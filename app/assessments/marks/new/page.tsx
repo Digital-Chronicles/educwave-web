@@ -55,6 +55,7 @@ interface TermExamRow {
 
 interface ExamSessionRow {
   id: number;
+  term_id: number;
   exam_type: 'BOT' | 'MOT' | 'EOT';
   term?: { term_name: string; year: number } | null;
 }
@@ -69,15 +70,12 @@ interface StudentRow {
 interface QuestionRow {
   id: number;
   question_number: string;
-  topic_id: number;
-  grade_id: number;
-  subject_id: number;
+  topic_id: number | null;
   max_score: number;
   topic?: { name: string } | null;
 }
 
 type MarksMap = Record<string, Record<number, number | ''>>;
-// student_id -> { question_id: score }
 
 export default function MarksEntryPage() {
   const router = useRouter();
@@ -92,13 +90,17 @@ export default function MarksEntryPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Data
+  // Base data
   const [grades, setGrades] = useState<GradeRow[]>([]);
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
   const [termExams, setTermExams] = useState<TermExamRow[]>([]);
   const [examSessions, setExamSessions] = useState<ExamSessionRow[]>([]);
+
+  // Grid data
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
+  const [marks, setMarks] = useState<MarksMap>({});
+  const [saving, setSaving] = useState(false);
 
   // Filters
   const [termExamId, setTermExamId] = useState('');
@@ -107,11 +109,7 @@ export default function MarksEntryPage() {
   const [subjectId, setSubjectId] = useState('');
   const [studentSearch, setStudentSearch] = useState('');
 
-  // Marks editing
-  const [marks, setMarks] = useState<MarksMap>({});
-  const [saving, setSaving] = useState(false);
-
-  // 1) Auth check
+  // 1️⃣ Auth check
   useEffect(() => {
     const run = async () => {
       const {
@@ -130,11 +128,11 @@ export default function MarksEntryPage() {
     run();
   }, [router]);
 
-  // 2) Load profile + school + base data
+  // 2️⃣ Load profile + base data
   useEffect(() => {
     if (authChecking) return;
 
-    const load = async () => {
+    const loadBase = async () => {
       setLoading(true);
       setErrorMsg(null);
       setSuccessMsg(null);
@@ -149,6 +147,7 @@ export default function MarksEntryPage() {
         setLoading(false);
         return;
       }
+
       if (!user) {
         setErrorMsg('Could not find authenticated user.');
         setLoading(false);
@@ -162,10 +161,7 @@ export default function MarksEntryPage() {
         .single();
 
       if (pErr || !p) {
-        setErrorMsg(
-          pErr?.message ||
-            'Profile not found. (If user existed before trigger, insert a profile row.)'
-        );
+        setErrorMsg(pErr?.message || 'Profile not found.');
         setLoading(false);
         return;
       }
@@ -195,7 +191,6 @@ export default function MarksEntryPage() {
       setSchool(schoolData);
 
       try {
-        // Grades
         const { data: gradeRows, error: gradesError } = await supabase
           .from('class')
           .select('id, grade_name')
@@ -205,7 +200,6 @@ export default function MarksEntryPage() {
         if (gradesError) throw gradesError;
         setGrades((gradeRows ?? []) as GradeRow[]);
 
-        // Subjects
         const { data: subjectRows, error: subjectsError } = await supabase
           .from('subject')
           .select(
@@ -222,7 +216,6 @@ export default function MarksEntryPage() {
         if (subjectsError) throw subjectsError;
         setSubjects((subjectRows ?? []) as unknown as SubjectRow[]);
 
-        // Term exams
         const { data: termRows, error: termError } = await supabase
           .from('term_exam_session')
           .select('id, term_name, year')
@@ -233,12 +226,13 @@ export default function MarksEntryPage() {
         if (termError) throw termError;
         setTermExams((termRows ?? []) as TermExamRow[]);
 
-        // Exam sessions
+        // exam_session has term_id FK to term_exam_session
         const { data: examSessRows, error: examSessError } = await supabase
           .from('exam_session')
           .select(
             `
             id,
+            term_id,
             exam_type,
             term:term_exam_session ( term_name, year )
           `
@@ -247,7 +241,7 @@ export default function MarksEntryPage() {
           .order('id', { ascending: false });
 
         if (examSessError) throw examSessError;
-        setExamSessions((examSessRows ?? []) as ExamSessionRow[]);
+        setExamSessions((examSessRows ?? []) as unknown as ExamSessionRow[]);
       } catch (err: any) {
         setErrorMsg(err.message || 'Failed to load base data.');
       } finally {
@@ -255,22 +249,32 @@ export default function MarksEntryPage() {
       }
     };
 
-    load();
+    loadBase();
   }, [authChecking]);
 
-  // Derived subject list by grade
+  // Derived
   const subjectsForGrade = useMemo(() => {
     if (!gradeId) return subjects;
     return subjects.filter((s) => s.grade_id === Number(gradeId));
   }, [subjects, gradeId]);
 
-  const canLoadGrid = useMemo(() => {
-    return Boolean(school?.id && termExamId && examSessionId && gradeId && subjectId);
-  }, [school?.id, termExamId, examSessionId, gradeId, subjectId]);
+  const selectedExamSession = useMemo(() => {
+    if (!examSessionId) return null;
+    return examSessions.find((x) => x.id === Number(examSessionId)) ?? null;
+  }, [examSessions, examSessionId]);
 
-  // Load students + questions when filters are ready
+  // We require term + exam session + grade + subject.
+  // Additionally, exam_session.term_id MUST match selected termExamId (to avoid mistakes)
+  const canLoadGrid = useMemo(() => {
+    if (!school?.id || !termExamId || !examSessionId || !gradeId || !subjectId) return false;
+    if (!selectedExamSession) return false;
+    return Number(termExamId) === Number(selectedExamSession.term_id);
+  }, [school?.id, termExamId, examSessionId, gradeId, subjectId, selectedExamSession]);
+
+  // 3️⃣ Load grid (students + questions)
   useEffect(() => {
     if (!school?.id) return;
+
     if (!canLoadGrid) {
       setStudents([]);
       setQuestions([]);
@@ -283,7 +287,6 @@ export default function MarksEntryPage() {
       setSuccessMsg(null);
 
       try {
-        // Students in grade
         const { data: studentRows, error: sErr } = await supabase
           .from('students')
           .select('registration_id, first_name, last_name, current_grade_id')
@@ -292,10 +295,8 @@ export default function MarksEntryPage() {
           .order('first_name');
 
         if (sErr) throw sErr;
-        const st = (studentRows ?? []) as StudentRow[];
-        setStudents(st);
 
-        // Questions for grade+subject
+        // QUESTIONS are based on term_exam_id + exam_type_id (your assessment_question design)
         const { data: questionRows, error: qErr } = await supabase
           .from('assessment_question')
           .select(
@@ -303,8 +304,6 @@ export default function MarksEntryPage() {
             id,
             question_number,
             topic_id,
-            grade_id,
-            subject_id,
             max_score,
             topic:assessment_topics ( name )
           `
@@ -317,10 +316,14 @@ export default function MarksEntryPage() {
           .order('id', { ascending: true });
 
         if (qErr) throw qErr;
+
+        const st = (studentRows ?? []) as StudentRow[];
         const qs = (questionRows ?? []) as unknown as QuestionRow[];
+
+        setStudents(st);
         setQuestions(qs);
 
-        // Initialize marks map
+        // init marks map
         const initial: MarksMap = {};
         for (const s of st) {
           initial[s.registration_id] = {};
@@ -328,25 +331,31 @@ export default function MarksEntryPage() {
         }
         setMarks(initial);
 
-        // OPTIONAL: If you already store results and want to prefill, uncomment and adjust columns:
-        // const { data: existing, error: exErr } = await supabase
-        //   .from('assessment_examresult')
-        //   .select('student_id, question_id, score')
-        //   .eq('school_id', school.id)
-        //   .eq('term_exam_id', Number(termExamId))
-        //   .eq('exam_type_id', Number(examSessionId))
-        //   .eq('grade_id', Number(gradeId))
-        //   .eq('subject_id', Number(subjectId));
-        // if (exErr) throw exErr;
-        // if (existing) {
-        //   setMarks((prev) => {
-        //     const copy = structuredClone(prev);
-        //     for (const r of existing as any[]) {
-        //       if (copy[r.student_id]?.[r.question_id] !== undefined) copy[r.student_id][r.question_id] = r.score ?? '';
-        //     }
-        //     return copy;
-        //   });
-        // }
+        // Prefill existing marks (edit mode)
+        const { data: existing, error: exErr } = await supabase
+          .from('assessment_examresult')
+          .select('student_id, question_id, score')
+          .eq('school_id', school.id)
+          .eq('exam_session_id', Number(examSessionId))
+          .eq('grade_id', Number(gradeId))
+          .eq('subject_id', Number(subjectId));
+
+        if (exErr) throw exErr;
+
+        if (existing?.length) {
+          setMarks((prev) => {
+            // structuredClone is supported in modern browsers; fallback manual clone:
+            const copy: MarksMap = {};
+            for (const sid of Object.keys(prev)) copy[sid] = { ...prev[sid] };
+
+            for (const r of existing as any[]) {
+              if (copy[r.student_id]?.[r.question_id] !== undefined) {
+                copy[r.student_id][r.question_id] = r.score ?? '';
+              }
+            }
+            return copy;
+          });
+        }
       } catch (err: any) {
         setErrorMsg(err.message || 'Failed to load marks grid.');
       }
@@ -358,13 +367,42 @@ export default function MarksEntryPage() {
   const filteredStudents = useMemo(() => {
     const q = studentSearch.trim().toLowerCase();
     if (!q) return students;
-    return students.filter((s) =>
-      `${s.first_name} ${s.last_name}`.toLowerCase().includes(q) ||
-      s.registration_id.toLowerCase().includes(q)
-    );
+    return students.filter((s) => {
+      const name = `${s.first_name} ${s.last_name}`.toLowerCase();
+      return name.includes(q) || s.registration_id.toLowerCase().includes(q);
+    });
   }, [students, studentSearch]);
 
-  const totalCells = useMemo(() => filteredStudents.length * questions.length, [filteredStudents.length, questions.length]);
+  // ✅ Totals alongside names
+  const perStudentTotals = useMemo(() => {
+    const totals: Record<string, { score: number; possible: number; percent: number }> = {};
+
+    for (const st of filteredStudents) {
+      let score = 0;
+      let possible = 0;
+
+      for (const q of questions) {
+        const v = marks?.[st.registration_id]?.[q.id];
+        const s = v === '' || v === undefined || v === null ? null : Number(v);
+        if (s !== null && Number.isFinite(s)) score += s;
+        possible += Number(q.max_score ?? 0);
+      }
+
+      const percent = possible > 0 ? (score / possible) * 100 : 0;
+      totals[st.registration_id] = {
+        score,
+        possible,
+        percent: Number(percent.toFixed(2)),
+      };
+    }
+
+    return totals;
+  }, [filteredStudents, questions, marks]);
+
+  const totalCells = useMemo(
+    () => filteredStudents.length * questions.length,
+    [filteredStudents.length, questions.length]
+  );
 
   const filledCells = useMemo(() => {
     let c = 0;
@@ -390,14 +428,17 @@ export default function MarksEntryPage() {
 
   const handleSave = async () => {
     if (!school?.id) return;
+
     if (!canLoadGrid) {
-      setErrorMsg('Select Term, Exam Session, Grade and Subject first.');
+      setErrorMsg('Select Term, Exam Session (matching term), Grade and Subject first.');
       return;
     }
+
     if (questions.length === 0) {
       setErrorMsg('No questions found for the selected filters.');
       return;
     }
+
     if (filteredStudents.length === 0) {
       setErrorMsg('No students found for that grade.');
       return;
@@ -408,8 +449,6 @@ export default function MarksEntryPage() {
     setSuccessMsg(null);
 
     try {
-      // Build rows for upsert/insert
-      // ✅ Adjust column names if your table differs.
       const rows: any[] = [];
 
       for (const st of filteredStudents) {
@@ -417,10 +456,11 @@ export default function MarksEntryPage() {
           const v = marks?.[st.registration_id]?.[q.id];
           if (v === '' || v === undefined || v === null) continue;
 
-          // validation: 0..max_score
-          const max = q.max_score ?? 0;
+          const max = Number(q.max_score ?? 0);
           const score = Number(v);
+
           if (Number.isNaN(score)) continue;
+
           if (score < 0 || score > max) {
             throw new Error(
               `Invalid score for ${st.first_name} ${st.last_name} (Q${q.question_number}). Must be 0 to ${max}.`
@@ -428,15 +468,16 @@ export default function MarksEntryPage() {
           }
 
           rows.push({
-            school_id: school.id,
-            term_exam_id: Number(termExamId),
-            exam_type_id: Number(examSessionId),
-            grade_id: Number(gradeId),
-            subject_id: Number(subjectId),
             student_id: st.registration_id,
             question_id: q.id,
+            grade_id: Number(gradeId),
+            subject_id: Number(subjectId),
+            topic_id: q.topic_id ?? null,
+            exam_session_id: Number(examSessionId), // ✅ correct column
             score,
             max_possible: max,
+            percentage: max > 0 ? Number(((score / max) * 100).toFixed(2)) : null,
+            school_id: school.id,
           });
         }
       }
@@ -447,24 +488,21 @@ export default function MarksEntryPage() {
         return;
       }
 
-      // If you have a UNIQUE constraint like (school_id, student_id, question_id, term_exam_id, exam_type_id)
-      // then use upsert. Otherwise use insert.
       const { error } = await supabase
         .from('assessment_examresult')
-        .upsert(rows, { onConflict: 'school_id,student_id,question_id,term_exam_id,exam_type_id' });
+        .upsert(rows, {
+          // ✅ must match UNIQUE constraint
+          onConflict: 'school_id,student_id,question_id,exam_session_id',
+        });
 
-      if (error) {
-        // If onConflict columns don't exist as unique, fallback suggestion:
-        throw error;
-      }
+      if (error) throw error;
 
       setSuccessMsg(`Saved ${rows.length} marks successfully.`);
     } catch (err: any) {
-      // Helpful message if onConflict doesn't match
       const msg = err?.message || 'Failed to save marks.';
-      if (msg.toLowerCase().includes('onconflict')) {
+      if (msg.toLowerCase().includes('onconflict') || msg.toLowerCase().includes('unique')) {
         setErrorMsg(
-          'Save failed due to upsert conflict settings. You need a UNIQUE constraint matching the onConflict columns, or switch to insert. Tell me your assessment_examresult columns + unique constraints and I’ll fix it.'
+          'Upsert failed. Add this UNIQUE constraint: UNIQUE(school_id, student_id, question_id, exam_session_id).'
         );
       } else {
         setErrorMsg(msg);
@@ -541,7 +579,10 @@ export default function MarksEntryPage() {
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
-                  <Link href="/assessments" className="hover:text-gray-700 inline-flex items-center gap-1">
+                  <Link
+                    href="/assessments"
+                    className="hover:text-gray-700 inline-flex items-center gap-1"
+                  >
                     <ArrowLeft className="w-4 h-4" />
                     Assessments
                   </Link>
@@ -578,7 +619,7 @@ export default function MarksEntryPage() {
               </div>
             )}
 
-            {/* Filters */}
+            {/* Filters card */}
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
               <div className="p-5 border-b border-gray-200 flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -586,7 +627,11 @@ export default function MarksEntryPage() {
                   <h2 className="font-semibold text-gray-900">Select Assessment</h2>
                 </div>
                 <div className="text-sm text-gray-500">
-                  {canLoadGrid ? 'Ready' : 'Pick all fields'}
+                  {termExamId && examSessionId && selectedExamSession && Number(termExamId) !== Number(selectedExamSession.term_id)
+                    ? 'Exam Session does not match Term'
+                    : canLoadGrid
+                    ? 'Ready'
+                    : 'Pick all fields'}
                 </div>
               </div>
 
@@ -622,6 +667,14 @@ export default function MarksEntryPage() {
                       </option>
                     ))}
                   </select>
+                  {termExamId &&
+                    examSessionId &&
+                    selectedExamSession &&
+                    Number(termExamId) !== Number(selectedExamSession.term_id) && (
+                      <p className="text-xs text-red-600 mt-2">
+                        This exam session belongs to a different term. Pick the correct session.
+                      </p>
+                    )}
                 </div>
 
                 <div>
@@ -712,7 +765,7 @@ export default function MarksEntryPage() {
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900">Enter Marks</h3>
                   <p className="text-sm text-gray-500">
-                    Scores must be between 0 and each question’s max score.
+                    Totals and percentage are shown next to each student name.
                   </p>
                 </div>
 
@@ -729,7 +782,10 @@ export default function MarksEntryPage() {
 
               {!canLoadGrid ? (
                 <div className="p-10 text-center text-sm text-gray-500">
-                  Select **Term**, **Exam Session**, **Grade**, and **Subject** to load the marks grid.
+                  Select <span className="font-medium">Term</span>,{' '}
+                  <span className="font-medium">Exam Session (matching term)</span>,{' '}
+                  <span className="font-medium">Grade</span>, and <span className="font-medium">Subject</span> to
+                  load the marks grid.
                 </div>
               ) : questions.length === 0 ? (
                 <div className="p-10 text-center text-sm text-gray-500">
@@ -744,9 +800,16 @@ export default function MarksEntryPage() {
                   <table className="w-full">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 sticky left-0 bg-gray-50 z-10">
-                          Student
+                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 min-w-[340px]">
+                          <div className="flex items-center justify-between gap-4">
+                            <span>Student</span>
+                            <div className="flex items-center gap-6 text-xs text-gray-500">
+                              <span className="w-20 text-right">Total</span>
+                              <span className="w-14 text-right">%</span>
+                            </div>
+                          </div>
                         </th>
+
                         {questions.map((q) => (
                           <th key={q.id} className="text-left py-3 px-4 text-sm font-medium text-gray-700">
                             <div className="flex flex-col">
@@ -764,16 +827,45 @@ export default function MarksEntryPage() {
                     <tbody className="divide-y divide-gray-200">
                       {filteredStudents.map((st) => (
                         <tr key={st.registration_id} className="hover:bg-gray-50">
-                          <td className="py-3 px-4 sticky left-0 bg-white z-10">
-                            <div className="font-medium text-gray-900">
-                              {st.first_name} {st.last_name}
+                          {/* Student + Total + % */}
+                          <td className="py-3 px-4 sticky left-0 bg-white z-10 min-w-[340px]">
+                            <div className="flex items-center justify-between gap-4">
+                              <div>
+                                <div className="font-medium text-gray-900">
+                                  {st.first_name} {st.last_name}
+                                </div>
+                                <div className="text-xs text-gray-500">{st.registration_id}</div>
+                              </div>
+
+                              <div className="flex items-center gap-6">
+                                <div className="w-20 text-right">
+                                  <div className="text-sm font-semibold text-gray-900">
+                                    {perStudentTotals[st.registration_id]?.score ?? 0}
+                                  </div>
+                                  <div className="text-[11px] text-gray-500">
+                                    / {perStudentTotals[st.registration_id]?.possible ?? 0}
+                                  </div>
+                                </div>
+
+                                <div className="w-14 text-right">
+                                  <span
+                                    className={`inline-flex items-center justify-end px-2 py-1 rounded-full text-xs font-medium ${
+                                      (perStudentTotals[st.registration_id]?.percent ?? 0) >= 50
+                                        ? 'bg-green-50 text-green-700'
+                                        : 'bg-red-50 text-red-700'
+                                    }`}
+                                  >
+                                    {(perStudentTotals[st.registration_id]?.percent ?? 0).toFixed(0)}%
+                                  </span>
+                                </div>
+                              </div>
                             </div>
-                            <div className="text-xs text-gray-500">{st.registration_id}</div>
                           </td>
 
+                          {/* Marks cells */}
                           {questions.map((q) => {
                             const v = marks?.[st.registration_id]?.[q.id] ?? '';
-                            const max = q.max_score ?? 0;
+                            const max = Number(q.max_score ?? 0);
                             const invalid = v !== '' && (Number(v) < 0 || Number(v) > max);
 
                             return (
@@ -791,11 +883,7 @@ export default function MarksEntryPage() {
                                   }`}
                                   placeholder="—"
                                 />
-                                {invalid && (
-                                  <div className="text-xs text-red-600 mt-1">
-                                    0–{max}
-                                  </div>
-                                )}
+                                {invalid && <div className="text-xs text-red-600 mt-1">0–{max}</div>}
                               </td>
                             );
                           })}
@@ -827,6 +915,10 @@ export default function MarksEntryPage() {
                   {saving ? 'Saving...' : 'Save Marks'}
                 </button>
               </div>
+            </div>
+
+            <div className="text-xs text-gray-500">
+              Note: Exam Session must match the selected Term (we enforce this to avoid mixing data).
             </div>
           </div>
         </main>

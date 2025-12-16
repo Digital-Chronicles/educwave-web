@@ -1133,12 +1133,21 @@ export default function AssessmentsPage() {
                 </div>
                 <div className="flex items-center gap-3">
                   <Link
-                    href="/assessments/new/marks"
+                    href="/assessments/marks/new"
                     className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
                   >
                     <FileText className="w-4 h-4" />
                     Enter Marks
                   </Link>
+
+                  <Link
+                    href="/assessments/marks"
+                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                    View Marks Analysis
+                  </Link>
+
 
                   <button
                     onClick={() => setShowTopicModal(true)}

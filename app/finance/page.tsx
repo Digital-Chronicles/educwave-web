@@ -1,70 +1,169 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
 import Sidebar from '@/components/Sidebar';
 import {
-  DollarSign,
-  TrendingUp,
-  TrendingDown,
-  Users,
-  PieChart,
-  Download,
+  Wallet,
+  BarChart3,
+  School,
+  GraduationCap,
+  Receipt,
+  Layers,
+  Plus,
   Search,
-  Calendar,
-  Eye,
-  MoreVertical,
-  CreditCard,
-  AlertCircle,
-  CheckCircle,
-  Clock,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  Settings2,
+  ArrowRight,
+  X,
+  TrendingUp,
+  Building2,
+  ClipboardList,
 } from 'lucide-react';
 
-// ---------- Types ----------
-type UUID = string;
-
 type AppRole = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
+type TabKey = 'overview' | 'schoolFees' | 'otherFees' | 'tuition' | 'transactions';
+
+type FeeTerm = 'T1' | 'T2' | 'T3';
+type FeeStatus = 'pending' | 'partial' | 'paid' | 'overdue';
+type PaymentMethod = 'cash' | 'card' | 'online_transfer' | 'mobile_money' | 'bank';
+
+// ⚠️ Adjust these to match your exact Postgres enum values in public.other_fee_type
+type OtherFeeType =
+  | 'development'
+  | 'sports'
+  | 'uniform'
+  | 'medical'
+  | 'exam'
+  | 'library'
+  | 'ict'
+  | 'others';
 
 interface ProfileRow {
-  user_id: UUID;
+  user_id: string;
   email: string | null;
-  full_name: string | null; // ✅ matches DB
+  full_name: string | null;
   role: AppRole;
-  school_id: UUID | null;
-  created_at: string;
-  updated_at: string;
+  school_id: string | null;
 }
 
 interface SchoolRow {
-  id: UUID;
+  id: string;
   school_name: string;
 }
 
-interface GradeSummary {
-  grade_id: number;
-  grade_name: string;
-  expected: number;
-  collected: number;
-  outstanding: number;
-  student_count: number;
-}
-
-interface Payment {
+interface GradeRow {
   id: number;
-  student_name: string;
-  grade: string;
-  amount: number;
-  date: string;
-  status: 'completed' | 'pending' | 'overdue';
-  payment_method: string;
+  grade_name: string;
 }
 
-// ---------- Component ----------
+interface SchoolFeesRow {
+  id: number;
+  grade_id: number;
+  school_id: string | null;
+  tuitionfee: number;
+  hostelfee: number;
+  breakfastfee: number;
+  lunchfee: number;
+  description: string;
+  created: string;
+  updated: string;
+  grade?: { id: number; grade_name: string } | null;
+}
+
+interface OtherFeesRow {
+  id: number;
+  grade_id: number;
+  school_id: string | null;
+  fees_type: OtherFeeType;
+  amount: number;
+  description: string;
+  unique_code: string | null;
+  created: string;
+  updated: string;
+  grade?: { id: number; grade_name: string } | null;
+}
+
+interface StudentTuitionRow {
+  id: number;
+  student_id: string;
+  tuition_id: number;
+  school_id: string | null;
+  hostel: boolean;
+  lunch: boolean;
+  breakfast: boolean;
+  total_fee: number;
+  tuition?: {
+    id: number;
+    grade_id: number;
+    grade?: { id: number; grade_name: string } | null;
+  } | null;
+  student?: { registration_id: string; first_name: string; last_name: string } | null;
+}
+
+interface FeeTransactionRow {
+  id: number;
+  student_tuition_id: number;
+  grade_id: number | null;
+  school_id: string | null;
+
+  term: FeeTerm | null;
+  academic_year: string | null;
+
+  amount_due: number;
+  amount_paid: number;
+
+  payment_method: PaymentMethod;
+  status: FeeStatus;
+
+  due_date: string | null;
+  last_payment_date: string | null;
+
+  payment_reference: string | null;
+  receipt_url: string | null;
+  remarks: string | null;
+
+  created: string;
+  updated: string;
+
+  grade?: { id: number; grade_name: string } | null;
+
+  student_tuition?: {
+    id: number;
+    student_id: string;
+    total_fee: number;
+    student?: { registration_id: string; first_name: string; last_name: string } | null;
+    tuition?: { id: number; grade?: { id: number; grade_name: string } | null } | null;
+  } | null;
+}
+
+function toMoney(n: any) {
+  const v = Number(n ?? 0);
+  if (Number.isNaN(v)) return '0.00';
+  return v.toFixed(2);
+}
+
+function supaErrText(err: any) {
+  if (!err) return null;
+  const parts = [
+    err.message ? `Message: ${err.message}` : null,
+    err.code ? `Code: ${err.code}` : null,
+    err.details ? `Details: ${err.details}` : null,
+    err.hint ? `Hint: ${err.hint}` : null,
+  ].filter(Boolean);
+  return parts.join(' • ');
+}
+
 export default function FinancePage() {
   const router = useRouter();
 
+  // -----------------------------
+  // State (ALL hooks at top level)
+  // -----------------------------
   const [authChecking, setAuthChecking] = useState(true);
   const [loading, setLoading] = useState(true);
 
@@ -72,60 +171,136 @@ export default function FinancePage() {
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [school, setSchool] = useState<SchoolRow | null>(null);
 
+  const [activeTab, setActiveTab] = useState<TabKey>('overview');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Stats
-  const [totalExpected, setTotalExpected] = useState(0);
-  const [totalCollected, setTotalCollected] = useState(0);
-  const [totalOutstanding, setTotalOutstanding] = useState(0);
-  const [collectionRate, setCollectionRate] = useState(0);
-  const [gradeSummaries, setGradeSummaries] = useState<GradeSummary[]>([]);
-  const [recentPayments, setRecentPayments] = useState<Payment[]>([]);
-  const [activeFilter, setActiveFilter] = useState<'all' | 'completed' | 'pending' | 'overdue'>('all');
-  const [searchTx, setSearchTx] = useState('');
+  const [grades, setGrades] = useState<GradeRow[]>([]);
+  const [schoolFees, setSchoolFees] = useState<SchoolFeesRow[]>([]);
+  const [otherFees, setOtherFees] = useState<OtherFeesRow[]>([]);
+  const [tuitionRows, setTuitionRows] = useState<StudentTuitionRow[]>([]);
+  const [transactions, setTransactions] = useState<FeeTransactionRow[]>([]);
 
-  const formatCurrency = (amount: number) => {
-    try {
-      return new Intl.NumberFormat('en-UG', {
-        style: 'currency',
-        currency: 'UGX',
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 0,
-      }).format(amount);
-    } catch {
-      return `UGX ${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(amount)}`;
-    }
-  };
+  // Filters
+  const [q, setQ] = useState('');
+  const [selectedGradeId, setSelectedGradeId] = useState<string>('');
 
-  // ✅ 1) Auth check
+  // Modals
+  const [showSchoolFeeModal, setShowSchoolFeeModal] = useState(false);
+  const [showOtherFeeModal, setShowOtherFeeModal] = useState(false);
+
+  // School fee form
+  const [feeGradeId, setFeeGradeId] = useState('');
+  const [feeTuition, setFeeTuition] = useState('0');
+  const [feeHostel, setFeeHostel] = useState('0');
+  const [feeBreakfast, setFeeBreakfast] = useState('0');
+  const [feeLunch, setFeeLunch] = useState('0');
+  const [feeDesc, setFeeDesc] = useState('No Description ...');
+  const [savingSchoolFee, setSavingSchoolFee] = useState(false);
+
+  // Other fee form
+  const [otherGradeId, setOtherGradeId] = useState('');
+  const [otherType, setOtherType] = useState<OtherFeeType>('development');
+  const [otherAmount, setOtherAmount] = useState('0');
+  const [otherDesc, setOtherDesc] = useState('No Description ...');
+  const [otherCode, setOtherCode] = useState('');
+  const [savingOtherFee, setSavingOtherFee] = useState(false);
+
+  // -----------------------------
+  // Derived
+  // -----------------------------
+  const totals = useMemo(() => {
+    const totalStudentsWithTuition = new Set(tuitionRows.map((t) => t.student_id)).size;
+
+    const paid = transactions.reduce((s, t) => s + Number(t.amount_paid ?? 0), 0);
+    const due = transactions.reduce((s, t) => s + Number(t.amount_due ?? 0), 0);
+    const balance = Math.max(due - paid, 0);
+
+    const paidPct = due > 0 ? Math.min((paid / due) * 100, 100) : 0;
+
+    return {
+      totalStudentsWithTuition,
+      totalFeesDefined: schoolFees.length,
+      totalOtherFees: otherFees.length,
+      paid,
+      due,
+      balance,
+      paidPct,
+      txCount: transactions.length,
+    };
+  }, [tuitionRows, schoolFees, otherFees, transactions]);
+
+  const filteredSchoolFees = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return schoolFees.filter((r) => {
+      const gOk = selectedGradeId ? r.grade_id === Number(selectedGradeId) : true;
+      const searchOk =
+        !query ||
+        (r.grade?.grade_name ?? '').toLowerCase().includes(query) ||
+        (r.description ?? '').toLowerCase().includes(query);
+      return gOk && searchOk;
+    });
+  }, [schoolFees, q, selectedGradeId]);
+
+  const filteredOtherFees = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return otherFees.filter((r) => {
+      const gOk = selectedGradeId ? r.grade_id === Number(selectedGradeId) : true;
+      const searchOk =
+        !query ||
+        (r.grade?.grade_name ?? '').toLowerCase().includes(query) ||
+        `${r.fees_type}`.toLowerCase().includes(query) ||
+        (r.description ?? '').toLowerCase().includes(query) ||
+        (r.unique_code ?? '').toLowerCase().includes(query);
+      return gOk && searchOk;
+    });
+  }, [otherFees, q, selectedGradeId]);
+
+  const filteredTuition = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return tuitionRows.filter((r) => {
+      const gId = r.tuition?.grade?.id ?? r.tuition?.grade_id;
+      const gOk = selectedGradeId ? Number(selectedGradeId) === Number(gId) : true;
+      const name = `${r.student?.first_name ?? ''} ${r.student?.last_name ?? ''}`.toLowerCase();
+      const searchOk = !query || name.includes(query) || (r.student_id ?? '').toLowerCase().includes(query);
+      return gOk && searchOk;
+    });
+  }, [tuitionRows, q, selectedGradeId]);
+
+  const filteredTransactions = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return transactions.filter((t) => {
+      const gOk = selectedGradeId ? Number(selectedGradeId) === Number(t.grade_id ?? 0) : true;
+      const stu = t.student_tuition?.student;
+      const name = `${stu?.first_name ?? ''} ${stu?.last_name ?? ''}`.toLowerCase();
+      const searchOk =
+        !query ||
+        name.includes(query) ||
+        (t.payment_reference ?? '').toLowerCase().includes(query) ||
+        (t.status ?? '').toLowerCase().includes(query) ||
+        (t.payment_method ?? '').toLowerCase().includes(query);
+      return gOk && searchOk;
+    });
+  }, [transactions, q, selectedGradeId]);
+
+  // -----------------------------
+  // Auth check
+  // -----------------------------
   useEffect(() => {
     const run = async () => {
-      try {
-        setAuthChecking(true);
-        setErrorMsg(null);
-
-        const { data, error } = await supabase.auth.getSession();
-        if (error) throw error;
-
-        const session = data.session;
-        if (!session) {
-          router.replace('/');
-          return;
-        }
-
-        setUserEmail(session.user.email ?? null);
-      } catch (e: any) {
-        console.error(e);
-        setErrorMsg(e?.message || 'Failed to check authentication.');
-      } finally {
-        setAuthChecking(false);
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) {
+        router.replace('/');
+        return;
       }
+      setUserEmail(data.session.user.email ?? null);
+      setAuthChecking(false);
     };
-
     run();
   }, [router]);
 
-  // ✅ 2) Load profile + school + finance data
+  // -----------------------------
+  // Load (scoped to the user’s school)
+  // -----------------------------
   useEffect(() => {
     if (authChecking) return;
 
@@ -134,260 +309,462 @@ export default function FinancePage() {
       setErrorMsg(null);
 
       try {
-        const { data: userRes, error: userErr } = await supabase.auth.getUser();
+        const {
+          data: { user },
+          error: userErr,
+        } = await supabase.auth.getUser();
+
         if (userErr) throw userErr;
+        if (!user) throw new Error('Could not find authenticated user.');
 
-        const user = userRes.user;
-        if (!user) {
-          setErrorMsg('Could not find authenticated user.');
-          return;
-        }
-
-        // ✅ profiles PK is user_id (uuid)
-        const { data: prof, error: profErr } = await supabase
+        // Profile
+        const { data: p, error: pErr } = await supabase
           .from('profiles')
-          .select('user_id, email, full_name, role, school_id, created_at, updated_at')
+          .select('user_id, email, full_name, role, school_id')
           .eq('user_id', user.id)
-          .maybeSingle();
+          .single();
 
-        if (profErr) throw profErr;
+        if (pErr) throw pErr;
+        if (!p) throw new Error('Profile not found.');
+        const prof = p as ProfileRow;
+        setProfile(prof);
 
-        if (!prof) {
-          setProfile(null);
+        // If no school assigned
+        if (!prof.school_id) {
           setSchool(null);
-          setErrorMsg('User profile not found. Insert a row into profiles for this auth user.');
+          setGrades([]);
+          setSchoolFees([]);
+          setOtherFees([]);
+          setTuitionRows([]);
+          setTransactions([]);
           return;
         }
 
-        const profRow = prof as ProfileRow;
-        setProfile(profRow);
-
-        if (!profRow.school_id) {
-          setSchool(null);
-          setErrorMsg('Your profile is not linked to a school. Set profiles.school_id for this user.');
-          return;
-        }
-
-        const { data: sch, error: schErr } = await supabase
+        // School
+        const { data: s, error: sErr } = await supabase
           .from('general_information')
           .select('id, school_name')
-          .eq('id', profRow.school_id)
-          .maybeSingle();
+          .eq('id', prof.school_id)
+          .single();
 
-        if (schErr) throw schErr;
-
-        if (!sch) {
-          setSchool(null);
-          setErrorMsg('School record not found in general_information for this school_id.');
-          return;
-        }
-
-        const schoolData = sch as SchoolRow;
+        if (sErr) throw sErr;
+        if (!s) throw new Error('School not found.');
+        const schoolData = s as SchoolRow;
         setSchool(schoolData);
 
-        // ================================
-        // A. Expected fees (tuition descriptions)
-        // ================================
-        const { data: tuitionRows, error: tuitionErr } = await supabase
+        // Grades
+        const { data: gradeRows, error: gradeErr } = await supabase
+          .from('class')
+          .select('id, grade_name')
+          .eq('school_id', schoolData.id)
+          .order('grade_name');
+
+        if (gradeErr) throw gradeErr;
+        setGrades((gradeRows ?? []) as GradeRow[]);
+
+        // School fees
+        const { data: feesRows, error: feesErr } = await supabase
+          .from('assessment_schoolfees')
+          .select(
+            `
+            id,
+            grade_id,
+            tuitionfee,
+            hostelfee,
+            breakfastfee,
+            lunchfee,
+            description,
+            school_id,
+            created,
+            updated,
+            grade:class ( id, grade_name )
+          `
+          )
+          .eq('school_id', schoolData.id)
+          .order('grade_id');
+
+        if (feesErr) throw feesErr;
+        setSchoolFees((feesRows ?? []) as unknown as SchoolFeesRow[]);
+
+        // Other fees
+        const { data: otherRows, error: otherErr } = await supabase
+          .from('other_school_payments')
+          .select(
+            `
+            id,
+            grade_id,
+            fees_type,
+            amount,
+            description,
+            unique_code,
+            school_id,
+            created,
+            updated,
+            grade:class ( id, grade_name )
+          `
+          )
+          .eq('school_id', schoolData.id)
+          .order('grade_id');
+
+        if (otherErr) throw otherErr;
+        setOtherFees((otherRows ?? []) as unknown as OtherFeesRow[]);
+
+        // Tuition descriptions
+        const { data: tuition, error: tuitionErr } = await supabase
           .from('student_tuition_description')
           .select(
             `
+            id,
+            student_id,
+            tuition_id,
+            hostel,
+            lunch,
+            breakfast,
+            total_fee,
+            school_id,
+            tuition:assessment_schoolfees (
               id,
-              total_fee,
-              school_id,
-              tuition:finance_schoolfees (
-                id,
-                grade:class ( id, grade_name )
-              )
-            `
+              grade_id,
+              grade:class ( id, grade_name )
+            ),
+            student:students ( registration_id, first_name, last_name )
+          `
           )
           .eq('school_id', schoolData.id);
 
         if (tuitionErr) throw tuitionErr;
+        setTuitionRows((tuition ?? []) as unknown as StudentTuitionRow[]);
 
-        const tuitionData = (tuitionRows ?? []) as any[];
-
-        // ================================
-        // B. ALL transactions (accurate totals)
-        // ================================
-        const { data: allTxRows, error: allTxErr } = await supabase
+        // Transactions
+        const { data: txRows, error: txErr } = await supabase
           .from('fee_transaction')
           .select(
             `
+            id,
+            student_tuition_id,
+            grade_id,
+            term,
+            academic_year,
+            amount_due,
+            amount_paid,
+            payment_method,
+            status,
+            due_date,
+            last_payment_date,
+            payment_reference,
+            receipt_url,
+            remarks,
+            created,
+            updated,
+            school_id,
+            grade:class ( id, grade_name ),
+            student_tuition:student_tuition_description (
               id,
-              amount_paid,
-              amount_due,
-              payment_date,
-              payment_method,
-              school_id,
-              grade:class ( id, grade_name ),
-              student:students ( first_name, last_name )
-            `
+              student_id,
+              total_fee,
+              student:students ( registration_id, first_name, last_name ),
+              tuition:assessment_schoolfees (
+                id,
+                grade:class ( id, grade_name )
+              )
+            )
+          `
           )
           .eq('school_id', schoolData.id)
-          .order('payment_date', { ascending: false });
+          .order('id', { ascending: false });
 
-        if (allTxErr) throw allTxErr;
-
-        const allTransactions = (allTxRows ?? []) as any[];
-        const recentTx = allTransactions.slice(0, 10);
-
-        // ================================
-        // C. Student counts per grade
-        // ================================
-        const { data: studentRows, error: studentErr } = await supabase
-          .from('students')
-          .select('grade_id')
-          .eq('school_id', schoolData.id);
-
-        if (studentErr) throw studentErr;
-
-        const studentCounts = new Map<number, number>();
-        (studentRows ?? []).forEach((s: any) => {
-          const gid = Number(s.grade_id);
-          if (!Number.isNaN(gid) && gid) studentCounts.set(gid, (studentCounts.get(gid) || 0) + 1);
-        });
-
-        // ================================
-        // D. Totals
-        // ================================
-        let expectedTotal = 0;
-        let collectedTotal = 0;
-
-        for (const t of tuitionData) expectedTotal += Number(t.total_fee ?? 0);
-        for (const tx of allTransactions) collectedTotal += Number(tx.amount_paid ?? 0);
-
-        const outstandingTotal = expectedTotal - collectedTotal;
-        const rate = expectedTotal > 0 ? (collectedTotal / expectedTotal) * 100 : 0;
-
-        setTotalExpected(expectedTotal);
-        setTotalCollected(collectedTotal);
-        setTotalOutstanding(outstandingTotal);
-        setCollectionRate(Number(rate.toFixed(1)));
-
-        // ================================
-        // E. Per-grade summaries
-        // ================================
-        const summaryMap = new Map<number, GradeSummary>();
-
-        // Expected per grade
-        for (const t of tuitionData) {
-          const grade = t.tuition?.grade;
-          if (!grade) continue;
-
-          const gradeId = Number(grade.id);
-          if (!summaryMap.has(gradeId)) {
-            summaryMap.set(gradeId, {
-              grade_id: gradeId,
-              grade_name: grade.grade_name,
-              expected: 0,
-              collected: 0,
-              outstanding: 0,
-              student_count: studentCounts.get(gradeId) || 0,
-            });
-          }
-          summaryMap.get(gradeId)!.expected += Number(t.total_fee ?? 0);
-        }
-
-        // Collected per grade
-        for (const tx of allTransactions) {
-          const grade = tx.grade;
-          if (!grade) continue;
-
-          const gradeId = Number(grade.id);
-          if (!summaryMap.has(gradeId)) {
-            summaryMap.set(gradeId, {
-              grade_id: gradeId,
-              grade_name: grade.grade_name,
-              expected: 0,
-              collected: 0,
-              outstanding: 0,
-              student_count: studentCounts.get(gradeId) || 0,
-            });
-          }
-          summaryMap.get(gradeId)!.collected += Number(tx.amount_paid ?? 0);
-        }
-
-        const summaries = Array.from(summaryMap.values())
-          .map(s => ({ ...s, outstanding: s.expected - s.collected }))
-          .sort((a, b) => a.grade_name.localeCompare(b.grade_name, undefined, { numeric: true }));
-
-        setGradeSummaries(summaries);
-
-        // ================================
-        // F. Recent payments UI
-        // ================================
-        const payments: Payment[] = recentTx.map((tx: any) => ({
-          id: tx.id,
-          student_name: `${tx.student?.first_name || 'Unknown'} ${tx.student?.last_name || ''}`.trim(),
-          grade: tx.grade?.grade_name || 'N/A',
-          amount: Number(tx.amount_paid ?? 0),
-          date: tx.payment_date ? new Date(tx.payment_date).toLocaleDateString() : '—',
-          status: 'completed',
-          payment_method: tx.payment_method || 'Cash',
-        }));
-
-        setRecentPayments(payments);
+        if (txErr) throw txErr;
+        setTransactions((txRows ?? []) as unknown as FeeTransactionRow[]);
       } catch (err: any) {
-        console.error(err);
-        setErrorMsg(err?.message || 'Failed to load finance data.');
+        setErrorMsg(supaErrText(err) || err?.message || 'Failed to load finance data.');
       } finally {
         setLoading(false);
       }
     };
 
     load();
-  }, [authChecking]);
+  }, [authChecking, router]);
 
-  // ---------- Derived ----------
-  const filteredPayments = useMemo(() => {
-    const q = searchTx.trim().toLowerCase();
-    return recentPayments
-      .filter(p => activeFilter === 'all' || p.status === activeFilter)
-      .filter(p => {
-        if (!q) return true;
-        return (
-          p.student_name.toLowerCase().includes(q) ||
-          p.grade.toLowerCase().includes(q) ||
-          p.payment_method.toLowerCase().includes(q)
-        );
-      });
-  }, [recentPayments, activeFilter, searchTx]);
+  // -----------------------------
+  // UI gating
+  // -----------------------------
+  const showLoading = authChecking || loading;
+  const showNoSchool = !showLoading && !!profile && !profile.school_id;
+  const canRenderApp = !showLoading && !!profile?.school_id && !!school;
 
-  // ---------- Loading ----------
-  if (authChecking || loading) {
+  const schoolId = school?.id ?? null;
+
+  // -----------------------------
+  // Mutations
+  // -----------------------------
+  const reloadSchoolFees = async () => {
+    if (!schoolId) return;
+    const { data: feesRows, error: feesErr } = await supabase
+      .from('assessment_schoolfees')
+      .select(
+        `
+        id,
+        grade_id,
+        tuitionfee,
+        hostelfee,
+        breakfastfee,
+        lunchfee,
+        description,
+        school_id,
+        created,
+        updated,
+        grade:class ( id, grade_name )
+      `
+      )
+      .eq('school_id', schoolId)
+      .order('grade_id');
+    if (feesErr) throw feesErr;
+    setSchoolFees((feesRows ?? []) as unknown as SchoolFeesRow[]);
+  };
+
+  const reloadOtherFees = async () => {
+    if (!schoolId) return;
+    const { data: otherRows, error: otherErr } = await supabase
+      .from('other_school_payments')
+      .select(
+        `
+        id,
+        grade_id,
+        fees_type,
+        amount,
+        description,
+        unique_code,
+        school_id,
+        created,
+        updated,
+        grade:class ( id, grade_name )
+      `
+      )
+      .eq('school_id', schoolId)
+      .order('grade_id');
+    if (otherErr) throw otherErr;
+    setOtherFees((otherRows ?? []) as unknown as OtherFeesRow[]);
+  };
+
+  const handleSaveSchoolFee = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!profile || !schoolId) return;
+
+    setSavingSchoolFee(true);
+    setErrorMsg(null);
+
+    try {
+      if (!feeGradeId) throw new Error('Grade is required.');
+
+      const payload = {
+        grade_id: Number(feeGradeId),
+        school_id: schoolId,
+        tuitionfee: Number(feeTuition || 0),
+        hostelfee: Number(feeHostel || 0),
+        breakfastfee: Number(feeBreakfast || 0),
+        lunchfee: Number(feeLunch || 0),
+        description: feeDesc?.trim() || 'No Description ...',
+        created_by: profile.user_id,
+      };
+
+      /**
+       * IMPORTANT:
+       * Your table has UNIQUE(grade_id) ONLY.
+       * So onConflict must be "grade_id" (not school_id,grade_id).
+       */
+      const { error } = await supabase
+        .from('assessment_schoolfees')
+        .upsert(payload, { onConflict: 'grade_id' });
+
+      if (error) throw error;
+
+      await reloadSchoolFees();
+
+      setShowSchoolFeeModal(false);
+      setFeeGradeId('');
+      setFeeTuition('0');
+      setFeeHostel('0');
+      setFeeBreakfast('0');
+      setFeeLunch('0');
+      setFeeDesc('No Description ...');
+    } catch (err: any) {
+      setErrorMsg(supaErrText(err) || err?.message || 'Failed to save school fees.');
+    } finally {
+      setSavingSchoolFee(false);
+    }
+  };
+
+  const handleSaveOtherFee = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!profile || !schoolId) return;
+
+    setSavingOtherFee(true);
+    setErrorMsg(null);
+
+    try {
+      if (!otherGradeId) throw new Error('Grade is required.');
+      if (!otherType) throw new Error('Fee type is required.');
+
+      const payload = {
+        grade_id: Number(otherGradeId),
+        school_id: schoolId,
+        fees_type: otherType,
+        amount: Number(otherAmount || 0),
+        description: otherDesc?.trim() || 'No Description ...',
+        unique_code: otherCode?.trim() || null,
+        created_by: profile.user_id,
+      };
+
+      /**
+       * Your table has UNIQUE(grade_id, fees_type).
+       * So onConflict must be "grade_id,fees_type".
+       */
+      const { error } = await supabase
+        .from('other_school_payments')
+        .upsert(payload, { onConflict: 'grade_id,fees_type' });
+
+      if (error) throw error;
+
+      await reloadOtherFees();
+
+      setShowOtherFeeModal(false);
+      setOtherGradeId('');
+      setOtherType('development');
+      setOtherAmount('0');
+      setOtherDesc('No Description ...');
+      setOtherCode('');
+    } catch (err: any) {
+      setErrorMsg(supaErrText(err) || err?.message || 'Failed to save other fees.');
+    } finally {
+      setSavingOtherFee(false);
+    }
+  };
+
+  // -----------------------------
+  // UI components
+  // -----------------------------
+  const TabButton = ({ k, label }: { k: TabKey; label: string }) => (
+    <button
+      onClick={() => setActiveTab(k)}
+      className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+        activeTab === k
+          ? 'border-blue-600 text-blue-600'
+          : 'border-transparent text-gray-500 hover:text-gray-700'
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  const HeaderFilters = () => (
+    <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative">
+          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search…"
+            className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm w-72 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          />
+        </div>
+
+        <select
+          value={selectedGradeId}
+          onChange={(e) => setSelectedGradeId(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+        >
+          <option value="">All Grades</option>
+          {grades.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.grade_name}
+            </option>
+          ))}
+        </select>
+
+        <button
+          onClick={() => {
+            setQ('');
+            setSelectedGradeId('');
+          }}
+          className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
+          title="Reset filters"
+        >
+          <RefreshCw className="w-4 h-4" />
+          Reset
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => router.push('/finance/management')}
+          className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
+          title="Finance management"
+        >
+          <ClipboardList className="w-4 h-4" />
+          Finance Management
+          <ArrowRight className="w-4 h-4" />
+        </button>
+
+        <button
+          onClick={() => router.push('/finance/stats')}
+          className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+          title="Finance stats"
+        >
+          <TrendingUp className="w-4 h-4" />
+          Finance Stats
+          <ArrowRight className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+
+  // -----------------------------
+  // Render branches
+  // -----------------------------
+  if (showLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="flex flex-col items-center gap-2">
           <div className="h-9 w-9 rounded-full border-2 border-gray-300 border-t-blue-600 animate-spin" />
-          <p className="text-sm text-gray-500">Loading Finance Dashboard...</p>
+          <p className="text-sm text-gray-500">Loading Finance...</p>
         </div>
       </div>
     );
   }
 
-  // ---------- Not configured ----------
-  if (!profile || !school) {
+  if (showNoSchool) {
     return (
       <div className="min-h-screen bg-gray-50">
         <Navbar userEmail={userEmail} />
         <div className="flex">
           <Sidebar />
           <main className="flex-1 p-6">
-            <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
+            <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <DollarSign className="w-8 h-8 text-blue-600" />
+                <School className="w-8 h-8 text-blue-600" />
               </div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">School Configuration Required</h3>
               <p className="text-gray-600 mb-6">
-                {errorMsg || 'Your account needs to be linked to a school before accessing the Finance module.'}
+                Your account must be linked to a school to use the Finance module.
               </p>
+
+              {errorMsg && (
+                <div className="mb-5 p-3 bg-red-50 border border-red-200 rounded-lg text-left">
+                  <p className="text-sm text-red-600">{errorMsg}</p>
+                </div>
+              )}
+
               <button
                 onClick={() => router.push('/settings')}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
                 Go to Settings
               </button>
+
+              <p className="mt-4 text-xs text-gray-500">
+                Signed in as <span className="font-medium">{userEmail ?? '—'}</span>
+              </p>
             </div>
           </main>
         </div>
@@ -395,6 +772,438 @@ export default function FinancePage() {
     );
   }
 
+  if (!canRenderApp) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navbar userEmail={userEmail} />
+        <div className="flex">
+          <Sidebar />
+          <main className="flex-1 p-6">
+            <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
+              <p className="text-sm text-gray-600">Unable to render finance page.</p>
+              {errorMsg && <p className="text-sm text-red-600 mt-2">{errorMsg}</p>}
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  // -----------------------------
+  // Screen sections
+  // -----------------------------
+  const renderOverview = () => (
+    <div className="space-y-6">
+      {/* Hero / Summary */}
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="p-6 bg-gradient-to-r from-blue-50 to-white">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex items-start gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-sm">
+                <Wallet className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="text-xs font-medium text-gray-500">Finance Overview</div>
+                <h2 className="text-xl font-bold text-gray-900">{school?.school_name}</h2>
+                <p className="text-sm text-gray-600">
+                  Track collections, balances, and fee setup — scoped to your school only.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => router.push('/finance/management')}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-xl hover:bg-gray-50"
+              >
+                <Building2 className="w-4 h-4" />
+                Manage
+                <ArrowRight className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => router.push('/finance/stats')}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700"
+              >
+                <BarChart3 className="w-4 h-4" />
+                Stats
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <div className="flex items-center justify-between text-xs text-gray-600 mb-2">
+              <span>Collections progress</span>
+              <span className="font-medium">{totals.due > 0 ? `${totals.paidPct.toFixed(1)}%` : '—'}</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${totals.paidPct}%` }} />
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-gray-200">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="rounded-xl border border-gray-200 p-4 bg-white">
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-gray-500">Total Paid</div>
+                <div className="p-2 rounded-lg bg-green-100">
+                  <Receipt className="w-4 h-4 text-green-600" />
+                </div>
+              </div>
+              <div className="mt-2 text-xl font-bold text-gray-900">{toMoney(totals.paid)}</div>
+              <div className="text-xs text-gray-500">{totals.txCount} transactions</div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 p-4 bg-white">
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-gray-500">Total Due</div>
+                <div className="p-2 rounded-lg bg-blue-100">
+                  <Wallet className="w-4 h-4 text-blue-600" />
+                </div>
+              </div>
+              <div className="mt-2 text-xl font-bold text-gray-900">{toMoney(totals.due)}</div>
+              <div className="text-xs text-gray-500">Expected collections</div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 p-4 bg-white">
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-gray-500">Outstanding</div>
+                <div className="p-2 rounded-lg bg-amber-100">
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                </div>
+              </div>
+              <div className="mt-2 text-xl font-bold text-gray-900">{toMoney(totals.balance)}</div>
+              <div className="text-xs text-gray-500">Due - Paid</div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 p-4 bg-white">
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-gray-500">Students w/ Tuition</div>
+                <div className="p-2 rounded-lg bg-purple-100">
+                  <GraduationCap className="w-4 h-4 text-purple-600" />
+                </div>
+              </div>
+              <div className="mt-2 text-xl font-bold text-gray-900">{totals.totalStudentsWithTuition}</div>
+              <div className="text-xs text-gray-500">Fee profiles created</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Recent tx */}
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Recent Transactions</h3>
+            <p className="text-sm text-gray-500">Latest fee payments recorded</p>
+          </div>
+          <button
+            onClick={() => setActiveTab('transactions')}
+            className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+          >
+            View All →
+          </button>
+        </div>
+        <div className="p-5">
+          {transactions.length === 0 ? (
+            <div className="text-center py-10 text-sm text-gray-500">No transactions yet.</div>
+          ) : (
+            <div className="space-y-3">
+              {transactions.slice(0, 6).map((t) => {
+                const stu = t.student_tuition?.student;
+                const studentName = stu
+                  ? `${stu.first_name ?? ''} ${stu.last_name ?? ''}`.trim()
+                  : '—';
+
+                return (
+                  <div
+                    key={t.id}
+                    className="flex items-center justify-between p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
+                  >
+                    <div>
+                      <div className="font-medium text-gray-900">{studentName}</div>
+                      <div className="text-xs text-gray-500">
+                        {t.payment_method} • {t.status} • Ref: {t.payment_reference ?? '—'}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-semibold text-gray-900">{toMoney(t.amount_paid)}</div>
+                      <div className="text-xs text-gray-500">{t.created}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderSchoolFees = () => (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">School Fees (Per Grade)</h3>
+          <p className="text-sm text-gray-500">Set tuition/hostel/breakfast/lunch fees for each class.</p>
+        </div>
+        <button
+          onClick={() => setShowSchoolFeeModal(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700"
+        >
+          <Plus className="w-4 h-4" />
+          Add / Update Fees
+        </button>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-gray-200">
+          <HeaderFilters />
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Grade</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Tuition</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Hostel</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Breakfast</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Lunch</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Description</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {filteredSchoolFees.map((r) => (
+                <tr key={r.id} className="hover:bg-gray-50">
+                  <td className="py-4 px-4 font-medium text-gray-900">{r.grade?.grade_name ?? r.grade_id}</td>
+                  <td className="py-4 px-4 text-sm text-gray-900">{toMoney(r.tuitionfee)}</td>
+                  <td className="py-4 px-4 text-sm text-gray-900">{toMoney(r.hostelfee)}</td>
+                  <td className="py-4 px-4 text-sm text-gray-900">{toMoney(r.breakfastfee)}</td>
+                  <td className="py-4 px-4 text-sm text-gray-900">{toMoney(r.lunchfee)}</td>
+                  <td className="py-4 px-4 text-sm text-gray-600">{r.description}</td>
+                </tr>
+              ))}
+              {filteredSchoolFees.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-10 text-center text-sm text-gray-500">
+                    No school fees configured.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="p-4 border-t border-gray-200 text-xs text-gray-500 flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-gray-400" />
+          Upsert key: <span className="font-medium">UNIQUE(grade_id)</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderOtherFees = () => (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">Other Fees (Per Grade)</h3>
+          <p className="text-sm text-gray-500">Additional charges per class (unique by grade + type).</p>
+        </div>
+        <button
+          onClick={() => setShowOtherFeeModal(true)}
+          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700"
+        >
+          <Plus className="w-4 h-4" />
+          Add / Update Other Fee
+        </button>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-gray-200">
+          <HeaderFilters />
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Grade</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Type</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Amount</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Unique Code</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Description</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {filteredOtherFees.map((r) => (
+                <tr key={r.id} className="hover:bg-gray-50">
+                  <td className="py-4 px-4 font-medium text-gray-900">{r.grade?.grade_name ?? r.grade_id}</td>
+                  <td className="py-4 px-4 text-sm text-gray-900">{r.fees_type}</td>
+                  <td className="py-4 px-4 text-sm text-gray-900">{Number(r.amount ?? 0)}</td>
+                  <td className="py-4 px-4 text-sm text-gray-600">{r.unique_code ?? '—'}</td>
+                  <td className="py-4 px-4 text-sm text-gray-600">{r.description}</td>
+                </tr>
+              ))}
+              {filteredOtherFees.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-10 text-center text-sm text-gray-500">
+                    No other fees configured.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="p-4 border-t border-gray-200 text-xs text-gray-500 flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-gray-400" />
+          Upsert key: <span className="font-medium">UNIQUE(grade_id, fees_type)</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderTuition = () => (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-lg font-semibold text-gray-900">Student Tuition Description</h3>
+        <p className="text-sm text-gray-500">Each row is a student’s fee profile with computed total_fee.</p>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-gray-200">
+          <HeaderFilters />
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Student</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Grade</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Hostel</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Breakfast</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Lunch</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Total Fee</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {filteredTuition.map((r) => {
+                const name = r.student ? `${r.student.first_name} ${r.student.last_name}` : r.student_id;
+                const gradeName = r.tuition?.grade?.grade_name ?? r.tuition?.grade_id ?? '—';
+                return (
+                  <tr key={r.id} className="hover:bg-gray-50">
+                    <td className="py-4 px-4">
+                      <div className="font-medium text-gray-900">{name}</div>
+                      <div className="text-xs text-gray-500">{r.student_id}</div>
+                    </td>
+                    <td className="py-4 px-4 text-sm text-gray-900">{gradeName}</td>
+                    <td className="py-4 px-4 text-sm">{r.hostel ? 'Yes' : 'No'}</td>
+                    <td className="py-4 px-4 text-sm">{r.breakfast ? 'Yes' : 'No'}</td>
+                    <td className="py-4 px-4 text-sm">{r.lunch ? 'Yes' : 'No'}</td>
+                    <td className="py-4 px-4 text-sm font-semibold text-gray-900">{toMoney(r.total_fee)}</td>
+                  </tr>
+                );
+              })}
+              {filteredTuition.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="py-10 text-center text-sm text-gray-500">
+                    No tuition profiles found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderTransactions = () => (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-lg font-semibold text-gray-900">Fee Transactions</h3>
+        <p className="text-sm text-gray-500">
+          Payments & balances (students are joined via student_tuition_description).
+        </p>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="p-5 border-b border-gray-200">
+          <HeaderFilters />
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Student</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Grade</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Paid</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Due</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Status</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Ref</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Date</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {filteredTransactions.map((t) => {
+                const stu = t.student_tuition?.student;
+                const name = stu ? `${stu.first_name ?? ''} ${stu.last_name ?? ''}`.trim() : '—';
+
+                const badge =
+                  t.status === 'paid'
+                    ? 'bg-green-100 text-green-800'
+                    : t.status === 'partial'
+                    ? 'bg-amber-100 text-amber-800'
+                    : t.status === 'overdue'
+                    ? 'bg-red-100 text-red-800'
+                    : 'bg-gray-100 text-gray-800';
+
+                return (
+                  <tr key={t.id} className="hover:bg-gray-50">
+                    <td className="py-4 px-4">
+                      <div className="font-medium text-gray-900">{name}</div>
+                      <div className="text-xs text-gray-500">{t.student_tuition?.student_id ?? '—'}</div>
+                    </td>
+                    <td className="py-4 px-4 text-sm text-gray-900">{t.grade?.grade_name ?? t.grade_id ?? '—'}</td>
+                    <td className="py-4 px-4 text-sm font-semibold text-gray-900">{toMoney(t.amount_paid)}</td>
+                    <td className="py-4 px-4 text-sm text-gray-900">{toMoney(t.amount_due)}</td>
+                    <td className="py-4 px-4">
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${badge}`}>
+                        {t.status}
+                      </span>
+                    </td>
+                    <td className="py-4 px-4 text-sm text-gray-600">{t.payment_reference ?? '—'}</td>
+                    <td className="py-4 px-4 text-sm text-gray-600">{t.created}</td>
+                  </tr>
+                );
+              })}
+              {filteredTransactions.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="py-10 text-center text-sm text-gray-500">
+                    No transactions found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="p-4 border-t border-gray-200 text-xs text-gray-500 flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-gray-400" />
+          Students are joined via <span className="font-medium">student_tuition_description</span> (not directly).
+        </div>
+      </div>
+    </div>
+  );
+
+  // -----------------------------
+  // Main render
+  // -----------------------------
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar userEmail={userEmail} />
@@ -408,327 +1217,270 @@ export default function FinancePage() {
             <div className="mb-8">
               <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
                 <div>
-                  <h1 className="text-2xl font-bold text-gray-900">Finance Dashboard</h1>
-                  <p className="text-gray-600">
-                    Track fees, collections, and financial performance for {school.school_name}
-                  </p>
+                  <h1 className="text-2xl font-bold text-gray-900">Finance</h1>
+                  <p className="text-gray-600">Fees setup and transactions for {school?.school_name}</p>
                 </div>
 
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg">
-                    <Calendar className="w-4 h-4 text-gray-500" />
-                    <span className="text-sm text-gray-700">Academic Year 2024-2025</span>
-                  </div>
-                  <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                    <Download className="w-4 h-4" />
-                    Export Report
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setShowSchoolFeeModal(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-xl hover:bg-gray-50"
+                  >
+                    <Plus className="w-4 h-4" />
+                    School Fees
+                  </button>
+                  <button
+                    onClick={() => setShowOtherFeeModal(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Other Fees
                   </button>
                 </div>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex items-center gap-1 border-b border-gray-200">
+                <TabButton k="overview" label="Overview" />
+                <TabButton k="schoolFees" label="School Fees" />
+                <TabButton k="otherFees" label="Other Fees" />
+                <TabButton k="tuition" label="Student Tuition" />
+                <TabButton k="transactions" label="Transactions" />
               </div>
             </div>
 
             {/* Error */}
             {errorMsg && (
-              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
                 <p className="text-sm text-red-600">{errorMsg}</p>
               </div>
             )}
 
-            {/* Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              <StatCard
-                title="Total Collected"
-                value={formatCurrency(totalCollected)}
-                icon={DollarSign}
-                badge="Collected"
-                badgeClass="text-blue-600 bg-blue-50"
-                iconClass="bg-blue-100 text-blue-600"
-              />
-              <StatCard
-                title="Collection Rate"
-                value={`${collectionRate}%`}
-                icon={TrendingUp}
-                badge="Rate"
-                badgeClass="text-green-600 bg-green-50"
-                iconClass="bg-green-100 text-green-600"
-              />
-              <StatCard
-                title="Outstanding Balance"
-                value={formatCurrency(totalOutstanding)}
-                icon={TrendingDown}
-                badge="Outstanding"
-                badgeClass="text-amber-600 bg-amber-50"
-                iconClass="bg-amber-100 text-amber-600"
-              />
-              <StatCard
-                title="Total Students"
-                value={String(gradeSummaries.reduce((acc, g) => acc + (g.student_count || 0), 0))}
-                icon={Users}
-                badge="Students"
-                badgeClass="text-purple-600 bg-purple-50"
-                iconClass="bg-purple-100 text-purple-600"
-              />
-            </div>
-
-            {/* Grade Summary + Quick Stats */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-              <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm">
-                <div className="p-5 border-b border-gray-200 flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900">Per-Grade Financial Summary</h3>
-                    <p className="text-sm text-gray-500">Detailed breakdown by grade level</p>
-                  </div>
-                  <button className="text-blue-600 hover:text-blue-700 text-sm font-medium">View Details →</button>
-                </div>
-
-                <div className="p-5">
-                  {gradeSummaries.length === 0 ? (
-                    <div className="text-center py-8">
-                      <PieChart className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                      <p className="text-gray-500">No financial data available</p>
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Grade</th>
-                            <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Students</th>
-                            <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Expected</th>
-                            <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Collected</th>
-                            <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Outstanding</th>
-                            <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Rate</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {gradeSummaries.map(g => {
-                            const rate = g.expected > 0 ? Math.round((g.collected / g.expected) * 100) : 0;
-                            return (
-                              <tr key={g.grade_id} className="hover:bg-gray-50">
-                                <td className="py-3 px-4">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-                                      <Users className="w-4 h-4 text-blue-600" />
-                                    </div>
-                                    <span className="font-medium text-gray-900">{g.grade_name}</span>
-                                  </div>
-                                </td>
-                                <td className="py-3 px-4 text-sm font-medium text-gray-900">{g.student_count}</td>
-                                <td className="py-3 px-4 text-sm text-gray-900">{formatCurrency(g.expected)}</td>
-                                <td className="py-3 px-4 text-sm font-medium text-green-600">{formatCurrency(g.collected)}</td>
-                                <td className="py-3 px-4 text-sm font-medium text-amber-600">{formatCurrency(g.outstanding)}</td>
-                                <td className="py-3 px-4">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-28 bg-gray-200 rounded-full h-2">
-                                      <div
-                                        className={`h-2 rounded-full ${
-                                          rate >= 80 ? 'bg-green-500' : rate >= 50 ? 'bg-yellow-500' : 'bg-red-500'
-                                        }`}
-                                        style={{ width: `${Math.min(rate, 100)}%` }}
-                                      />
-                                    </div>
-                                    <span className="text-xs font-medium text-gray-700 w-10">{rate}%</span>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-                <div className="p-5 border-b border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900">Quick Stats</h3>
-                  <p className="text-sm text-gray-500">Financial overview</p>
-                </div>
-
-                <div className="p-5 space-y-4">
-                  <QuickStat icon={CreditCard} title="Total Expected" subtitle="Annual tuition fees" value={formatCurrency(totalExpected)} />
-                  <QuickStat
-                    icon={CheckCircle}
-                    title="Paid in Full"
-                    subtitle="Grades with zero outstanding"
-                    value={`${gradeSummaries.filter(g => g.outstanding === 0).length} grades`}
-                  />
-                  <QuickStat
-                    icon={AlertCircle}
-                    title="High Risk"
-                    subtitle="Grades below 50% collection"
-                    value={`${gradeSummaries.filter(g => (g.collected / Math.max(g.expected, 1)) * 100 < 50).length} grades`}
-                  />
-                  <QuickStat icon={Clock} title="Payment Methods" subtitle="Top method (demo)" value="Bank: 45%" />
-                </div>
-              </div>
-            </div>
-
-            {/* Recent Transactions */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
-              <div className="p-5 border-b border-gray-200">
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900">Recent Transactions</h3>
-                    <p className="text-sm text-gray-500">Latest fee payments and collections</p>
-                  </div>
-
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <div className="relative">
-                      <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        value={searchTx}
-                        onChange={e => setSearchTx(e.target.value)}
-                        placeholder="Search transactions..."
-                        className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64"
-                      />
-                    </div>
-
-                    <div className="flex border border-gray-300 rounded-lg overflow-hidden">
-                      {(['all', 'completed', 'pending', 'overdue'] as const).map(filter => (
-                        <button
-                          key={filter}
-                          onClick={() => setActiveFilter(filter)}
-                          className={`px-3 py-2 text-sm font-medium capitalize ${
-                            activeFilter === filter ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-50'
-                          }`}
-                          type="button"
-                        >
-                          {filter}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-5">
-                {filteredPayments.length === 0 ? (
-                  <div className="text-center py-8">
-                    <CreditCard className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                    <p className="text-gray-500">No transactions found</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Student</th>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Grade</th>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Amount</th>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Date</th>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Status</th>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Method</th>
-                          <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {filteredPayments.map(p => (
-                          <tr key={p.id} className="hover:bg-gray-50">
-                            <td className="py-3 px-4">
-                              <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
-                                  <Users className="w-4 h-4 text-gray-600" />
-                                </div>
-                                <span className="font-medium text-gray-900">{p.student_name}</span>
-                              </div>
-                            </td>
-                            <td className="py-3 px-4">
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                {p.grade}
-                              </span>
-                            </td>
-                            <td className="py-3 px-4 font-medium text-gray-900">{formatCurrency(p.amount)}</td>
-                            <td className="py-3 px-4 text-sm text-gray-900">{p.date}</td>
-                            <td className="py-3 px-4">
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                Completed
-                              </span>
-                            </td>
-                            <td className="py-3 px-4 text-sm text-gray-900">{p.payment_method}</td>
-                            <td className="py-3 px-4">
-                              <div className="flex items-center gap-2">
-                                <button className="p-1 hover:bg-gray-100 rounded" type="button">
-                                  <Eye className="w-4 h-4 text-gray-600" />
-                                </button>
-                                <button className="p-1 hover:bg-gray-100 rounded" type="button">
-                                  <MoreVertical className="w-4 h-4 text-gray-600" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-
+            {/* Content */}
+            {activeTab === 'overview' && renderOverview()}
+            {activeTab === 'schoolFees' && renderSchoolFees()}
+            {activeTab === 'otherFees' && renderOtherFees()}
+            {activeTab === 'tuition' && renderTuition()}
+            {activeTab === 'transactions' && renderTransactions()}
           </div>
         </main>
       </div>
-    </div>
-  );
-}
 
-// ---------- UI helpers ----------
-function StatCard({
-  title,
-  value,
-  icon: Icon,
-  badge,
-  badgeClass,
-  iconClass,
-}: {
-  title: string;
-  value: string;
-  icon: any;
-  badge: string;
-  badgeClass: string;
-  iconClass: string;
-}) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-      <div className="flex items-center justify-between mb-4">
-        <div className={`p-3 rounded-lg ${iconClass}`}>
-          <Icon className="w-6 h-6" />
-        </div>
-        <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${badgeClass}`}>{badge}</span>
-      </div>
-      <h3 className="text-2xl font-bold text-gray-900 mb-1">{value}</h3>
-      <p className="text-sm text-gray-500">{title}</p>
-    </div>
-  );
-}
+      {/* School Fee Modal */}
+      {showSchoolFeeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl w-full max-w-lg p-6 m-4">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-semibold text-gray-900">Add / Update School Fees</h3>
+              <button
+                onClick={() => setShowSchoolFeeModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
 
-function QuickStat({
-  icon: Icon,
-  title,
-  subtitle,
-  value,
-}: {
-  icon: any;
-  title: string;
-  subtitle: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
-          <Icon className="w-5 h-5 text-gray-700" />
+            <form onSubmit={handleSaveSchoolFee} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Grade *</label>
+                <select
+                  value={feeGradeId}
+                  onChange={(e) => setFeeGradeId(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select grade</option>
+                  {grades.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.grade_name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Upsert uses UNIQUE(grade_id).</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Tuition</label>
+                  <input
+                    value={feeTuition}
+                    onChange={(e) => setFeeTuition(e.target.value)}
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Hostel</label>
+                  <input
+                    value={feeHostel}
+                    onChange={(e) => setFeeHostel(e.target.value)}
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Breakfast</label>
+                  <input
+                    value={feeBreakfast}
+                    onChange={(e) => setFeeBreakfast(e.target.value)}
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Lunch</label>
+                  <input
+                    value={feeLunch}
+                    onChange={(e) => setFeeLunch(e.target.value)}
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <input
+                  value={feeDesc}
+                  onChange={(e) => setFeeDesc(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSchoolFeeModal(false)}
+                  className="px-4 py-2 text-sm border border-gray-300 rounded-xl hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingSchoolFee}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {savingSchoolFee ? 'Saving…' : 'Save Fees'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
-        <div>
-          <p className="text-sm font-medium text-gray-900">{title}</p>
-          <p className="text-xs text-gray-500">{subtitle}</p>
+      )}
+
+      {/* Other Fee Modal */}
+      {showOtherFeeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-2xl w-full max-w-lg p-6 m-4">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-lg font-semibold text-gray-900">Add / Update Other Fee</h3>
+              <button
+                onClick={() => setShowOtherFeeModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveOtherFee} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Grade *</label>
+                <select
+                  value={otherGradeId}
+                  onChange={(e) => setOtherGradeId(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  <option value="">Select grade</option>
+                  {grades.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.grade_name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">Upsert uses UNIQUE(grade_id, fees_type).</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Fee Type *</label>
+                <select
+                  value={otherType}
+                  onChange={(e) => setOtherType(e.target.value as OtherFeeType)}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
+                >
+                  {(
+                    ['development', 'sports', 'uniform', 'medical', 'exam', 'library', 'ict', 'others'] as OtherFeeType[]
+                  ).map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Amount *</label>
+                  <input
+                    value={otherAmount}
+                    onChange={(e) => setOtherAmount(e.target.value)}
+                    type="number"
+                    min="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Unique Code</label>
+                  <input
+                    value={otherCode}
+                    onChange={(e) => setOtherCode(e.target.value)}
+                    placeholder="Optional"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <input
+                  value={otherDesc}
+                  onChange={(e) => setOtherDesc(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowOtherFeeModal(false)}
+                  className="px-4 py-2 text-sm border border-gray-300 rounded-xl hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingOtherFee}
+                  className="px-4 py-2 text-sm bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50"
+                >
+                  {savingOtherFee ? 'Saving…' : 'Save Other Fee'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
-      </div>
-      <div className="text-right">
-        <p className="text-sm font-semibold text-gray-900">{value}</p>
-      </div>
+      )}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
-import Sidebar from '@/components/Sidebar';
+import AppShell from '@/components/AppShell';
 
 type Role = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
 
@@ -336,7 +336,7 @@ export default function SettingsPage() {
       <Navbar userEmail={userEmail} />
 
       <div className="flex flex-1">
-        <Sidebar />
+        <AppShell />
 
         <main className="flex-1 px-4 md:px-6 py-4 md:py-6">
           <div className="max-w-5xl mx-auto flex flex-col gap-4">

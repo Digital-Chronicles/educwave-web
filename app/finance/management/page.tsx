@@ -1,13 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useState, FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
-import Sidebar from '@/components/Sidebar';
+import AppShell from '@/components/AppShell';
 import {
-  ClipboardList,
-  Receipt,
   Users,
   Search,
   RefreshCw,
@@ -17,9 +15,11 @@ import {
   CheckCircle2,
   X,
   Wallet,
+  Receipt,
+  Building2,
+  ClipboardList,
   CalendarDays,
   CreditCard,
-  Building2,
 } from 'lucide-react';
 
 type AppRole = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
@@ -28,8 +28,6 @@ type TabKey = 'tuition' | 'transactions';
 type FeeTerm = 'T1' | 'T2' | 'T3';
 type FeeStatus = 'pending' | 'partial' | 'paid' | 'overdue';
 type PaymentMethod = 'cash' | 'card' | 'online_transfer' | 'mobile_money' | 'bank';
-
-// ✅ Adjust to your enum in Postgres if needed
 type FeePaymentMethod = PaymentMethod;
 
 interface ProfileRow {
@@ -80,8 +78,6 @@ interface StudentTuitionRow {
   lunch: boolean;
   breakfast: boolean;
   total_fee: number;
-  // NOTE: your table doesn't show created/updated, but many systems add them.
-  // We'll keep optional to avoid runtime issues.
   created?: string | null;
   updated?: string | null;
   tuition?: {
@@ -93,7 +89,12 @@ interface StudentTuitionRow {
     lunchfee: number;
     grade?: { id: number; grade_name: string } | null;
   } | null;
-  student?: { registration_id: string; first_name: string; last_name: string; current_grade_id: number | null } | null;
+  student?: {
+    registration_id: string;
+    first_name: string;
+    last_name: string;
+    current_grade_id: number | null;
+  } | null;
 }
 
 interface FeeTransactionRow {
@@ -125,14 +126,19 @@ interface FeeTransactionRow {
     id: number;
     student_id: string;
     total_fee: number;
-    student?: { registration_id: string; first_name: string; last_name: string; current_grade_id: number | null } | null;
+    student?: {
+      registration_id: string;
+      first_name: string;
+      last_name: string;
+      current_grade_id: number | null;
+    } | null;
     tuition?: { id: number; grade?: { id: number; grade_name: string } | null } | null;
   } | null;
 }
 
 function toMoney(n: any) {
   const v = Number(n ?? 0);
-  return Number.isFinite(v) ? v.toFixed(2) : '0.00';
+  return Number.isFinite(v) ? v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : '0';
 }
 
 function supaErrText(err: any) {
@@ -154,19 +160,31 @@ function todayISO() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function isWithinDays(isoDate: string | null | undefined, days: number) {
-  if (!isoDate) return false;
-  const t = new Date(isoDate).getTime();
-  if (!Number.isFinite(t)) return false;
-  const diff = Date.now() - t;
-  return diff <= days * 24 * 60 * 60 * 1000;
+function parseISO(iso: string | null | undefined) {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+// -----------------------------
+// Tiny Combobox (no libs)
+// -----------------------------
+function useOutsideClick(ref: any, onOutside: () => void) {
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target)) onOutside();
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [ref, onOutside]);
 }
 
 export default function FinanceManagementPage() {
   const router = useRouter();
 
   // -----------------------------
-  // State (keep hooks consistent)
+  // State
   // -----------------------------
   const [authChecking, setAuthChecking] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -176,7 +194,6 @@ export default function FinanceManagementPage() {
   const [school, setSchool] = useState<SchoolRow | null>(null);
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
   const [activeTab, setActiveTab] = useState<TabKey>('tuition');
 
   // Data
@@ -202,6 +219,11 @@ export default function FinanceManagementPage() {
   const [tuitionLunch, setTuitionLunch] = useState(false);
   const [savingTuition, setSavingTuition] = useState(false);
 
+  // Tuition autocomplete
+  const [tuitionStudentQuery, setTuitionStudentQuery] = useState('');
+  const [tuitionStudentOpen, setTuitionStudentOpen] = useState(false);
+  const tuitionStudentBoxRef = useRef<HTMLDivElement | null>(null);
+
   // Payment modal form
   const [payStudentTuitionId, setPayStudentTuitionId] = useState('');
   const [payTerm, setPayTerm] = useState<FeeTerm>('T1');
@@ -213,16 +235,18 @@ export default function FinanceManagementPage() {
   const [payRemarks, setPayRemarks] = useState('');
   const [savingPayment, setSavingPayment] = useState(false);
 
+  // Payment autocomplete
+  const [payProfileQuery, setPayProfileQuery] = useState('');
+  const [payProfileOpen, setPayProfileOpen] = useState(false);
+  const payProfileBoxRef = useRef<HTMLDivElement | null>(null);
+
+  useOutsideClick(tuitionStudentBoxRef, () => setTuitionStudentOpen(false));
+  useOutsideClick(payProfileBoxRef, () => setPayProfileOpen(false));
+
   // -----------------------------
   // Derived
   // -----------------------------
   const schoolId = school?.id ?? null;
-
-  const tuitionByStudentId = useMemo(() => {
-    const m = new Map<string, StudentTuitionRow>();
-    for (const r of tuitionRows) m.set(r.student_id, r);
-    return m;
-  }, [tuitionRows]);
 
   const gradeNameById = useMemo(() => {
     const m = new Map<number, string>();
@@ -236,49 +260,68 @@ export default function FinanceManagementPage() {
     return m;
   }, [schoolFees]);
 
-  const txByTuitionId = useMemo(() => {
-    const m = new Map<number, FeeTransactionRow[]>();
-    for (const t of transactions) {
-      const key = t.student_tuition_id;
-      if (!m.has(key)) m.set(key, []);
-      m.get(key)!.push(t);
-    }
+  const tuitionByStudentId = useMemo(() => {
+    const m = new Map<string, StudentTuitionRow>();
+    for (const r of tuitionRows) m.set(r.student_id, r);
     return m;
+  }, [tuitionRows]);
+
+  // ✅ KEY FIX: totals/paid/balance based on tuition.total_fee (not amount_due)
+  const tuitionPayments = useMemo(() => {
+    const paidByTuitionId = new Map<number, number>();
+    const lastPayByTuitionId = new Map<number, string | null>();
+
+    for (const tx of transactions) {
+      const id = tx.student_tuition_id;
+      const cur = paidByTuitionId.get(id) ?? 0;
+      paidByTuitionId.set(id, cur + Number(tx.amount_paid ?? 0));
+
+      // latest date
+      const a = parseISO(lastPayByTuitionId.get(id) ?? null);
+      const b = parseISO(tx.last_payment_date ?? tx.created ?? null);
+      if (b !== null && (a === null || b > a)) {
+        lastPayByTuitionId.set(id, tx.last_payment_date ?? tx.created ?? null);
+      }
+    }
+
+    return { paidByTuitionId, lastPayByTuitionId };
   }, [transactions]);
 
-  const studentBalances = useMemo(() => {
-    // balance = sum(amount_due) - sum(amount_paid) per student_tuition_id
-    const m = new Map<number, { due: number; paid: number; bal: number }>();
-    for (const t of transactions) {
-      const id = t.student_tuition_id;
-      const cur = m.get(id) ?? { due: 0, paid: 0, bal: 0 };
-      cur.due += Number(t.amount_due ?? 0);
-      cur.paid += Number(t.amount_paid ?? 0);
-      cur.bal = Math.max(cur.due - cur.paid, 0);
-      m.set(id, cur);
-    }
-    return m;
-  }, [transactions]);
+  const computedTuitionRows = useMemo(() => {
+    return tuitionRows.map((t) => {
+      const paid = tuitionPayments.paidByTuitionId.get(t.id) ?? 0;
+      const total = Number(t.total_fee ?? 0);
+      const outstanding = Math.max(total - paid, 0);
 
-  const stats = useMemo(() => {
+      let status: FeeStatus = 'pending';
+      if (paid <= 0 && total > 0) status = 'pending';
+      if (paid > 0 && paid < total) status = 'partial';
+      if (paid >= total && total > 0) status = 'paid';
+
+      return {
+        tuition: t,
+        total,
+        paid,
+        outstanding,
+        status,
+        lastPayment: tuitionPayments.lastPayByTuitionId.get(t.id) ?? null,
+      };
+    });
+  }, [tuitionRows, tuitionPayments]);
+
+  const overviewStats = useMemo(() => {
+    const totalExpected = computedTuitionRows.reduce((s, r) => s + r.total, 0);
+    const totalPaid = computedTuitionRows.reduce((s, r) => s + r.paid, 0);
+    const totalOutstanding = Math.max(totalExpected - totalPaid, 0);
+
     const studentsCount = students.length;
-    const tuitionCount = tuitionRows.length;
-    const withTuition = new Set(tuitionRows.map((t) => t.student_id)).size;
+    const profilesCount = tuitionRows.length;
+    const txCount = transactions.length;
 
-    const totalPaid = transactions.reduce((s, t) => s + Number(t.amount_paid ?? 0), 0);
-    const totalDue = transactions.reduce((s, t) => s + Number(t.amount_due ?? 0), 0);
-    const outstanding = Math.max(totalDue - totalPaid, 0);
+    const pct = totalExpected > 0 ? Math.min((totalPaid / totalExpected) * 100, 100) : 0;
 
-    return {
-      studentsCount,
-      tuitionCount,
-      withTuition,
-      totalPaid,
-      totalDue,
-      outstanding,
-      txCount: transactions.length,
-    };
-  }, [students, tuitionRows, transactions]);
+    return { totalExpected, totalPaid, totalOutstanding, studentsCount, profilesCount, txCount, pct };
+  }, [computedTuitionRows, students, tuitionRows, transactions]);
 
   const filteredStudents = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -289,6 +332,24 @@ export default function FinanceManagementPage() {
       return gOk && searchOk;
     });
   }, [students, q, selectedGradeId]);
+
+  const filteredTuitionForTable = useMemo(() => {
+    const query = q.trim().toLowerCase();
+
+    return computedTuitionRows.filter((row) => {
+      const t = row.tuition;
+      const gradeId = t.student?.current_grade_id ?? null;
+      const gOk = selectedGradeId ? Number(selectedGradeId) === Number(gradeId ?? 0) : true;
+
+      const name = `${t.student?.first_name ?? ''} ${t.student?.last_name ?? ''}`.toLowerCase();
+      const searchOk =
+        !query ||
+        name.includes(query) ||
+        (t.student_id ?? '').toLowerCase().includes(query);
+
+      return gOk && searchOk;
+    });
+  }, [computedTuitionRows, q, selectedGradeId]);
 
   const filteredTransactions = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -307,6 +368,40 @@ export default function FinanceManagementPage() {
     });
   }, [transactions, q, selectedGradeId]);
 
+  // Autocomplete lists
+  const tuitionStudentSuggestions = useMemo(() => {
+    const query = tuitionStudentQuery.trim().toLowerCase();
+    const base = students;
+    const res = !query
+      ? base.slice(0, 30)
+      : base
+          .filter((s) => {
+            const name = `${s.first_name} ${s.last_name}`.toLowerCase();
+            const reg = `${s.registration_id}`.toLowerCase();
+            return name.includes(query) || reg.includes(query);
+          })
+          .slice(0, 30);
+    return res;
+  }, [students, tuitionStudentQuery]);
+
+  const payProfileSuggestions = useMemo(() => {
+    const query = payProfileQuery.trim().toLowerCase();
+    const base = tuitionRows;
+
+    const format = (t: StudentTuitionRow) => {
+      const st = t.student;
+      const name = st ? `${st.first_name ?? ''} ${st.last_name ?? ''}`.trim() : t.student_id;
+      const g = st?.current_grade_id ? gradeNameById.get(st.current_grade_id) : undefined;
+      return `${name} — ${t.student_id}${g ? ` (${g})` : ''}`.toLowerCase();
+    };
+
+    const res = !query
+      ? base.slice(0, 30)
+      : base.filter((t) => format(t).includes(query) || `${t.id}`.includes(query)).slice(0, 30);
+
+    return res;
+  }, [tuitionRows, payProfileQuery, gradeNameById]);
+
   // -----------------------------
   // Auth check
   // -----------------------------
@@ -324,7 +419,7 @@ export default function FinanceManagementPage() {
   }, [router]);
 
   // -----------------------------
-  // Load (scoped to school)
+  // Load
   // -----------------------------
   useEffect(() => {
     if (authChecking) return;
@@ -341,7 +436,6 @@ export default function FinanceManagementPage() {
         if (userErr) throw userErr;
         if (!user) throw new Error('Could not find authenticated user.');
 
-        // Profile
         const { data: p, error: pErr } = await supabase
           .from('profiles')
           .select('user_id, email, full_name, role, school_id')
@@ -362,7 +456,6 @@ export default function FinanceManagementPage() {
           return;
         }
 
-        // School
         const { data: s, error: sErr } = await supabase
           .from('general_information')
           .select('id, school_name')
@@ -373,7 +466,6 @@ export default function FinanceManagementPage() {
         const schoolData = s as SchoolRow;
         setSchool(schoolData);
 
-        // Grades
         const { data: gradeRows, error: gradeErr } = await supabase
           .from('class')
           .select('id, grade_name')
@@ -382,7 +474,6 @@ export default function FinanceManagementPage() {
         if (gradeErr) throw gradeErr;
         setGrades((gradeRows ?? []) as GradeRow[]);
 
-        // School fees (for mapping grade -> fees id)
         const { data: feesRows, error: feesErr } = await supabase
           .from('assessment_schoolfees')
           .select(
@@ -397,7 +488,6 @@ export default function FinanceManagementPage() {
         if (feesErr) throw feesErr;
         setSchoolFees((feesRows ?? []) as unknown as SchoolFeesRow[]);
 
-        // Students (scoped to school)
         const { data: studentRows, error: stuErr } = await supabase
           .from('students')
           .select('registration_id, first_name, last_name, current_grade_id')
@@ -406,7 +496,6 @@ export default function FinanceManagementPage() {
         if (stuErr) throw stuErr;
         setStudents((studentRows ?? []) as unknown as StudentRow[]);
 
-        // Tuition profiles
         const { data: tuition, error: tuitionErr } = await supabase
           .from('student_tuition_description')
           .select(
@@ -424,7 +513,6 @@ export default function FinanceManagementPage() {
         if (tuitionErr) throw tuitionErr;
         setTuitionRows((tuition ?? []) as unknown as StudentTuitionRow[]);
 
-        // Transactions
         const { data: txRows, error: txErr } = await supabase
           .from('fee_transaction')
           .select(
@@ -465,48 +553,9 @@ export default function FinanceManagementPage() {
     setSelectedGradeId('');
   };
 
-  const openTuitionModalForStudent = (s: StudentRow) => {
-    const existing = tuitionByStudentId.get(s.registration_id);
-    const gradeId = s.current_grade_id ? String(s.current_grade_id) : '';
-
-    setTuitionStudentId(s.registration_id);
-    setTuitionGradeId(gradeId);
-
-    setTuitionHostel(existing?.hostel ?? false);
-    setTuitionBreakfast(existing?.breakfast ?? false);
-    setTuitionLunch(existing?.lunch ?? false);
-
-    setShowTuitionModal(true);
-  };
-
-  const openPaymentModalForStudent = (s: StudentRow) => {
-    const t = tuitionByStudentId.get(s.registration_id);
-    if (!t) {
-      setErrorMsg('This student has no tuition profile yet. Create tuition first.');
-      return;
-    }
-    setPayStudentTuitionId(String(t.id));
-    setPayTerm('T1');
-    setPayAcademicYear('');
-    setPayAmountPaid('0');
-    setPayMethod('cash');
-    setPayDueDate('');
-    setPayReference('');
-    setPayRemarks('');
-    setShowPaymentModal(true);
-  };
-
-  const canEditTuitionRow = (r: StudentTuitionRow) => {
-    // Requirement: user can only change fee description within 30 days, otherwise admin only.
-    // Your tuition table doesn't show created date; if you add it later, this will work automatically.
-    if (profile?.role === 'ADMIN') return true;
-    if (r.created && isWithinDays(r.created, 30)) return true;
-    // If no created column exists, default to allowing only ADMIN (safer).
-    return false;
-  };
-
   const reloadTuitionAndTx = async () => {
     if (!schoolId) return;
+
     const [tuRes, txRes] = await Promise.all([
       supabase
         .from('student_tuition_description')
@@ -552,7 +601,98 @@ export default function FinanceManagementPage() {
   };
 
   // -----------------------------
-  // Save Tuition Profile
+  // Hostel rule
+  // -----------------------------
+  const setHostelWithRule = (checked: boolean) => {
+    setTuitionHostel(checked);
+    if (checked) {
+      setTuitionBreakfast(true);
+      setTuitionLunch(true);
+    }
+  };
+
+  // -----------------------------
+  // Tuition modal select student
+  // -----------------------------
+  const selectStudentForTuition = (s: StudentRow) => {
+    setTuitionStudentId(s.registration_id);
+    setTuitionGradeId(s.current_grade_id ? String(s.current_grade_id) : '');
+
+    const existing = tuitionByStudentId.get(s.registration_id);
+    const exHostel = existing?.hostel ?? false;
+    const exBreakfast = existing?.breakfast ?? false;
+    const exLunch = existing?.lunch ?? false;
+
+    setTuitionHostel(exHostel);
+    setTuitionBreakfast(exBreakfast);
+    setTuitionLunch(exLunch);
+
+    if (exHostel) {
+      setTuitionBreakfast(true);
+      setTuitionLunch(true);
+    }
+
+    setTuitionStudentQuery(`${s.first_name} ${s.last_name} — ${s.registration_id}`);
+    setTuitionStudentOpen(false);
+  };
+
+  const selectPayProfile = (t: StudentTuitionRow) => {
+    setPayStudentTuitionId(String(t.id));
+    const st = t.student;
+    const name = st ? `${st.first_name} ${st.last_name}` : t.student_id;
+    const g = st?.current_grade_id ? gradeNameById.get(st.current_grade_id) : undefined;
+    setPayProfileQuery(`${name} — ${t.student_id}${g ? ` (${g})` : ''}`);
+    setPayProfileOpen(false);
+  };
+
+  const openTuitionModalForStudent = (s: StudentRow) => {
+    const existing = tuitionByStudentId.get(s.registration_id);
+    const gradeId = s.current_grade_id ? String(s.current_grade_id) : '';
+
+    setTuitionStudentId(s.registration_id);
+    setTuitionGradeId(gradeId);
+
+    setTuitionHostel(existing?.hostel ?? false);
+    setTuitionBreakfast(existing?.breakfast ?? false);
+    setTuitionLunch(existing?.lunch ?? false);
+
+    if (existing?.hostel) {
+      setTuitionBreakfast(true);
+      setTuitionLunch(true);
+    }
+
+    setTuitionStudentQuery(`${s.first_name} ${s.last_name} — ${s.registration_id}`);
+    setTuitionStudentOpen(false);
+    setShowTuitionModal(true);
+  };
+
+  const openPaymentModalForStudent = (s: StudentRow) => {
+    const t = tuitionByStudentId.get(s.registration_id);
+    if (!t) {
+      setErrorMsg('This student has no tuition profile yet. Create tuition first.');
+      return;
+    }
+
+    setPayStudentTuitionId(String(t.id));
+    setPayTerm('T1');
+    setPayAcademicYear('');
+    setPayAmountPaid('0');
+    setPayMethod('cash');
+    setPayDueDate('');
+    setPayReference('');
+    setPayRemarks('');
+
+    const st = t.student;
+    const name = st ? `${st.first_name} ${st.last_name}` : t.student_id;
+    const g = st?.current_grade_id ? gradeNameById.get(st.current_grade_id) : undefined;
+    setPayProfileQuery(`${name} — ${t.student_id}${g ? ` (${g})` : ''}`);
+    setPayProfileOpen(false);
+
+    setShowPaymentModal(true);
+  };
+
+  // -----------------------------
+  // Save Tuition
   // -----------------------------
   const handleSaveTuition = async (e: FormEvent) => {
     e.preventDefault();
@@ -567,27 +707,23 @@ export default function FinanceManagementPage() {
 
       const gradeId = Number(tuitionGradeId);
       const feeRow = schoolFeeByGradeId.get(gradeId);
-      if (!feeRow) {
-        throw new Error('No school fees found for this grade. Please set School Fees first.');
-      }
+      if (!feeRow) throw new Error('No school fees found for this grade. Please set School Fees first.');
 
       const existing = tuitionByStudentId.get(tuitionStudentId);
 
-      // Enforce 30-day rule (non-admins)
-      if (existing && !canEditTuitionRow(existing)) {
-        throw new Error('Edits are locked after 30 days. Only system admins can change this record.');
-      }
+      // Enforce Hostel => Breakfast + Lunch
+      const hostel = tuitionHostel;
+      const breakfast = hostel ? true : tuitionBreakfast;
+      const lunch = hostel ? true : tuitionLunch;
 
-      // Upsert needs a UNIQUE constraint. You have none shown for tuition_description.
-      // We'll do: if exists -> update; else -> insert.
       if (existing) {
         const { error } = await supabase
           .from('student_tuition_description')
           .update({
             tuition_id: feeRow.id,
-            hostel: tuitionHostel,
-            breakfast: tuitionBreakfast,
-            lunch: tuitionLunch,
+            hostel,
+            breakfast,
+            lunch,
             school_id: schoolId,
           })
           .eq('id', existing.id)
@@ -599,10 +735,9 @@ export default function FinanceManagementPage() {
           student_id: tuitionStudentId,
           tuition_id: feeRow.id,
           school_id: schoolId,
-          hostel: tuitionHostel,
-          breakfast: tuitionBreakfast,
-          lunch: tuitionLunch,
-          // total_fee will be calculated by your trigger
+          hostel,
+          breakfast,
+          lunch,
         });
 
         if (error) throw error;
@@ -618,7 +753,7 @@ export default function FinanceManagementPage() {
   };
 
   // -----------------------------
-  // Save Payment (transaction)
+  // Save Payment
   // -----------------------------
   const handleSavePayment = async (e: FormEvent) => {
     e.preventDefault();
@@ -637,13 +772,8 @@ export default function FinanceManagementPage() {
       const amountPaid = Number(payAmountPaid || 0);
       if (!Number.isFinite(amountPaid) || amountPaid < 0) throw new Error('Invalid amount paid.');
 
-      // Compute recommended amount_due:
-      // If there are transactions for same term/year, keep due = max(previous due) else tuition total_fee
-      const same = (txByTuitionId.get(tuitionId) ?? []).filter(
-        (x) => (x.term ?? null) === (payTerm ?? null) && (x.academic_year ?? null) === (payAcademicYear?.trim() || null)
-      );
-
-      const baseDue = same.length > 0 ? Number(same[0].amount_due ?? tRow.total_fee ?? 0) : Number(tRow.total_fee ?? 0);
+      // Keep amount_due for record, but balance display uses tuition.total_fee
+      const baseDue = Number(tRow.total_fee ?? 0);
 
       const payload = {
         student_tuition_id: tuitionId,
@@ -664,8 +794,6 @@ export default function FinanceManagementPage() {
         remarks: payRemarks?.trim() || null,
       };
 
-      // IMPORTANT: fee_transaction only has UNIQUE(payment_reference).
-      // So we must INSERT (not upsert on composite).
       const { error } = await supabase.from('fee_transaction').insert(payload);
       if (error) throw error;
 
@@ -697,7 +825,7 @@ export default function FinanceManagementPage() {
       <div className="min-h-screen bg-gray-50">
         <Navbar userEmail={userEmail} />
         <div className="flex">
-          <Sidebar />
+          <AppShell />
           <main className="flex-1 p-6">
             <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -780,7 +908,7 @@ export default function FinanceManagementPage() {
     </div>
   );
 
-  const renderOverviewCards = () => (
+  const OverviewCards = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between">
@@ -789,30 +917,30 @@ export default function FinanceManagementPage() {
             <Users className="w-4 h-4 text-blue-600" />
           </div>
         </div>
-        <div className="mt-2 text-2xl font-bold text-gray-900">{stats.studentsCount}</div>
-        <div className="text-xs text-gray-500">{stats.withTuition} have tuition profiles</div>
+        <div className="mt-2 text-2xl font-bold text-gray-900">{overviewStats.studentsCount}</div>
+        <div className="text-xs text-gray-500">{overviewStats.profilesCount} tuition profiles</div>
       </div>
 
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between">
-          <div className="text-xs text-gray-500">Transactions</div>
-          <div className="p-2 rounded-xl bg-green-100">
-            <Receipt className="w-4 h-4 text-green-600" />
+          <div className="text-xs text-gray-500">Total Expected</div>
+          <div className="p-2 rounded-xl bg-indigo-100">
+            <Wallet className="w-4 h-4 text-indigo-600" />
           </div>
         </div>
-        <div className="mt-2 text-2xl font-bold text-gray-900">{stats.txCount}</div>
-        <div className="text-xs text-gray-500">Payments recorded</div>
+        <div className="mt-2 text-2xl font-bold text-gray-900">{toMoney(overviewStats.totalExpected)}</div>
+        <div className="text-xs text-gray-500">Sum of tuition totals</div>
       </div>
 
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="text-xs text-gray-500">Total Paid</div>
           <div className="p-2 rounded-xl bg-emerald-100">
-            <Wallet className="w-4 h-4 text-emerald-600" />
+            <Receipt className="w-4 h-4 text-emerald-600" />
           </div>
         </div>
-        <div className="mt-2 text-2xl font-bold text-gray-900">{toMoney(stats.totalPaid)}</div>
-        <div className="text-xs text-gray-500">Across all terms</div>
+        <div className="mt-2 text-2xl font-bold text-gray-900">{toMoney(overviewStats.totalPaid)}</div>
+        <div className="text-xs text-gray-500">{overviewStats.txCount} payments</div>
       </div>
 
       <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -822,25 +950,36 @@ export default function FinanceManagementPage() {
             <AlertTriangle className="w-4 h-4 text-amber-600" />
           </div>
         </div>
-        <div className="mt-2 text-2xl font-bold text-gray-900">{toMoney(stats.outstanding)}</div>
-        <div className="text-xs text-gray-500">Due - Paid</div>
+        <div className="mt-2 text-2xl font-bold text-gray-900">{toMoney(overviewStats.totalOutstanding)}</div>
+        <div className="text-xs text-gray-500">Expected − Paid</div>
       </div>
     </div>
   );
 
-  const renderTuitionTab = () => (
+  // -----------------------------
+  // Tabs
+  // -----------------------------
+  const TuitionTab = () => (
     <div className="space-y-6">
-      {renderOverviewCards()}
+      <OverviewCards />
 
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="p-5 border-b border-gray-200 flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h3 className="text-lg font-semibold text-gray-900">Student Tuition Management</h3>
-            <p className="text-sm text-gray-500">Create/update tuition profiles and add payments.</p>
+            <p className="text-sm text-gray-500">Clearly shows Total Fee, Paid and Outstanding.</p>
           </div>
 
           <button
-            onClick={() => setShowTuitionModal(true)}
+            onClick={() => {
+              setTuitionStudentId('');
+              setTuitionGradeId('');
+              setTuitionHostel(false);
+              setTuitionBreakfast(false);
+              setTuitionLunch(false);
+              setTuitionStudentQuery('');
+              setShowTuitionModal(true);
+            }}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700"
           >
             <Plus className="w-4 h-4" />
@@ -859,27 +998,61 @@ export default function FinanceManagementPage() {
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Student</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Grade</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Total Fee</th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Balance</th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Options</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Total Paid</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Outstanding</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Status</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Last Payment</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Actions</th>
               </tr>
             </thead>
 
             <tbody className="divide-y divide-gray-200">
               {filteredStudents.map((s) => {
-                const t = tuitionByStudentId.get(s.registration_id);
+                const tuition = tuitionByStudentId.get(s.registration_id);
                 const gName = s.current_grade_id ? gradeNameById.get(s.current_grade_id) : null;
 
-                const balInfo = t ? studentBalances.get(t.id) : null;
-                const balance = balInfo?.bal ?? 0;
+                if (!tuition) {
+                  return (
+                    <tr key={s.registration_id} className="hover:bg-gray-50">
+                      <td className="py-4 px-4">
+                        <div className="font-medium text-gray-900">
+                          {s.first_name} {s.last_name}
+                        </div>
+                        <div className="text-xs text-gray-500">{s.registration_id}</div>
+                      </td>
+                      <td className="py-4 px-4 text-sm text-gray-900">{gName ?? '—'}</td>
+                      <td className="py-4 px-4 text-sm text-gray-500">—</td>
+                      <td className="py-4 px-4 text-sm text-gray-500">—</td>
+                      <td className="py-4 px-4 text-sm text-gray-500">—</td>
+                      <td className="py-4 px-4 text-sm text-gray-500">No profile</td>
+                      <td className="py-4 px-4 text-sm text-gray-500">—</td>
+                      <td className="py-4 px-4">
+                        <button
+                          onClick={() => openTuitionModalForStudent(s)}
+                          className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-xl hover:bg-gray-50"
+                        >
+                          Create Tuition
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                }
 
-                const options = t
-                  ? [
-                      t.hostel ? 'Hostel' : null,
-                      t.breakfast ? 'Breakfast' : null,
-                      t.lunch ? 'Lunch' : null,
-                    ].filter(Boolean)
-                  : [];
+                const computed = computedTuitionRows.find((x) => x.tuition.id === tuition.id);
+                const total = computed?.total ?? Number(tuition.total_fee ?? 0);
+                const paid = computed?.paid ?? 0;
+                const outstanding = computed?.outstanding ?? Math.max(total - paid, 0);
+                const status = computed?.status ?? 'pending';
+                const lastPayment = computed?.lastPayment ?? null;
+
+                const badge =
+                  status === 'paid'
+                    ? 'bg-green-100 text-green-800'
+                    : status === 'partial'
+                    ? 'bg-amber-100 text-amber-800'
+                    : status === 'overdue'
+                    ? 'bg-red-100 text-red-800'
+                    : 'bg-gray-100 text-gray-800';
 
                 return (
                   <tr key={s.registration_id} className="hover:bg-gray-50">
@@ -891,43 +1064,26 @@ export default function FinanceManagementPage() {
                     </td>
 
                     <td className="py-4 px-4 text-sm text-gray-900">{gName ?? '—'}</td>
+                    <td className="py-4 px-4 text-sm font-semibold text-gray-900">{toMoney(total)}</td>
+                    <td className="py-4 px-4 text-sm font-semibold text-gray-900">{toMoney(paid)}</td>
 
-                    <td className="py-4 px-4 text-sm font-semibold text-gray-900">
-                      {t ? toMoney(t.total_fee) : '—'}
-                      {!t && <div className="text-xs text-gray-500 font-normal">No tuition profile</div>}
+                    <td className="py-4 px-4">
+                      <span
+                        className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
+                          outstanding > 0 ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'
+                        }`}
+                      >
+                        {toMoney(outstanding)}
+                      </span>
                     </td>
 
                     <td className="py-4 px-4">
-                      {t ? (
-                        <span
-                          className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                            balance > 0 ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800'
-                          }`}
-                        >
-                          {toMoney(balance)}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-500">—</span>
-                      )}
+                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${badge}`}>
+                        {status}
+                      </span>
                     </td>
 
-                    <td className="py-4 px-4 text-sm text-gray-700">
-                      {t ? (
-                        options.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            {options.map((o) => (
-                              <span key={o} className="px-2.5 py-1 rounded-full text-xs bg-gray-100 text-gray-700">
-                                {o}
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-gray-500">No extras</span>
-                        )
-                      ) : (
-                        <span className="text-xs text-gray-500">—</span>
-                      )}
-                    </td>
+                    <td className="py-4 px-4 text-sm text-gray-600">{lastPayment ?? '—'}</td>
 
                     <td className="py-4 px-4">
                       <div className="flex items-center gap-2">
@@ -944,12 +1100,6 @@ export default function FinanceManagementPage() {
                           Add Payment
                         </button>
                       </div>
-                      {t && !canEditTuitionRow(t) && profile?.role !== 'ADMIN' && (
-                        <div className="text-xs text-amber-700 mt-1 flex items-center gap-1">
-                          <AlertTriangle className="w-3.5 h-3.5" />
-                          Edits locked (30-day rule)
-                        </div>
-                      )}
                     </td>
                   </tr>
                 );
@@ -957,7 +1107,7 @@ export default function FinanceManagementPage() {
 
               {filteredStudents.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-10 text-center text-sm text-gray-500">
+                  <td colSpan={8} className="py-10 text-center text-sm text-gray-500">
                     No students found.
                   </td>
                 </tr>
@@ -968,25 +1118,29 @@ export default function FinanceManagementPage() {
 
         <div className="p-4 border-t border-gray-200 text-xs text-gray-500 flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-gray-400" />
-          Tuition is computed by your trigger on <span className="font-medium">student_tuition_description</span>.
+          Outstanding is calculated as <span className="font-medium">student_tuition_description.total_fee − SUM(fee_transaction.amount_paid)</span>.
         </div>
       </div>
     </div>
   );
 
-  const renderTransactionsTab = () => (
+  const TransactionsTab = () => (
     <div className="space-y-6">
-      {renderOverviewCards()}
+      <OverviewCards />
 
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="p-5 border-b border-gray-200 flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h3 className="text-lg font-semibold text-gray-900">Transactions</h3>
-            <p className="text-sm text-gray-500">Review payments and references.</p>
+            <p className="text-sm text-gray-500">Payments recorded. Tuition balance is shown in Tuition tab.</p>
           </div>
 
           <button
-            onClick={() => setShowPaymentModal(true)}
+            onClick={() => {
+              setPayStudentTuitionId('');
+              setPayProfileQuery('');
+              setShowPaymentModal(true);
+            }}
             className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700"
           >
             <Plus className="w-4 h-4" />
@@ -1006,10 +1160,9 @@ export default function FinanceManagementPage() {
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Grade</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Term / Year</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Paid</th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Due</th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Status</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Method</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Reference</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Date</th>
               </tr>
             </thead>
 
@@ -1017,15 +1170,6 @@ export default function FinanceManagementPage() {
               {filteredTransactions.map((t) => {
                 const stu = t.student_tuition?.student;
                 const name = stu ? `${stu.first_name ?? ''} ${stu.last_name ?? ''}`.trim() : '—';
-
-                const badge =
-                  t.status === 'paid'
-                    ? 'bg-green-100 text-green-800'
-                    : t.status === 'partial'
-                    ? 'bg-amber-100 text-amber-800'
-                    : t.status === 'overdue'
-                    ? 'bg-red-100 text-red-800'
-                    : 'bg-gray-100 text-gray-800';
 
                 return (
                   <tr key={t.id} className="hover:bg-gray-50">
@@ -1042,23 +1186,16 @@ export default function FinanceManagementPage() {
                     </td>
 
                     <td className="py-4 px-4 text-sm font-semibold text-gray-900">{toMoney(t.amount_paid)}</td>
-                    <td className="py-4 px-4 text-sm text-gray-900">{toMoney(t.amount_due)}</td>
-
-                    <td className="py-4 px-4">
-                      <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${badge}`}>
-                        {t.status}
-                      </span>
-                    </td>
-
                     <td className="py-4 px-4 text-sm text-gray-700">{t.payment_method}</td>
                     <td className="py-4 px-4 text-sm text-gray-600">{t.payment_reference ?? '—'}</td>
+                    <td className="py-4 px-4 text-sm text-gray-600">{t.created}</td>
                   </tr>
                 );
               })}
 
               {filteredTransactions.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-10 text-center text-sm text-gray-500">
+                  <td colSpan={7} className="py-10 text-center text-sm text-gray-500">
                     No transactions found.
                   </td>
                 </tr>
@@ -1069,20 +1206,20 @@ export default function FinanceManagementPage() {
 
         <div className="p-4 border-t border-gray-200 text-xs text-gray-500 flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-gray-400" />
-          Transactions are inserted (not upsert) because only <span className="font-medium">payment_reference</span> is unique.
+          To see outstanding per student, use the <span className="font-medium">Tuition</span> tab.
         </div>
       </div>
     </div>
   );
 
   // -----------------------------
-  // Page render
+  // Render
   // -----------------------------
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar userEmail={userEmail} />
       <div className="flex">
-        <Sidebar />
+        <AppShell />
 
         <main className="flex-1 p-6">
           <div className="max-w-7xl mx-auto">
@@ -1139,8 +1276,8 @@ export default function FinanceManagementPage() {
               </div>
             )}
 
-            {activeTab === 'tuition' && renderTuitionTab()}
-            {activeTab === 'transactions' && renderTransactionsTab()}
+            {activeTab === 'tuition' && <TuitionTab />}
+            {activeTab === 'transactions' && <TransactionsTab />}
           </div>
         </main>
       </div>
@@ -1152,7 +1289,7 @@ export default function FinanceManagementPage() {
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">Create / Update Tuition Profile</h3>
-                <p className="text-sm text-gray-500">Uses the student’s current grade to pick the correct fee row.</p>
+                <p className="text-sm text-gray-500">Hostel auto-selects Breakfast & Lunch.</p>
               </div>
               <button onClick={() => setShowTuitionModal(false)} className="p-2 hover:bg-gray-100 rounded-lg">
                 <X className="w-5 h-5 text-gray-500" />
@@ -1160,84 +1297,118 @@ export default function FinanceManagementPage() {
             </div>
 
             <form onSubmit={handleSaveTuition} className="space-y-4">
-              <div>
+              <div ref={tuitionStudentBoxRef as any} className="relative">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Student *</label>
-                <select
-                  value={tuitionStudentId}
+
+                <input
+                  value={tuitionStudentQuery}
                   onChange={(e) => {
-                    const sid = e.target.value;
-                    setTuitionStudentId(sid);
-                    const st = students.find((x) => x.registration_id === sid);
-                    setTuitionGradeId(st?.current_grade_id ? String(st.current_grade_id) : '');
-                    const existing = tuitionByStudentId.get(sid);
-                    setTuitionHostel(existing?.hostel ?? false);
-                    setTuitionBreakfast(existing?.breakfast ?? false);
-                    setTuitionLunch(existing?.lunch ?? false);
+                    setTuitionStudentQuery(e.target.value);
+                    setTuitionStudentOpen(true);
+                    setTuitionStudentId('');
+                    setTuitionGradeId('');
+                    setTuitionHostel(false);
+                    setTuitionBreakfast(false);
+                    setTuitionLunch(false);
                   }}
-                  required
+                  onFocus={() => setTuitionStudentOpen(true)}
+                  placeholder="Type name or registration number..."
                   className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+
+                {tuitionStudentOpen && (
+                  <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+                    <div className="max-h-72 overflow-auto">
+                      {tuitionStudentSuggestions.length === 0 ? (
+                        <div className="p-3 text-sm text-gray-500">No matches.</div>
+                      ) : (
+                        tuitionStudentSuggestions.map((s) => (
+                          <button
+                            type="button"
+                            key={s.registration_id}
+                            onClick={() => selectStudentForTuition(s)}
+                            className="w-full text-left px-3 py-2 hover:bg-gray-50"
+                          >
+                            <div className="text-sm font-medium text-gray-900">
+                              {s.first_name} {s.last_name}
+                            </div>
+                            <div className="text-xs text-gray-500">{s.registration_id}</div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {!tuitionStudentId && tuitionStudentQuery.trim() && (
+                  <p className="text-xs text-amber-700 mt-2">Select a student from the list to continue.</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Current Grade *</label>
+                <select
+                  value={tuitionGradeId}
+                  onChange={(e) => setTuitionGradeId(e.target.value)}
+                  required
+                  disabled={!tuitionStudentId}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
                 >
-                  <option value="">Select student</option>
-                  {students.map((s) => (
-                    <option key={s.registration_id} value={s.registration_id}>
-                      {s.first_name} {s.last_name} — {s.registration_id}
+                  <option value="">Select grade</option>
+                  {grades.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.grade_name}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Current Grade *</label>
-                  <select
-                    value={tuitionGradeId}
-                    onChange={(e) => setTuitionGradeId(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Select grade</option>
-                    {grades.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.grade_name}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1">Fees must be configured for this grade.</p>
-                </div>
-
-                <div className="rounded-xl border border-gray-200 p-3 bg-gray-50">
-                  <div className="text-xs text-gray-500">Mapped Fee Row</div>
-                  <div className="text-sm font-semibold text-gray-900 mt-1">
-                    {tuitionGradeId && schoolFeeByGradeId.get(Number(tuitionGradeId))
-                      ? `assessment_schoolfees #${schoolFeeByGradeId.get(Number(tuitionGradeId))!.id}`
-                      : '—'}
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Total is calculated by your trigger based on extras.
-                  </div>
-                </div>
-              </div>
-
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <label className="flex items-center gap-2 p-3 rounded-xl border border-gray-200 hover:bg-gray-50 cursor-pointer">
-                  <input type="checkbox" checked={tuitionHostel} onChange={(e) => setTuitionHostel(e.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={tuitionHostel}
+                    onChange={(e) => setHostelWithRule(e.target.checked)}
+                    disabled={!tuitionStudentId}
+                  />
                   <span className="text-sm text-gray-700">Hostel</span>
                 </label>
 
-                <label className="flex items-center gap-2 p-3 rounded-xl border border-gray-200 hover:bg-gray-50 cursor-pointer">
+                <label
+                  className={`flex items-center gap-2 p-3 rounded-xl border border-gray-200 cursor-pointer ${
+                    tuitionHostel ? 'bg-gray-50 opacity-80' : 'hover:bg-gray-50'
+                  }`}
+                >
                   <input
                     type="checkbox"
                     checked={tuitionBreakfast}
                     onChange={(e) => setTuitionBreakfast(e.target.checked)}
+                    disabled={!tuitionStudentId || tuitionHostel}
                   />
                   <span className="text-sm text-gray-700">Breakfast</span>
                 </label>
 
-                <label className="flex items-center gap-2 p-3 rounded-xl border border-gray-200 hover:bg-gray-50 cursor-pointer">
-                  <input type="checkbox" checked={tuitionLunch} onChange={(e) => setTuitionLunch(e.target.checked)} />
+                <label
+                  className={`flex items-center gap-2 p-3 rounded-xl border border-gray-200 cursor-pointer ${
+                    tuitionHostel ? 'bg-gray-50 opacity-80' : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={tuitionLunch}
+                    onChange={(e) => setTuitionLunch(e.target.checked)}
+                    disabled={!tuitionStudentId || tuitionHostel}
+                  />
                   <span className="text-sm text-gray-700">Lunch</span>
                 </label>
               </div>
+
+              {tuitionHostel && (
+                <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-xl p-3">
+                  Hostel selected → Breakfast and Lunch are automatically included.
+                </div>
+              )}
 
               <div className="flex justify-end gap-3 pt-2">
                 <button
@@ -1249,16 +1420,11 @@ export default function FinanceManagementPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={savingTuition}
+                  disabled={savingTuition || !tuitionStudentId}
                   className="px-4 py-2 text-sm bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50"
                 >
                   {savingTuition ? 'Saving…' : 'Save Tuition'}
                 </button>
-              </div>
-
-              <div className="text-xs text-gray-500 border-t border-gray-200 pt-3 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-gray-400" />
-                Non-admin edits may be restricted after 30 days (recommended to enforce with RLS/DB policy too).
               </div>
             </form>
           </div>
@@ -1272,7 +1438,7 @@ export default function FinanceManagementPage() {
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h3 className="text-lg font-semibold text-gray-900">Record Payment</h3>
-                <p className="text-sm text-gray-500">Creates a new fee_transaction row.</p>
+                <p className="text-sm text-gray-500">Adds a new fee_transaction row.</p>
               </div>
               <button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-gray-100 rounded-lg">
                 <X className="w-5 h-5 text-gray-500" />
@@ -1280,26 +1446,53 @@ export default function FinanceManagementPage() {
             </div>
 
             <form onSubmit={handleSavePayment} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="md:col-span-2">
+              <div ref={payProfileBoxRef as any} className="md:col-span-2 relative">
                 <label className="block text-sm font-medium text-gray-700 mb-2">Student Tuition Profile *</label>
-                <select
-                  value={payStudentTuitionId}
-                  onChange={(e) => setPayStudentTuitionId(e.target.value)}
-                  required
+
+                <input
+                  value={payProfileQuery}
+                  onChange={(e) => {
+                    setPayProfileQuery(e.target.value);
+                    setPayProfileOpen(true);
+                    setPayStudentTuitionId('');
+                  }}
+                  onFocus={() => setPayProfileOpen(true)}
+                  placeholder="Type student name, reg no, grade..."
                   className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
-                >
-                  <option value="">Select</option>
-                  {tuitionRows.map((t) => {
-                    const st = t.student;
-                    const name = st ? `${st.first_name} ${st.last_name}` : t.student_id;
-                    const g = st?.current_grade_id ? gradeNameById.get(st.current_grade_id) : undefined;
-                    return (
-                      <option key={t.id} value={t.id}>
-                        {name} — {t.student_id} {g ? `(${g})` : ''}
-                      </option>
-                    );
-                  })}
-                </select>
+                  required
+                />
+
+                {payProfileOpen && (
+                  <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+                    <div className="max-h-72 overflow-auto">
+                      {payProfileSuggestions.length === 0 ? (
+                        <div className="p-3 text-sm text-gray-500">No matches.</div>
+                      ) : (
+                        payProfileSuggestions.map((t) => {
+                          const st = t.student;
+                          const name = st ? `${st.first_name ?? ''} ${st.last_name ?? ''}`.trim() : t.student_id;
+                          const g = st?.current_grade_id ? gradeNameById.get(st.current_grade_id) : undefined;
+
+                          return (
+                            <button
+                              type="button"
+                              key={t.id}
+                              onClick={() => selectPayProfile(t)}
+                              className="w-full text-left px-3 py-2 hover:bg-gray-50"
+                            >
+                              <div className="text-sm font-medium text-gray-900">
+                                {name} {g ? <span className="text-xs text-gray-500">({g})</span> : null}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {t.student_id} • Profile #{t.id}
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1377,7 +1570,6 @@ export default function FinanceManagementPage() {
                     className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500"
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Must be unique if provided.</p>
               </div>
 
               <div className="md:col-span-2">
@@ -1400,16 +1592,11 @@ export default function FinanceManagementPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={savingPayment}
+                  disabled={savingPayment || !payStudentTuitionId}
                   className="px-4 py-2 text-sm bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50"
                 >
                   {savingPayment ? 'Saving…' : 'Record Payment'}
                 </button>
-              </div>
-
-              <div className="md:col-span-2 text-xs text-gray-500 border-t border-gray-200 pt-3 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-gray-400" />
-                This inserts a new transaction row; status/balance logic can be handled by your DB trigger.
               </div>
             </form>
           </div>

@@ -4,7 +4,7 @@ import React, { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
-import Sidebar from '@/components/Sidebar';
+import AppShell from '@/components/AppShell';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -1100,7 +1100,7 @@ export default function StudentProfileClient() {
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
         <Navbar userEmail={userEmail} userName={userName} />
         <div className="flex flex-1">
-          <Sidebar />
+          <AppShell />
           <main className="flex-1 flex items-center justify-center p-4">
             <div className="max-w-md w-full bg-white rounded-xl border border-gray-200 p-6 text-center shadow-sm">
               <div className="h-12 w-12 mx-auto rounded-xl bg-gradient-to-br from-blue-600 to-orange-500 flex items-center justify-center text-white font-bold mb-4">
@@ -1132,7 +1132,7 @@ export default function StudentProfileClient() {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
       <Navbar userEmail={userEmail} userName={userName} />
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
+        <AppShell />
         <main className="flex-1 flex flex-col overflow-hidden">
           {/* Header */}
           <div className="p-6 border-b border-gray-200 bg-white">

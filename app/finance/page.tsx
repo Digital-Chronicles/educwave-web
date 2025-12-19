@@ -4,25 +4,20 @@ import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
-import Sidebar from '@/components/Sidebar';
+import AppShell from '@/components/AppShell';
 import {
-  Wallet,
-  BarChart3,
-  School,
-  GraduationCap,
-  Receipt,
-  Layers,
-  Plus,
   Search,
+  Plus,
   RefreshCw,
+  Wallet,
+  Receipt,
+  GraduationCap,
   AlertTriangle,
-  CheckCircle2,
-  Settings2,
+  TrendingUp,
   ArrowRight,
   X,
-  TrendingUp,
-  Building2,
   ClipboardList,
+  BarChart3,
 } from 'lucide-react';
 
 type AppRole = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
@@ -32,7 +27,7 @@ type FeeTerm = 'T1' | 'T2' | 'T3';
 type FeeStatus = 'pending' | 'partial' | 'paid' | 'overdue';
 type PaymentMethod = 'cash' | 'card' | 'online_transfer' | 'mobile_money' | 'bank';
 
-// ⚠️ Adjust these to match your exact Postgres enum values in public.other_fee_type
+// Adjust if your enum names differ
 type OtherFeeType =
   | 'development'
   | 'sports'
@@ -61,6 +56,11 @@ interface GradeRow {
   grade_name: string;
 }
 
+/**
+ * assessment_schoolfees:
+ * ✅ do NOT select created_at/updated_at because they don't exist in your schema.
+ * You can keep created_by if you want, but UI doesn't need it here.
+ */
 interface SchoolFeesRow {
   id: number;
   grade_id: number;
@@ -70,11 +70,13 @@ interface SchoolFeesRow {
   breakfastfee: number;
   lunchfee: number;
   description: string;
-  created: string;
-  updated: string;
+  created_by?: string | null;
   grade?: { id: number; grade_name: string } | null;
 }
 
+/**
+ * other_school_payments has created/updated (DATE)
+ */
 interface OtherFeesRow {
   id: number;
   grade_id: number;
@@ -83,11 +85,14 @@ interface OtherFeesRow {
   amount: number;
   description: string;
   unique_code: string | null;
-  created: string;
-  updated: string;
+  created: string; // DATE
+  updated: string; // DATE
   grade?: { id: number; grade_name: string } | null;
 }
 
+/**
+ * student_tuition_description uses created_at/updated_at (timestamp)
+ */
 interface StudentTuitionRow {
   id: number;
   student_id: string;
@@ -97,14 +102,25 @@ interface StudentTuitionRow {
   lunch: boolean;
   breakfast: boolean;
   total_fee: number;
+  created_at: string;
+  updated_at: string;
+
   tuition?: {
     id: number;
     grade_id: number;
     grade?: { id: number; grade_name: string } | null;
   } | null;
-  student?: { registration_id: string; first_name: string; last_name: string } | null;
+
+  student?: {
+    registration_id: string;
+    first_name: string;
+    last_name: string;
+  } | null;
 }
 
+/**
+ * fee_transaction has created/updated (DATE)
+ */
 interface FeeTransactionRow {
   id: number;
   student_tuition_id: number;
@@ -127,8 +143,8 @@ interface FeeTransactionRow {
   receipt_url: string | null;
   remarks: string | null;
 
-  created: string;
-  updated: string;
+  created: string; // DATE
+  updated: string; // DATE
 
   grade?: { id: number; grade_name: string } | null;
 
@@ -141,10 +157,14 @@ interface FeeTransactionRow {
   } | null;
 }
 
-function toMoney(n: any) {
-  const v = Number(n ?? 0);
-  if (Number.isNaN(v)) return '0.00';
-  return v.toFixed(2);
+function safeNum(v: any) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function money(n: any) {
+  const v = safeNum(n);
+  return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
 function supaErrText(err: any) {
@@ -161,24 +181,24 @@ function supaErrText(err: any) {
 export default function FinancePage() {
   const router = useRouter();
 
-  // -----------------------------
-  // State (ALL hooks at top level)
-  // -----------------------------
+  // Auth/scope
   const [authChecking, setAuthChecking] = useState(true);
   const [loading, setLoading] = useState(true);
-
   const [userEmail, setUserEmail] = useState<string | null>(null);
+
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [school, setSchool] = useState<SchoolRow | null>(null);
 
-  const [activeTab, setActiveTab] = useState<TabKey>('overview');
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
+  // Data
   const [grades, setGrades] = useState<GradeRow[]>([]);
   const [schoolFees, setSchoolFees] = useState<SchoolFeesRow[]>([]);
   const [otherFees, setOtherFees] = useState<OtherFeesRow[]>([]);
   const [tuitionRows, setTuitionRows] = useState<StudentTuitionRow[]>([]);
   const [transactions, setTransactions] = useState<FeeTransactionRow[]>([]);
+
+  // UI
+  const [activeTab, setActiveTab] = useState<TabKey>('overview');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Filters
   const [q, setQ] = useState('');
@@ -205,30 +225,38 @@ export default function FinancePage() {
   const [otherCode, setOtherCode] = useState('');
   const [savingOtherFee, setSavingOtherFee] = useState(false);
 
-  // -----------------------------
-  // Derived
-  // -----------------------------
-  const totals = useMemo(() => {
-    const totalStudentsWithTuition = new Set(tuitionRows.map((t) => t.student_id)).size;
+  const schoolId = school?.id ?? null;
 
-    const paid = transactions.reduce((s, t) => s + Number(t.amount_paid ?? 0), 0);
-    const due = transactions.reduce((s, t) => s + Number(t.amount_due ?? 0), 0);
-    const balance = Math.max(due - paid, 0);
+  // ----------------------------------------------------
+  // Derived totals (✅ correct Outstanding)
+  // Due = sum(student_tuition_description.total_fee)
+  // Paid = sum(fee_transaction.amount_paid)
+  // Outstanding = Due - Paid
+  // ----------------------------------------------------
+  const totals = useMemo(() => {
+    const due = tuitionRows.reduce((s, t) => s + safeNum(t.total_fee), 0);
+    const paid = transactions.reduce((s, t) => s + safeNum(t.amount_paid), 0);
+    const balance = due - paid;
 
     const paidPct = due > 0 ? Math.min((paid / due) * 100, 100) : 0;
 
+    const studentsWithTuition = new Set(tuitionRows.map((t) => t.student_id)).size;
+
     return {
-      totalStudentsWithTuition,
-      totalFeesDefined: schoolFees.length,
-      totalOtherFees: otherFees.length,
-      paid,
       due,
+      paid,
       balance,
       paidPct,
       txCount: transactions.length,
+      studentsWithTuition,
+      totalFeesDefined: schoolFees.length,
+      totalOtherFees: otherFees.length,
     };
-  }, [tuitionRows, schoolFees, otherFees, transactions]);
+  }, [tuitionRows, transactions, schoolFees, otherFees]);
 
+  // ----------------------------------------------------
+  // Filtering helpers
+  // ----------------------------------------------------
   const filteredSchoolFees = useMemo(() => {
     const query = q.trim().toLowerCase();
     return schoolFees.filter((r) => {
@@ -269,7 +297,7 @@ export default function FinancePage() {
   const filteredTransactions = useMemo(() => {
     const query = q.trim().toLowerCase();
     return transactions.filter((t) => {
-      const gOk = selectedGradeId ? Number(selectedGradeId) === Number(t.grade_id ?? 0) : true;
+      const gOk = selectedGradeId ? String(t.grade_id ?? '') === selectedGradeId : true;
       const stu = t.student_tuition?.student;
       const name = `${stu?.first_name ?? ''} ${stu?.last_name ?? ''}`.toLowerCase();
       const searchOk =
@@ -282,9 +310,9 @@ export default function FinancePage() {
     });
   }, [transactions, q, selectedGradeId]);
 
-  // -----------------------------
+  // ----------------------------------------------------
   // Auth check
-  // -----------------------------
+  // ----------------------------------------------------
   useEffect(() => {
     const run = async () => {
       const { data } = await supabase.auth.getSession();
@@ -298,9 +326,9 @@ export default function FinancePage() {
     run();
   }, [router]);
 
-  // -----------------------------
-  // Load (scoped to the user’s school)
-  // -----------------------------
+  // ----------------------------------------------------
+  // Load (school scoped)
+  // ----------------------------------------------------
   useEffect(() => {
     if (authChecking) return;
 
@@ -329,7 +357,6 @@ export default function FinancePage() {
         const prof = p as ProfileRow;
         setProfile(prof);
 
-        // If no school assigned
         if (!prof.school_id) {
           setSchool(null);
           setGrades([]);
@@ -349,21 +376,21 @@ export default function FinancePage() {
 
         if (sErr) throw sErr;
         if (!s) throw new Error('School not found.');
-        const schoolData = s as SchoolRow;
-        setSchool(schoolData);
+        const schoolRow = s as SchoolRow;
+        setSchool(schoolRow);
 
         // Grades
         const { data: gradeRows, error: gradeErr } = await supabase
           .from('class')
           .select('id, grade_name')
-          .eq('school_id', schoolData.id)
+          .eq('school_id', schoolRow.id)
           .order('grade_name');
 
         if (gradeErr) throw gradeErr;
         setGrades((gradeRows ?? []) as GradeRow[]);
 
-        // School fees
-        const { data: feesRows, error: feesErr } = await supabase
+        // assessment_schoolfees (NO created_at/updated_at)
+        const { data: feeRows, error: feeErr } = await supabase
           .from('assessment_schoolfees')
           .select(
             `
@@ -375,18 +402,17 @@ export default function FinancePage() {
             lunchfee,
             description,
             school_id,
-            created,
-            updated,
+            created_by,
             grade:class ( id, grade_name )
           `
           )
-          .eq('school_id', schoolData.id)
+          .eq('school_id', schoolRow.id)
           .order('grade_id');
 
-        if (feesErr) throw feesErr;
-        setSchoolFees((feesRows ?? []) as unknown as SchoolFeesRow[]);
+        if (feeErr) throw feeErr;
+        setSchoolFees((feeRows ?? []) as unknown as SchoolFeesRow[]);
 
-        // Other fees
+        // other_school_payments (created/updated)
         const { data: otherRows, error: otherErr } = await supabase
           .from('other_school_payments')
           .select(
@@ -403,13 +429,13 @@ export default function FinancePage() {
             grade:class ( id, grade_name )
           `
           )
-          .eq('school_id', schoolData.id)
+          .eq('school_id', schoolRow.id)
           .order('grade_id');
 
         if (otherErr) throw otherErr;
         setOtherFees((otherRows ?? []) as unknown as OtherFeesRow[]);
 
-        // Tuition descriptions
+        // student_tuition_description (created_at/updated_at)
         const { data: tuition, error: tuitionErr } = await supabase
           .from('student_tuition_description')
           .select(
@@ -422,6 +448,8 @@ export default function FinancePage() {
             breakfast,
             total_fee,
             school_id,
+            created_at,
+            updated_at,
             tuition:assessment_schoolfees (
               id,
               grade_id,
@@ -430,12 +458,12 @@ export default function FinancePage() {
             student:students ( registration_id, first_name, last_name )
           `
           )
-          .eq('school_id', schoolData.id);
+          .eq('school_id', schoolRow.id);
 
         if (tuitionErr) throw tuitionErr;
         setTuitionRows((tuition ?? []) as unknown as StudentTuitionRow[]);
 
-        // Transactions
+        // fee_transaction (created/updated)
         const { data: txRows, error: txErr } = await supabase
           .from('fee_transaction')
           .select(
@@ -470,7 +498,7 @@ export default function FinancePage() {
             )
           `
           )
-          .eq('school_id', schoolData.id)
+          .eq('school_id', schoolRow.id)
           .order('id', { ascending: false });
 
         if (txErr) throw txErr;
@@ -485,21 +513,13 @@ export default function FinancePage() {
     load();
   }, [authChecking, router]);
 
-  // -----------------------------
-  // UI gating
-  // -----------------------------
-  const showLoading = authChecking || loading;
-  const showNoSchool = !showLoading && !!profile && !profile.school_id;
-  const canRenderApp = !showLoading && !!profile?.school_id && !!school;
-
-  const schoolId = school?.id ?? null;
-
-  // -----------------------------
-  // Mutations
-  // -----------------------------
+  // ----------------------------------------------------
+  // Reload helpers
+  // ----------------------------------------------------
   const reloadSchoolFees = async () => {
     if (!schoolId) return;
-    const { data: feesRows, error: feesErr } = await supabase
+
+    const { data, error } = await supabase
       .from('assessment_schoolfees')
       .select(
         `
@@ -511,20 +531,21 @@ export default function FinancePage() {
         lunchfee,
         description,
         school_id,
-        created,
-        updated,
+        created_by,
         grade:class ( id, grade_name )
       `
       )
       .eq('school_id', schoolId)
       .order('grade_id');
-    if (feesErr) throw feesErr;
-    setSchoolFees((feesRows ?? []) as unknown as SchoolFeesRow[]);
+
+    if (error) throw error;
+    setSchoolFees((data ?? []) as unknown as SchoolFeesRow[]);
   };
 
   const reloadOtherFees = async () => {
     if (!schoolId) return;
-    const { data: otherRows, error: otherErr } = await supabase
+
+    const { data, error } = await supabase
       .from('other_school_payments')
       .select(
         `
@@ -542,10 +563,14 @@ export default function FinancePage() {
       )
       .eq('school_id', schoolId)
       .order('grade_id');
-    if (otherErr) throw otherErr;
-    setOtherFees((otherRows ?? []) as unknown as OtherFeesRow[]);
+
+    if (error) throw error;
+    setOtherFees((data ?? []) as unknown as OtherFeesRow[]);
   };
 
+  // ----------------------------------------------------
+  // Create/Update fees
+  // ----------------------------------------------------
   const handleSaveSchoolFee = async (e: FormEvent) => {
     e.preventDefault();
     if (!profile || !schoolId) return;
@@ -559,28 +584,24 @@ export default function FinancePage() {
       const payload = {
         grade_id: Number(feeGradeId),
         school_id: schoolId,
-        tuitionfee: Number(feeTuition || 0),
-        hostelfee: Number(feeHostel || 0),
-        breakfastfee: Number(feeBreakfast || 0),
-        lunchfee: Number(feeLunch || 0),
+        tuitionfee: safeNum(feeTuition),
+        hostelfee: safeNum(feeHostel),
+        breakfastfee: safeNum(feeBreakfast),
+        lunchfee: safeNum(feeLunch),
         description: feeDesc?.trim() || 'No Description ...',
         created_by: profile.user_id,
       };
 
-      /**
-       * IMPORTANT:
-       * Your table has UNIQUE(grade_id) ONLY.
-       * So onConflict must be "grade_id" (not school_id,grade_id).
-       */
+      // If your constraint is school_id + grade_id unique, use that:
       const { error } = await supabase
         .from('assessment_schoolfees')
-        .upsert(payload, { onConflict: 'grade_id' });
+        .upsert(payload, { onConflict: 'school_id,grade_id' });
 
       if (error) throw error;
 
       await reloadSchoolFees();
-
       setShowSchoolFeeModal(false);
+
       setFeeGradeId('');
       setFeeTuition('0');
       setFeeHostel('0');
@@ -609,25 +630,21 @@ export default function FinancePage() {
         grade_id: Number(otherGradeId),
         school_id: schoolId,
         fees_type: otherType,
-        amount: Number(otherAmount || 0),
+        amount: safeNum(otherAmount),
         description: otherDesc?.trim() || 'No Description ...',
         unique_code: otherCode?.trim() || null,
         created_by: profile.user_id,
       };
 
-      /**
-       * Your table has UNIQUE(grade_id, fees_type).
-       * So onConflict must be "grade_id,fees_type".
-       */
       const { error } = await supabase
         .from('other_school_payments')
-        .upsert(payload, { onConflict: 'grade_id,fees_type' });
+        .upsert(payload, { onConflict: 'school_id,grade_id,fees_type' });
 
       if (error) throw error;
 
       await reloadOtherFees();
-
       setShowOtherFeeModal(false);
+
       setOtherGradeId('');
       setOtherType('development');
       setOtherAmount('0');
@@ -640,9 +657,9 @@ export default function FinancePage() {
     }
   };
 
-  // -----------------------------
+  // ----------------------------------------------------
   // UI components
-  // -----------------------------
+  // ----------------------------------------------------
   const TabButton = ({ k, label }: { k: TabKey; label: string }) => (
     <button
       onClick={() => setActiveTab(k)}
@@ -699,7 +716,6 @@ export default function FinancePage() {
         <button
           onClick={() => router.push('/finance/management')}
           className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
-          title="Finance management"
         >
           <ClipboardList className="w-4 h-4" />
           Finance Management
@@ -709,7 +725,6 @@ export default function FinancePage() {
         <button
           onClick={() => router.push('/finance/stats')}
           className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-          title="Finance stats"
         >
           <TrendingUp className="w-4 h-4" />
           Finance Stats
@@ -719,9 +734,13 @@ export default function FinancePage() {
     </div>
   );
 
-  // -----------------------------
-  // Render branches
-  // -----------------------------
+  // ----------------------------------------------------
+  // Guards
+  // ----------------------------------------------------
+  const showLoading = authChecking || loading;
+  const showNoSchool = !showLoading && !!profile && !profile.school_id;
+  const canRenderApp = !showLoading && !!profile?.school_id && !!school;
+
   if (showLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -738,11 +757,11 @@ export default function FinancePage() {
       <div className="min-h-screen bg-gray-50">
         <Navbar userEmail={userEmail} />
         <div className="flex">
-          <Sidebar />
+          <AppShell />
           <main className="flex-1 p-6">
             <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <School className="w-8 h-8 text-blue-600" />
+                <Wallet className="w-8 h-8 text-blue-600" />
               </div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">School Configuration Required</h3>
               <p className="text-gray-600 mb-6">
@@ -777,7 +796,7 @@ export default function FinancePage() {
       <div className="min-h-screen bg-gray-50">
         <Navbar userEmail={userEmail} />
         <div className="flex">
-          <Sidebar />
+          <AppShell />
           <main className="flex-1 p-6">
             <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
               <p className="text-sm text-gray-600">Unable to render finance page.</p>
@@ -789,12 +808,11 @@ export default function FinancePage() {
     );
   }
 
-  // -----------------------------
-  // Screen sections
-  // -----------------------------
+  // ----------------------------------------------------
+  // Sections
+  // ----------------------------------------------------
   const renderOverview = () => (
     <div className="space-y-6">
-      {/* Hero / Summary */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="p-6 bg-gradient-to-r from-blue-50 to-white">
           <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -806,7 +824,7 @@ export default function FinancePage() {
                 <div className="text-xs font-medium text-gray-500">Finance Overview</div>
                 <h2 className="text-xl font-bold text-gray-900">{school?.school_name}</h2>
                 <p className="text-sm text-gray-600">
-                  Track collections, balances, and fee setup — scoped to your school only.
+                  Outstanding = Tuition Profiles Total ({money(totals.due)}) − Total Paid ({money(totals.paid)})
                 </p>
               </div>
             </div>
@@ -816,7 +834,7 @@ export default function FinancePage() {
                 onClick={() => router.push('/finance/management')}
                 className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-xl hover:bg-gray-50"
               >
-                <Building2 className="w-4 h-4" />
+                <ClipboardList className="w-4 h-4" />
                 Manage
                 <ArrowRight className="w-4 h-4" />
               </button>
@@ -852,7 +870,7 @@ export default function FinancePage() {
                   <Receipt className="w-4 h-4 text-green-600" />
                 </div>
               </div>
-              <div className="mt-2 text-xl font-bold text-gray-900">{toMoney(totals.paid)}</div>
+              <div className="mt-2 text-xl font-bold text-gray-900">{money(totals.paid)}</div>
               <div className="text-xs text-gray-500">{totals.txCount} transactions</div>
             </div>
 
@@ -863,8 +881,8 @@ export default function FinancePage() {
                   <Wallet className="w-4 h-4 text-blue-600" />
                 </div>
               </div>
-              <div className="mt-2 text-xl font-bold text-gray-900">{toMoney(totals.due)}</div>
-              <div className="text-xs text-gray-500">Expected collections</div>
+              <div className="mt-2 text-xl font-bold text-gray-900">{money(totals.due)}</div>
+              <div className="text-xs text-gray-500">Sum of tuition profile totals</div>
             </div>
 
             <div className="rounded-xl border border-gray-200 p-4 bg-white">
@@ -874,8 +892,8 @@ export default function FinancePage() {
                   <AlertTriangle className="w-4 h-4 text-amber-600" />
                 </div>
               </div>
-              <div className="mt-2 text-xl font-bold text-gray-900">{toMoney(totals.balance)}</div>
-              <div className="text-xs text-gray-500">Due - Paid</div>
+              <div className="mt-2 text-xl font-bold text-gray-900">{money(totals.balance)}</div>
+              <div className="text-xs text-gray-500">Due − Paid</div>
             </div>
 
             <div className="rounded-xl border border-gray-200 p-4 bg-white">
@@ -885,14 +903,13 @@ export default function FinancePage() {
                   <GraduationCap className="w-4 h-4 text-purple-600" />
                 </div>
               </div>
-              <div className="mt-2 text-xl font-bold text-gray-900">{totals.totalStudentsWithTuition}</div>
+              <div className="mt-2 text-xl font-bold text-gray-900">{totals.studentsWithTuition}</div>
               <div className="text-xs text-gray-500">Fee profiles created</div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Recent tx */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         <div className="p-5 border-b border-gray-200 flex items-center justify-between">
           <div>
@@ -913,9 +930,7 @@ export default function FinancePage() {
             <div className="space-y-3">
               {transactions.slice(0, 6).map((t) => {
                 const stu = t.student_tuition?.student;
-                const studentName = stu
-                  ? `${stu.first_name ?? ''} ${stu.last_name ?? ''}`.trim()
-                  : '—';
+                const studentName = stu ? `${stu.first_name ?? ''} ${stu.last_name ?? ''}`.trim() : '—';
 
                 return (
                   <div
@@ -929,8 +944,8 @@ export default function FinancePage() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-sm font-semibold text-gray-900">{toMoney(t.amount_paid)}</div>
-                      <div className="text-xs text-gray-500">{t.created}</div>
+                      <div className="text-sm font-semibold text-gray-900">{money(t.amount_paid)}</div>
+                      <div className="text-xs text-gray-500">{t.created ?? '—'}</div>
                     </div>
                   </div>
                 );
@@ -979,10 +994,10 @@ export default function FinancePage() {
               {filteredSchoolFees.map((r) => (
                 <tr key={r.id} className="hover:bg-gray-50">
                   <td className="py-4 px-4 font-medium text-gray-900">{r.grade?.grade_name ?? r.grade_id}</td>
-                  <td className="py-4 px-4 text-sm text-gray-900">{toMoney(r.tuitionfee)}</td>
-                  <td className="py-4 px-4 text-sm text-gray-900">{toMoney(r.hostelfee)}</td>
-                  <td className="py-4 px-4 text-sm text-gray-900">{toMoney(r.breakfastfee)}</td>
-                  <td className="py-4 px-4 text-sm text-gray-900">{toMoney(r.lunchfee)}</td>
+                  <td className="py-4 px-4 text-sm text-gray-900">{money(r.tuitionfee)}</td>
+                  <td className="py-4 px-4 text-sm text-gray-900">{money(r.hostelfee)}</td>
+                  <td className="py-4 px-4 text-sm text-gray-900">{money(r.breakfastfee)}</td>
+                  <td className="py-4 px-4 text-sm text-gray-900">{money(r.lunchfee)}</td>
                   <td className="py-4 px-4 text-sm text-gray-600">{r.description}</td>
                 </tr>
               ))}
@@ -995,11 +1010,6 @@ export default function FinancePage() {
               )}
             </tbody>
           </table>
-        </div>
-
-        <div className="p-4 border-t border-gray-200 text-xs text-gray-500 flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-gray-400" />
-          Upsert key: <span className="font-medium">UNIQUE(grade_id)</span>
         </div>
       </div>
     </div>
@@ -1035,6 +1045,7 @@ export default function FinancePage() {
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Amount</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Unique Code</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Description</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Created</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -1042,25 +1053,21 @@ export default function FinancePage() {
                 <tr key={r.id} className="hover:bg-gray-50">
                   <td className="py-4 px-4 font-medium text-gray-900">{r.grade?.grade_name ?? r.grade_id}</td>
                   <td className="py-4 px-4 text-sm text-gray-900">{r.fees_type}</td>
-                  <td className="py-4 px-4 text-sm text-gray-900">{Number(r.amount ?? 0)}</td>
+                  <td className="py-4 px-4 text-sm text-gray-900">{money(r.amount)}</td>
                   <td className="py-4 px-4 text-sm text-gray-600">{r.unique_code ?? '—'}</td>
                   <td className="py-4 px-4 text-sm text-gray-600">{r.description}</td>
+                  <td className="py-4 px-4 text-sm text-gray-600">{r.created}</td>
                 </tr>
               ))}
               {filteredOtherFees.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-10 text-center text-sm text-gray-500">
+                  <td colSpan={6} className="py-10 text-center text-sm text-gray-500">
                     No other fees configured.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
-        </div>
-
-        <div className="p-4 border-t border-gray-200 text-xs text-gray-500 flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-gray-400" />
-          Upsert key: <span className="font-medium">UNIQUE(grade_id, fees_type)</span>
         </div>
       </div>
     </div>
@@ -1088,6 +1095,7 @@ export default function FinancePage() {
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Breakfast</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Lunch</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Total Fee</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Created</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -1104,13 +1112,14 @@ export default function FinancePage() {
                     <td className="py-4 px-4 text-sm">{r.hostel ? 'Yes' : 'No'}</td>
                     <td className="py-4 px-4 text-sm">{r.breakfast ? 'Yes' : 'No'}</td>
                     <td className="py-4 px-4 text-sm">{r.lunch ? 'Yes' : 'No'}</td>
-                    <td className="py-4 px-4 text-sm font-semibold text-gray-900">{toMoney(r.total_fee)}</td>
+                    <td className="py-4 px-4 text-sm font-semibold text-gray-900">{money(r.total_fee)}</td>
+                    <td className="py-4 px-4 text-sm text-gray-600">{r.created_at ? r.created_at : '—'}</td>
                   </tr>
                 );
               })}
               {filteredTuition.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-10 text-center text-sm text-gray-500">
+                  <td colSpan={7} className="py-10 text-center text-sm text-gray-500">
                     No tuition profiles found.
                   </td>
                 </tr>
@@ -1126,9 +1135,7 @@ export default function FinancePage() {
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-semibold text-gray-900">Fee Transactions</h3>
-        <p className="text-sm text-gray-500">
-          Payments & balances (students are joined via student_tuition_description).
-        </p>
+        <p className="text-sm text-gray-500">Payments & statuses.</p>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -1143,8 +1150,8 @@ export default function FinancePage() {
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Student</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Grade</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Paid</th>
-                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Due</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Status</th>
+                <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Method</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Ref</th>
                 <th className="text-left py-3 px-4 text-sm font-medium text-gray-700">Date</th>
               </tr>
@@ -1170,15 +1177,15 @@ export default function FinancePage() {
                       <div className="text-xs text-gray-500">{t.student_tuition?.student_id ?? '—'}</div>
                     </td>
                     <td className="py-4 px-4 text-sm text-gray-900">{t.grade?.grade_name ?? t.grade_id ?? '—'}</td>
-                    <td className="py-4 px-4 text-sm font-semibold text-gray-900">{toMoney(t.amount_paid)}</td>
-                    <td className="py-4 px-4 text-sm text-gray-900">{toMoney(t.amount_due)}</td>
+                    <td className="py-4 px-4 text-sm font-semibold text-gray-900">{money(t.amount_paid)}</td>
                     <td className="py-4 px-4">
                       <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${badge}`}>
                         {t.status}
                       </span>
                     </td>
+                    <td className="py-4 px-4 text-sm text-gray-600">{t.payment_method}</td>
                     <td className="py-4 px-4 text-sm text-gray-600">{t.payment_reference ?? '—'}</td>
-                    <td className="py-4 px-4 text-sm text-gray-600">{t.created}</td>
+                    <td className="py-4 px-4 text-sm text-gray-600">{t.created ?? '—'}</td>
                   </tr>
                 );
               })}
@@ -1193,27 +1200,24 @@ export default function FinancePage() {
           </table>
         </div>
 
-        <div className="p-4 border-t border-gray-200 text-xs text-gray-500 flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-gray-400" />
-          Students are joined via <span className="font-medium">student_tuition_description</span> (not directly).
+        <div className="p-4 border-t border-gray-200 text-xs text-gray-500">
+          Outstanding shown on Overview is computed from tuition profiles total_fee − sum(amount_paid).
         </div>
       </div>
     </div>
   );
 
-  // -----------------------------
+  // ----------------------------------------------------
   // Main render
-  // -----------------------------
+  // ----------------------------------------------------
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar userEmail={userEmail} />
-
       <div className="flex">
-        <Sidebar />
+        <AppShell />
 
         <main className="flex-1 p-6">
           <div className="max-w-7xl mx-auto">
-            {/* Header */}
             <div className="mb-8">
               <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
                 <div>
@@ -1221,7 +1225,25 @@ export default function FinancePage() {
                   <p className="text-gray-600">Fees setup and transactions for {school?.school_name}</p>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => router.push('/finance/management')}
+                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-xl hover:bg-gray-50"
+                  >
+                    <ClipboardList className="w-4 h-4" />
+                    Finance Management
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    onClick={() => router.push('/finance/stats')}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700"
+                  >
+                    <TrendingUp className="w-4 h-4" />
+                    Finance Stats
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+
                   <button
                     onClick={() => setShowSchoolFeeModal(true)}
                     className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-xl hover:bg-gray-50"
@@ -1229,6 +1251,7 @@ export default function FinancePage() {
                     <Plus className="w-4 h-4" />
                     School Fees
                   </button>
+
                   <button
                     onClick={() => setShowOtherFeeModal(true)}
                     className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700"
@@ -1239,7 +1262,6 @@ export default function FinancePage() {
                 </div>
               </div>
 
-              {/* Tabs */}
               <div className="flex items-center gap-1 border-b border-gray-200">
                 <TabButton k="overview" label="Overview" />
                 <TabButton k="schoolFees" label="School Fees" />
@@ -1249,14 +1271,12 @@ export default function FinancePage() {
               </div>
             </div>
 
-            {/* Error */}
             {errorMsg && (
               <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
                 <p className="text-sm text-red-600">{errorMsg}</p>
               </div>
             )}
 
-            {/* Content */}
             {activeTab === 'overview' && renderOverview()}
             {activeTab === 'schoolFees' && renderSchoolFees()}
             {activeTab === 'otherFees' && renderOtherFees()}
@@ -1297,7 +1317,6 @@ export default function FinancePage() {
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-gray-500 mt-1">Upsert uses UNIQUE(grade_id).</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1307,7 +1326,6 @@ export default function FinancePage() {
                     value={feeTuition}
                     onChange={(e) => setFeeTuition(e.target.value)}
                     type="number"
-                    step="0.01"
                     min="0"
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
@@ -1318,7 +1336,6 @@ export default function FinancePage() {
                     value={feeHostel}
                     onChange={(e) => setFeeHostel(e.target.value)}
                     type="number"
-                    step="0.01"
                     min="0"
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
@@ -1329,7 +1346,6 @@ export default function FinancePage() {
                     value={feeBreakfast}
                     onChange={(e) => setFeeBreakfast(e.target.value)}
                     type="number"
-                    step="0.01"
                     min="0"
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
@@ -1340,7 +1356,6 @@ export default function FinancePage() {
                     value={feeLunch}
                     onChange={(e) => setFeeLunch(e.target.value)}
                     type="number"
-                    step="0.01"
                     min="0"
                     className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
@@ -1408,7 +1423,6 @@ export default function FinancePage() {
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-gray-500 mt-1">Upsert uses UNIQUE(grade_id, fees_type).</p>
               </div>
 
               <div>

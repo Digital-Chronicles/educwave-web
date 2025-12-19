@@ -4,7 +4,7 @@ import React, { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
-import Sidebar from '@/components/Sidebar';
+import AppShell from '@/components/AppShell';
 import {
   ArrowLeft,
   BadgeCheck,
@@ -886,7 +886,7 @@ export default function TeacherDetailClient() {
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-orange-50 flex flex-col">
         <Navbar userEmail={userEmail} userName={userName} />
         <div className="flex flex-1">
-          <Sidebar />
+          <AppShell />
           <main className="flex-1 flex items-center justify-center p-6">
             <div className="max-w-lg w-full bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
               <div className="flex items-start gap-3">
@@ -925,7 +925,7 @@ export default function TeacherDetailClient() {
       <Navbar userEmail={userEmail} userName={userName} />
 
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
+        <AppShell />
 
         <main className="flex-1 flex flex-col overflow-hidden">
           {/* Toast */}

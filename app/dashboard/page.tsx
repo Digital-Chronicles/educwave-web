@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
-import Sidebar from '@/components/Sidebar';
+import AppShell from '@/components/AppShell';
 import {
   Users,
   GraduationCap,
@@ -291,7 +291,7 @@ export default function DashboardPage() {
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
         <Navbar userEmail={userEmail} userName={userName} />
         <div className="flex">
-          <Sidebar />
+          <AppShell />
           <main className="flex-1 p-6">
             <div className="max-w-3xl mx-auto bg-white rounded-2xl p-8 shadow-sm border border-gray-200">
               <h1 className="text-2xl font-bold text-gray-900">School setup required</h1>
@@ -335,7 +335,7 @@ export default function DashboardPage() {
       <Navbar userEmail={userEmail} userName={userName} />
 
       <div className="flex">
-        <Sidebar />
+        <AppShell />
 
         <main className="flex-1 p-6">
           {/* Header */}

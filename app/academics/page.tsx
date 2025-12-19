@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
-import Sidebar from '@/components/Sidebar';
+import AppShell from '@/components/AppShell';
 import {
   BookOpen,
   Calendar,
@@ -652,7 +652,7 @@ export default function AcademicsPage() {
       <div className="min-h-screen bg-gray-50">
         <Navbar />
         <div className="flex">
-          <Sidebar />
+          <AppShell />
           <main className="flex-1 p-6">
             <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center">
               <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -1273,7 +1273,7 @@ export default function AcademicsPage() {
     <div className="min-h-screen bg-gray-50">
       <Navbar />
       <div className="flex">
-        <Sidebar />
+        <AppShell />
         <main className="flex-1 p-6 lg:p-8">
           <div className="max-w-7xl mx-auto">
             {renderHeader()}

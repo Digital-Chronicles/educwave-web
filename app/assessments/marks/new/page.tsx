@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
-import Sidebar from '@/components/Sidebar';
+import AppShell from '@/components/AppShell';
 import {
   ArrowLeft,
   BookOpen,
@@ -530,7 +530,7 @@ export default function MarksEntryPage() {
       <div className="min-h-screen bg-gray-50">
         <Navbar userEmail={userEmail} />
         <div className="flex">
-          <Sidebar />
+          <AppShell />
           <main className="flex-1 p-6">
             <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -571,7 +571,7 @@ export default function MarksEntryPage() {
       <Navbar userEmail={userEmail} />
 
       <div className="flex">
-        <Sidebar />
+        <AppShell />
 
         <main className="flex-1 p-6">
           <div className="max-w-7xl mx-auto space-y-6">

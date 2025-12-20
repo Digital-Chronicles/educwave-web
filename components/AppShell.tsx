@@ -25,7 +25,7 @@ const navItems = [
   { href: '/students', label: 'Students', icon: Users },
   { href: '/teachers', label: 'Teachers', icon: GraduationCap },
   { href: '/academics', label: 'Academics', icon: BookOpen },
-  { href: '/academics/student-report', label: 'Reports', icon: FileChartLine },
+  { href: '/student-report', label: 'Reports', icon: FileChartLine },
   { href: '/assessments', label: 'Assessments', icon: FileText },
   { href: '/finance', label: 'Finance', icon: CreditCard },
   { href: '/settings', label: 'Settings', icon: Settings },

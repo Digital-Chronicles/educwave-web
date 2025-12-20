@@ -1137,7 +1137,15 @@ export default function AssessmentsPage() {
                     className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
                   >
                     <FileText className="w-4 h-4" />
-                    Enter Marks
+                    Enter Question Marks Scores
+                  </Link>
+
+                  <Link
+                    href="/assessments/percentage-entry/"
+                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
+                  >
+                    <FileText className="w-4 h-4" />
+                    Enter Percentage Scores
                   </Link>
 
                   <Link

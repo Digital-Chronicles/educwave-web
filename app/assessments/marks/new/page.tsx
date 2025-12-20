@@ -11,11 +11,13 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  Download,
   FileText,
   Filter,
   Loader2,
   Save,
   Search,
+  Upload,
   Users,
   XCircle,
 } from 'lucide-react';
@@ -35,28 +37,31 @@ interface SchoolRow {
   school_name: string;
 }
 
-interface GradeRow {
+interface ClassRow {
   id: number;
-  grade_name: string;
+  grade_name: string; // ✅ your schema
 }
 
 interface SubjectRow {
   id: number;
   name: string;
-  grade_id: number | null;
-  grade?: { grade_name: string } | null;
+  grade_id: number | null; // ✅ your schema
 }
 
-interface TermExamRow {
+interface TermExamSessionRow {
   id: number;
   term_name: 'TERM_1' | 'TERM_2' | 'TERM_3';
   year: number;
+  start_date: string;
+  end_date: string;
 }
 
 interface ExamSessionRow {
   id: number;
   term_id: number;
   exam_type: 'BOT' | 'MOT' | 'EOT';
+  start_date: string;
+  end_date: string;
   term?: { term_name: string; year: number } | null;
 }
 
@@ -77,6 +82,59 @@ interface QuestionRow {
 
 type MarksMap = Record<string, Record<number, number | ''>>;
 
+/** CSV helpers */
+function parseCSVLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (ch === ',' && !inQuotes) {
+      out.push(cur.trim());
+      cur = '';
+      continue;
+    }
+
+    cur += ch;
+  }
+
+  out.push(cur.trim());
+  return out;
+}
+
+function parseCSV(text: string): { headers: string[]; rows: Record<string, string>[] } {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  if (lines.length < 2) return { headers: [], rows: [] };
+
+  const headers = parseCSVLine(lines[0]).map((h) => h.replace(/^\uFEFF/, '').trim());
+  const rows: Record<string, string>[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCSVLine(lines[i]);
+    const row: Record<string, string> = {};
+    for (let j = 0; j < headers.length; j++) row[headers[j]] = (cols[j] ?? '').trim();
+    rows.push(row);
+  }
+
+  return { headers, rows };
+}
+
 export default function MarksEntryPage() {
   const router = useRouter();
 
@@ -90,28 +148,29 @@ export default function MarksEntryPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Base data
-  const [grades, setGrades] = useState<GradeRow[]>([]);
+  const [classes, setClasses] = useState<ClassRow[]>([]);
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
-  const [termExams, setTermExams] = useState<TermExamRow[]>([]);
+  const [termSessions, setTermSessions] = useState<TermExamSessionRow[]>([]);
   const [examSessions, setExamSessions] = useState<ExamSessionRow[]>([]);
 
-  // Grid data
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [marks, setMarks] = useState<MarksMap>({});
   const [saving, setSaving] = useState(false);
 
-  // Filters
   const [termExamId, setTermExamId] = useState('');
   const [examSessionId, setExamSessionId] = useState('');
-  const [gradeId, setGradeId] = useState('');
+  const [classId, setClassId] = useState('');
   const [subjectId, setSubjectId] = useState('');
   const [studentSearch, setStudentSearch] = useState('');
 
-  // 1️⃣ Auth check
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [importErrs, setImportErrs] = useState<string[]>([]);
+
+  // Auth check
   useEffect(() => {
-    const run = async () => {
+    (async () => {
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -123,12 +182,10 @@ export default function MarksEntryPage() {
 
       setUserEmail(session.user.email ?? null);
       setAuthChecking(false);
-    };
-
-    run();
+    })();
   }, [router]);
 
-  // 2️⃣ Load profile + base data
+  // Load profile + school + base lists
   useEffect(() => {
     if (authChecking) return;
 
@@ -147,7 +204,6 @@ export default function MarksEntryPage() {
         setLoading(false);
         return;
       }
-
       if (!user) {
         setErrorMsg('Could not find authenticated user.');
         setLoading(false);
@@ -165,113 +221,80 @@ export default function MarksEntryPage() {
         setLoading(false);
         return;
       }
+      setProfile(p as ProfileRow);
 
-      const prof = p as ProfileRow;
-      setProfile(prof);
-
-      if (!prof.school_id) {
-        setSchool(null);
+      if (!p.school_id) {
         setLoading(false);
         return;
       }
 
-      const { data: s, error: sErr } = await supabase
+      const { data: sch, error: sErr } = await supabase
         .from('general_information')
         .select('id, school_name')
-        .eq('id', prof.school_id)
+        .eq('id', p.school_id)
         .single();
 
-      if (sErr || !s) {
-        setErrorMsg(sErr?.message || 'Failed to load your school information.');
+      if (sErr || !sch) {
+        setErrorMsg(sErr?.message || 'School not found in general_information.');
         setLoading(false);
         return;
       }
+      setSchool(sch as SchoolRow);
 
-      const schoolData = s as SchoolRow;
-      setSchool(schoolData);
+      const [classRes, subjRes, termRes, sessionRes] = await Promise.all([
+        // ✅ class.grade_name
+        supabase.from('class').select('id, grade_name').eq('school_id', sch.id).order('id'),
 
-      try {
-        const { data: gradeRows, error: gradesError } = await supabase
-          .from('class')
-          .select('id, grade_name')
-          .eq('school_id', schoolData.id)
-          .order('grade_name');
+        // ✅ subject.grade_id
+        supabase.from('subject').select('id, name, grade_id').eq('school_id', sch.id).order('name'),
 
-        if (gradesError) throw gradesError;
-        setGrades((gradeRows ?? []) as GradeRow[]);
-
-        const { data: subjectRows, error: subjectsError } = await supabase
-          .from('subject')
-          .select(
-            `
-            id,
-            name,
-            grade_id,
-            grade:class ( grade_name )
-          `
-          )
-          .eq('school_id', schoolData.id)
-          .order('name');
-
-        if (subjectsError) throw subjectsError;
-        setSubjects((subjectRows ?? []) as unknown as SubjectRow[]);
-
-        const { data: termRows, error: termError } = await supabase
+        supabase
           .from('term_exam_session')
-          .select('id, term_name, year')
-          .eq('school_id', schoolData.id)
-          .order('year', { ascending: false })
-          .order('term_name');
+          .select('id, term_name, year, start_date, end_date')
+          .eq('school_id', sch.id)
+          .order('id', { ascending: false }),
 
-        if (termError) throw termError;
-        setTermExams((termRows ?? []) as TermExamRow[]);
-
-        // exam_session has term_id FK to term_exam_session
-        const { data: examSessRows, error: examSessError } = await supabase
+        supabase
           .from('exam_session')
-          .select(
-            `
-            id,
-            term_id,
-            exam_type,
-            term:term_exam_session ( term_name, year )
-          `
-          )
-          .eq('school_id', schoolData.id)
-          .order('id', { ascending: false });
+          .select('id, term_id, exam_type, start_date, end_date, term:term_exam_session(term_name, year)')
+          .eq('school_id', sch.id)
+          .order('id', { ascending: false }),
+      ]);
 
-        if (examSessError) throw examSessError;
-        setExamSessions((examSessRows ?? []) as unknown as ExamSessionRow[]);
-      } catch (err: any) {
-        setErrorMsg(err.message || 'Failed to load base data.');
-      } finally {
-        setLoading(false);
-      }
+      if (classRes.error) setErrorMsg(classRes.error.message);
+      if (subjRes.error) setErrorMsg(subjRes.error.message);
+      if (termRes.error) setErrorMsg(termRes.error.message);
+      if (sessionRes.error) setErrorMsg(sessionRes.error.message);
+
+      setClasses((classRes.data ?? []) as ClassRow[]);
+      setSubjects((subjRes.data ?? []) as SubjectRow[]);
+      setTermSessions((termRes.data ?? []) as TermExamSessionRow[]);
+      setExamSessions((sessionRes.data ?? []) as ExamSessionRow[]);
+
+      setLoading(false);
     };
 
     loadBase();
   }, [authChecking]);
 
-  // Derived
-  const subjectsForGrade = useMemo(() => {
-    if (!gradeId) return subjects;
-    return subjects.filter((s) => s.grade_id === Number(gradeId));
-  }, [subjects, gradeId]);
-
   const selectedExamSession = useMemo(() => {
     if (!examSessionId) return null;
-    return examSessions.find((x) => x.id === Number(examSessionId)) ?? null;
+    return examSessions.find((x) => Number(x.id) === Number(examSessionId)) ?? null;
   }, [examSessions, examSessionId]);
 
-  // We require term + exam session + grade + subject.
-  // Additionally, exam_session.term_id MUST match selected termExamId (to avoid mistakes)
   const canLoadGrid = useMemo(() => {
-    if (!school?.id || !termExamId || !examSessionId || !gradeId || !subjectId) return false;
+    if (!termExamId || !examSessionId || !classId || !subjectId) return false;
     if (!selectedExamSession) return false;
     return Number(termExamId) === Number(selectedExamSession.term_id);
-  }, [school?.id, termExamId, examSessionId, gradeId, subjectId, selectedExamSession]);
+  }, [termExamId, examSessionId, classId, subjectId, selectedExamSession]);
 
-  // 3️⃣ Load grid (students + questions)
+  // ✅ filter subjects by subject.grade_id
+  const subjectsForClass = useMemo(() => {
+    if (!classId) return subjects;
+    return subjects.filter((s) => Number(s.grade_id ?? 0) === Number(classId));
+  }, [subjects, classId]);
+
+  // Load grid
   useEffect(() => {
     if (!school?.id) return;
 
@@ -285,18 +308,19 @@ export default function MarksEntryPage() {
     const run = async () => {
       setErrorMsg(null);
       setSuccessMsg(null);
+      setImportMsg(null);
+      setImportErrs([]);
 
       try {
         const { data: studentRows, error: sErr } = await supabase
           .from('students')
           .select('registration_id, first_name, last_name, current_grade_id')
           .eq('school_id', school.id)
-          .eq('current_grade_id', Number(gradeId))
+          .eq('current_grade_id', Number(classId))
           .order('first_name');
 
         if (sErr) throw sErr;
 
-        // QUESTIONS are based on term_exam_id + exam_type_id (your assessment_question design)
         const { data: questionRows, error: qErr } = await supabase
           .from('assessment_question')
           .select(
@@ -309,7 +333,7 @@ export default function MarksEntryPage() {
           `
           )
           .eq('school_id', school.id)
-          .eq('grade_id', Number(gradeId))
+          .eq('grade_id', Number(classId))
           .eq('subject_id', Number(subjectId))
           .eq('term_exam_id', Number(termExamId))
           .eq('exam_type_id', Number(examSessionId))
@@ -323,7 +347,6 @@ export default function MarksEntryPage() {
         setStudents(st);
         setQuestions(qs);
 
-        // init marks map
         const initial: MarksMap = {};
         for (const s of st) {
           initial[s.registration_id] = {};
@@ -331,25 +354,23 @@ export default function MarksEntryPage() {
         }
         setMarks(initial);
 
-        // Prefill existing marks (edit mode)
         const { data: existing, error: exErr } = await supabase
           .from('assessment_examresult')
           .select('student_id, question_id, score')
           .eq('school_id', school.id)
           .eq('exam_session_id', Number(examSessionId))
-          .eq('grade_id', Number(gradeId))
+          .eq('grade_id', Number(classId))
           .eq('subject_id', Number(subjectId));
 
         if (exErr) throw exErr;
 
         if (existing?.length) {
           setMarks((prev) => {
-            // structuredClone is supported in modern browsers; fallback manual clone:
             const copy: MarksMap = {};
-            for (const sid of Object.keys(prev)) copy[sid] = { ...prev[sid] };
+            for (const sid of Object.keys(prev)) copy[sid] = { ...(prev[sid] || {}) };
 
             for (const r of existing as any[]) {
-              if (copy[r.student_id]?.[r.question_id] !== undefined) {
+              if (copy?.[r.student_id]?.[r.question_id] !== undefined) {
                 copy[r.student_id][r.question_id] = r.score ?? '';
               }
             }
@@ -357,12 +378,12 @@ export default function MarksEntryPage() {
           });
         }
       } catch (err: any) {
-        setErrorMsg(err.message || 'Failed to load marks grid.');
+        setErrorMsg(err?.message || 'Failed to load marks grid.');
       }
     };
 
     run();
-  }, [canLoadGrid, school?.id, termExamId, examSessionId, gradeId, subjectId]);
+  }, [canLoadGrid, school?.id, termExamId, examSessionId, classId, subjectId]);
 
   const filteredStudents = useMemo(() => {
     const q = studentSearch.trim().toLowerCase();
@@ -373,36 +394,7 @@ export default function MarksEntryPage() {
     });
   }, [students, studentSearch]);
 
-  // ✅ Totals alongside names
-  const perStudentTotals = useMemo(() => {
-    const totals: Record<string, { score: number; possible: number; percent: number }> = {};
-
-    for (const st of filteredStudents) {
-      let score = 0;
-      let possible = 0;
-
-      for (const q of questions) {
-        const v = marks?.[st.registration_id]?.[q.id];
-        const s = v === '' || v === undefined || v === null ? null : Number(v);
-        if (s !== null && Number.isFinite(s)) score += s;
-        possible += Number(q.max_score ?? 0);
-      }
-
-      const percent = possible > 0 ? (score / possible) * 100 : 0;
-      totals[st.registration_id] = {
-        score,
-        possible,
-        percent: Number(percent.toFixed(2)),
-      };
-    }
-
-    return totals;
-  }, [filteredStudents, questions, marks]);
-
-  const totalCells = useMemo(
-    () => filteredStudents.length * questions.length,
-    [filteredStudents.length, questions.length]
-  );
+  const totalCells = useMemo(() => filteredStudents.length * questions.length, [filteredStudents.length, questions.length]);
 
   const filledCells = useMemo(() => {
     let c = 0;
@@ -430,17 +422,15 @@ export default function MarksEntryPage() {
     if (!school?.id) return;
 
     if (!canLoadGrid) {
-      setErrorMsg('Select Term, Exam Session (matching term), Grade and Subject first.');
+      setErrorMsg('Select Term, Exam Session (matching term), Class and Subject first.');
       return;
     }
-
     if (questions.length === 0) {
       setErrorMsg('No questions found for the selected filters.');
       return;
     }
-
     if (filteredStudents.length === 0) {
-      setErrorMsg('No students found for that grade.');
+      setErrorMsg('No students found for that class.');
       return;
     }
 
@@ -458,7 +448,6 @@ export default function MarksEntryPage() {
 
           const max = Number(q.max_score ?? 0);
           const score = Number(v);
-
           if (Number.isNaN(score)) continue;
 
           if (score < 0 || score > max) {
@@ -470,10 +459,10 @@ export default function MarksEntryPage() {
           rows.push({
             student_id: st.registration_id,
             question_id: q.id,
-            grade_id: Number(gradeId),
+            grade_id: Number(classId),
             subject_id: Number(subjectId),
             topic_id: q.topic_id ?? null,
-            exam_session_id: Number(examSessionId), // ✅ correct column
+            exam_session_id: Number(examSessionId),
             score,
             max_possible: max,
             percentage: max > 0 ? Number(((score / max) * 100).toFixed(2)) : null,
@@ -488,31 +477,156 @@ export default function MarksEntryPage() {
         return;
       }
 
-      const { error } = await supabase
-        .from('assessment_examresult')
-        .upsert(rows, {
-          // ✅ must match UNIQUE constraint
-          onConflict: 'school_id,student_id,question_id,exam_session_id',
-        });
+      const { error } = await supabase.from('assessment_examresult').upsert(rows, {
+        onConflict: 'school_id,student_id,question_id,exam_session_id',
+      });
 
       if (error) throw error;
 
       setSuccessMsg(`Saved ${rows.length} marks successfully.`);
     } catch (err: any) {
-      const msg = err?.message || 'Failed to save marks.';
-      if (msg.toLowerCase().includes('onconflict') || msg.toLowerCase().includes('unique')) {
-        setErrorMsg(
-          'Upsert failed. Add this UNIQUE constraint: UNIQUE(school_id, student_id, question_id, exam_session_id).'
-        );
-      } else {
-        setErrorMsg(msg);
-      }
+      setErrorMsg(err?.message || 'Failed to save marks.');
     } finally {
       setSaving(false);
     }
   };
 
-  // Loading state
+  const downloadCSVTemplate = () => {
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setImportMsg(null);
+    setImportErrs([]);
+
+    if (!canLoadGrid || !questions.length) {
+      setErrorMsg('Load the grid first so we can generate the correct CSV template.');
+      return;
+    }
+
+    const qHeaders = questions.map((q) => `Q${q.question_number}`);
+    const headers = ['registration_id', ...qHeaders];
+    const sample = ['2019/PCS/001', ...questions.map(() => '')];
+
+    const csv = [headers.join(','), sample.join(',')].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'marks_import_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCSVImport = async (file: File) => {
+    if (!school?.id) return;
+
+    if (!canLoadGrid) {
+      setErrorMsg('Select Term, Exam Session (matching term), Class and Subject first.');
+      return;
+    }
+
+    if (!questions.length || !students.length) {
+      setErrorMsg('Load the grid first (students and questions) before importing.');
+      return;
+    }
+
+    setImporting(true);
+    setImportMsg(null);
+    setImportErrs([]);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    try {
+      const text = await file.text();
+      const { headers, rows } = parseCSV(text);
+
+      if (!headers.length) throw new Error('CSV has no headers or rows.');
+
+      const idHeader =
+        headers.find((h) => h.toLowerCase() === 'registration_id') ||
+        headers.find((h) => h.toLowerCase() === 'student_id');
+
+      if (!idHeader) throw new Error('CSV must include "registration_id" (or "student_id") column.');
+
+      const qMap = new Map<string, QuestionRow>();
+      for (const q of questions) qMap.set(`Q${String(q.question_number).trim()}`.toUpperCase(), q);
+
+      const studentSet = new Set(students.map((s) => s.registration_id));
+
+      let applied = 0;
+      let skipped = 0;
+      const errs: string[] = [];
+
+      setMarks((prev) => {
+        const next: MarksMap = {};
+        for (const sid of Object.keys(prev)) next[sid] = { ...(prev[sid] || {}) };
+
+        rows.forEach((r, idx) => {
+          const rowNo = idx + 2;
+          const studentId = (r[idHeader] ?? '').trim();
+
+          if (!studentId) {
+            skipped++;
+            errs.push(`Row ${rowNo}: Missing registration_id`);
+            return;
+          }
+
+          if (!studentSet.has(studentId)) {
+            skipped++;
+            errs.push(`Row ${rowNo}: Student not found in this class -> ${studentId}`);
+            return;
+          }
+
+          if (!next[studentId]) next[studentId] = {};
+
+          for (const h of headers) {
+            if (h === idHeader) continue;
+
+            const key = h.trim().toUpperCase();
+            const q = qMap.get(key);
+            if (!q) continue;
+
+            const raw = (r[h] ?? '').trim();
+            if (raw === '') continue;
+
+            const score = Number(raw);
+            if (!Number.isFinite(score)) {
+              skipped++;
+              errs.push(`Row ${rowNo}: ${h} invalid number "${raw}"`);
+              continue;
+            }
+
+            const max = Number(q.max_score ?? 0);
+            if (score < 0 || score > max) {
+              skipped++;
+              errs.push(`Row ${rowNo}: ${h} score ${score} out of range (0–${max})`);
+              continue;
+            }
+
+            next[studentId][q.id] = score;
+            applied++;
+          }
+        });
+
+        return next;
+      });
+
+      setImportErrs(errs);
+      setImportMsg(
+        `Import completed: applied ${applied} marks. ${
+          skipped ? `Skipped ${skipped} cells/rows (open details below).` : 'No errors.'
+        }`
+      );
+    } catch (e: any) {
+      setErrorMsg(e?.message || 'CSV import failed.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // Loading
   if (authChecking || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -536,29 +650,16 @@ export default function MarksEntryPage() {
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <FileText className="w-8 h-8 text-blue-600" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                School Configuration Required
-              </h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">School Configuration Required</h3>
               <p className="text-gray-600 mb-6">
-                Your account needs to be linked to a school before entering marks.
+                Your account needs to be linked to a school before you can enter marks.
               </p>
-
-              {errorMsg && (
-                <div className="mb-5 p-3 bg-red-50 border border-red-200 rounded-lg text-left">
-                  <p className="text-sm text-red-600">{errorMsg}</p>
-                </div>
-              )}
-
               <button
-                onClick={() => router.push('/settings')}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                onClick={() => router.push('/management/school-settings')}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
               >
-                Go to Settings
+                Configure School Settings
               </button>
-
-              <p className="mt-4 text-xs text-gray-500">
-                Signed in as <span className="font-medium">{userEmail ?? '—'}</span>
-              </p>
             </div>
           </main>
         </div>
@@ -579,10 +680,7 @@ export default function MarksEntryPage() {
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
-                  <Link
-                    href="/assessments"
-                    className="hover:text-gray-700 inline-flex items-center gap-1"
-                  >
+                  <Link href="/assessments" className="hover:text-gray-700 inline-flex items-center gap-1">
                     <ArrowLeft className="w-4 h-4" />
                     Assessments
                   </Link>
@@ -612,6 +710,7 @@ export default function MarksEntryPage() {
                 <p className="text-sm text-red-700">{errorMsg}</p>
               </div>
             )}
+
             {successMsg && (
               <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-2">
                 <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5" />
@@ -619,32 +718,55 @@ export default function MarksEntryPage() {
               </div>
             )}
 
-            {/* Filters card */}
+            {importMsg && (
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm text-blue-700">{importMsg}</p>
+                {importErrs.length > 0 && (
+                  <details className="mt-2">
+                    <summary className="text-sm cursor-pointer text-blue-700 underline">
+                      View skipped rows/cells ({importErrs.length})
+                    </summary>
+                    <ul className="mt-2 space-y-1 text-xs text-blue-800 max-h-56 overflow-auto pr-2">
+                      {importErrs.slice(0, 200).map((x, i) => (
+                        <li key={i}>• {x}</li>
+                      ))}
+                      {importErrs.length > 200 && <li>• ...and more</li>}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {/* Filters */}
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
               <div className="p-5 border-b border-gray-200 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Filter className="w-4 h-4 text-gray-500" />
                   <h2 className="font-semibold text-gray-900">Select Assessment</h2>
                 </div>
+
                 <div className="text-sm text-gray-500">
-                  {termExamId && examSessionId && selectedExamSession && Number(termExamId) !== Number(selectedExamSession.term_id)
+                  {termExamId &&
+                  examSessionId &&
+                  selectedExamSession &&
+                  Number(termExamId) !== Number(selectedExamSession.term_id)
                     ? 'Exam Session does not match Term'
                     : canLoadGrid
-                    ? 'Ready'
-                    : 'Pick all fields'}
+                      ? 'Ready'
+                      : 'Pick all fields'}
                 </div>
               </div>
 
               <div className="p-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Term Exam *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Term *</label>
                   <select
                     value={termExamId}
                     onChange={(e) => setTermExamId(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Select term</option>
-                    {termExams.map((t) => (
+                    {termSessions.map((t) => (
                       <option key={t.id} value={t.id}>
                         {t.term_name.replace('_', ' ')} {t.year}
                       </option>
@@ -663,10 +785,11 @@ export default function MarksEntryPage() {
                     {examSessions.map((es) => (
                       <option key={es.id} value={es.id}>
                         {es.exam_type}
-                        {es.term ? ` — ${es.term.term_name.replace('_', ' ')} ${es.term.year}` : ''}
+                        {es.term ? ` — ${String(es.term.term_name).replace('_', ' ')} ${es.term.year}` : ''}
                       </option>
                     ))}
                   </select>
+
                   {termExamId &&
                     examSessionId &&
                     selectedExamSession &&
@@ -678,17 +801,17 @@ export default function MarksEntryPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Grade / Class *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Class *</label>
                   <select
-                    value={gradeId}
+                    value={classId}
                     onChange={(e) => {
-                      setGradeId(e.target.value);
+                      setClassId(e.target.value);
                       setSubjectId('');
                     }}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="">Select grade</option>
-                    {grades.map((g) => (
+                    <option value="">Select class</option>
+                    {classes.map((g) => (
                       <option key={g.id} value={g.id}>
                         {g.grade_name}
                       </option>
@@ -704,58 +827,13 @@ export default function MarksEntryPage() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Select subject</option>
-                    {subjectsForGrade.map((s) => (
+                    {subjectsForClass.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.name}
-                        {s.grade?.grade_name ? ` (${s.grade.grade_name})` : ''}
                       </option>
                     ))}
                   </select>
                 </div>
-              </div>
-            </div>
-
-            {/* Summary cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="p-3 bg-blue-100 rounded-lg">
-                    <Users className="w-6 h-6 text-blue-600" />
-                  </div>
-                  <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full">
-                    {filteredStudents.length} Students
-                  </span>
-                </div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-1">{filteredStudents.length}</h3>
-                <p className="text-sm text-gray-500">Students in selected grade</p>
-              </div>
-
-              <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="p-3 bg-green-100 rounded-lg">
-                    <BookOpen className="w-6 h-6 text-green-600" />
-                  </div>
-                  <span className="text-xs font-medium text-green-600 bg-green-50 px-2.5 py-1 rounded-full">
-                    {questions.length} Questions
-                  </span>
-                </div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-1">{questions.length}</h3>
-                <p className="text-sm text-gray-500">Questions matched by filters</p>
-              </div>
-
-              <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="p-3 bg-purple-100 rounded-lg">
-                    <FileText className="w-6 h-6 text-purple-600" />
-                  </div>
-                  <span className="text-xs font-medium text-purple-600 bg-purple-50 px-2.5 py-1 rounded-full">
-                    {totalCells ? `${filledCells}/${totalCells}` : '—'}
-                  </span>
-                </div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-1">
-                  {totalCells ? `${Math.round((filledCells / totalCells) * 100)}%` : '—'}
-                </h3>
-                <p className="text-sm text-gray-500">Marks filled (filtered view)</p>
               </div>
             </div>
 
@@ -764,52 +842,71 @@ export default function MarksEntryPage() {
               <div className="p-5 border-b border-gray-200 flex items-center justify-between gap-3 flex-wrap">
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900">Enter Marks</h3>
-                  <p className="text-sm text-gray-500">
-                    Totals and percentage are shown next to each student name.
-                  </p>
+                  <p className="text-sm text-gray-500">Import CSV or type marks directly.</p>
                 </div>
 
-                <div className="relative">
-                  <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    value={studentSearch}
-                    onChange={(e) => setStudentSearch(e.target.value)}
-                    placeholder="Search student name or reg no..."
-                    className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-72"
-                  />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={downloadCSVTemplate}
+                    disabled={!canLoadGrid || questions.length === 0}
+                    className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 bg-white rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50"
+                    type="button"
+                  >
+                    <Download className="w-4 h-4" />
+                    Template CSV
+                  </button>
+
+                  <label
+                    className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer ${
+                      importing || !canLoadGrid ? 'bg-blue-300 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'
+                    }`}
+                  >
+                    <Upload className="w-4 h-4" />
+                    {importing ? 'Importing...' : 'Import CSV'}
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      className="hidden"
+                      disabled={importing || !canLoadGrid}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        handleCSVImport(f);
+                        e.currentTarget.value = '';
+                      }}
+                    />
+                  </label>
+
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      value={studentSearch}
+                      onChange={(e) => setStudentSearch(e.target.value)}
+                      placeholder="Search student name or reg no..."
+                      className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-72"
+                    />
+                  </div>
                 </div>
               </div>
 
               {!canLoadGrid ? (
                 <div className="p-10 text-center text-sm text-gray-500">
-                  Select <span className="font-medium">Term</span>,{' '}
-                  <span className="font-medium">Exam Session (matching term)</span>,{' '}
-                  <span className="font-medium">Grade</span>, and <span className="font-medium">Subject</span> to
-                  load the marks grid.
+                  Select Term, Exam Session (matching term), Class and Subject to load the marks grid.
                 </div>
               ) : questions.length === 0 ? (
                 <div className="p-10 text-center text-sm text-gray-500">
                   No questions found for the selected filters. Create questions first.
                 </div>
               ) : filteredStudents.length === 0 ? (
-                <div className="p-10 text-center text-sm text-gray-500">
-                  No students found (or search returned none).
-                </div>
+                <div className="p-10 text-center text-sm text-gray-500">No students found (or search returned none).</div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 min-w-[340px]">
-                          <div className="flex items-center justify-between gap-4">
-                            <span>Student</span>
-                            <div className="flex items-center gap-6 text-xs text-gray-500">
-                              <span className="w-20 text-right">Total</span>
-                              <span className="w-14 text-right">%</span>
-                            </div>
-                          </div>
+                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 min-w-[320px]">
+                          Student
                         </th>
-
                         {questions.map((q) => (
                           <th key={q.id} className="text-left py-3 px-4 text-sm font-medium text-gray-700">
                             <div className="flex flex-col">
@@ -827,42 +924,13 @@ export default function MarksEntryPage() {
                     <tbody className="divide-y divide-gray-200">
                       {filteredStudents.map((st) => (
                         <tr key={st.registration_id} className="hover:bg-gray-50">
-                          {/* Student + Total + % */}
-                          <td className="py-3 px-4 sticky left-0 bg-white z-10 min-w-[340px]">
-                            <div className="flex items-center justify-between gap-4">
-                              <div>
-                                <div className="font-medium text-gray-900">
-                                  {st.first_name} {st.last_name}
-                                </div>
-                                <div className="text-xs text-gray-500">{st.registration_id}</div>
-                              </div>
-
-                              <div className="flex items-center gap-6">
-                                <div className="w-20 text-right">
-                                  <div className="text-sm font-semibold text-gray-900">
-                                    {perStudentTotals[st.registration_id]?.score ?? 0}
-                                  </div>
-                                  <div className="text-[11px] text-gray-500">
-                                    / {perStudentTotals[st.registration_id]?.possible ?? 0}
-                                  </div>
-                                </div>
-
-                                <div className="w-14 text-right">
-                                  <span
-                                    className={`inline-flex items-center justify-end px-2 py-1 rounded-full text-xs font-medium ${
-                                      (perStudentTotals[st.registration_id]?.percent ?? 0) >= 50
-                                        ? 'bg-green-50 text-green-700'
-                                        : 'bg-red-50 text-red-700'
-                                    }`}
-                                  >
-                                    {(perStudentTotals[st.registration_id]?.percent ?? 0).toFixed(0)}%
-                                  </span>
-                                </div>
-                              </div>
+                          <td className="py-3 px-4 sticky left-0 bg-white z-10 min-w-[320px]">
+                            <div className="font-medium text-gray-900">
+                              {st.first_name} {st.last_name}
                             </div>
+                            <div className="text-xs text-gray-500">{st.registration_id}</div>
                           </td>
 
-                          {/* Marks cells */}
                           {questions.map((q) => {
                             const v = marks?.[st.registration_id]?.[q.id] ?? '';
                             const max = Number(q.max_score ?? 0);
@@ -877,9 +945,7 @@ export default function MarksEntryPage() {
                                   min={0}
                                   max={max}
                                   className={`w-24 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 ${
-                                    invalid
-                                      ? 'border-red-300 focus:ring-red-300'
-                                      : 'border-gray-300 focus:ring-blue-500'
+                                    invalid ? 'border-red-300 focus:ring-red-300' : 'border-gray-300 focus:ring-blue-500'
                                   }`}
                                   placeholder="—"
                                 />

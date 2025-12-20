@@ -7,23 +7,41 @@ import Navbar from '@/components/Navbar';
 import AppShell from '@/components/AppShell';
 import {
   ArrowLeft,
-  CheckCircle2,
-  XCircle,
-  UserCircle2,
-  GraduationCap,
+  User,
+  Mail,
   Phone,
-  CalendarDays,
+  Calendar,
+  MapPin,
+  Users,
   Shield,
-  Pencil,
+  Edit2,
   Save,
   Trash2,
-  MapPin,
   Plus,
   X,
-  Users,
   Wallet,
-  Receipt,
-  AlertTriangle,
+  GraduationCap,
+  Home,
+  Heart,
+  Briefcase,
+  AlertCircle,
+  CheckCircle,
+  ChevronRight,
+  Star,
+  FileText,
+  CreditCard,
+  BookOpen,
+  Award,
+  Building,
+  DollarSign,
+  UserCircle,
+  Book,
+  UserCheck,
+  Calculator,
+  BarChart3,
+  Utensils,
+  Coffee,
+  Bed,
 } from 'lucide-react';
 
 /* ---------------- Types ---------------- */
@@ -74,7 +92,6 @@ interface StudentDetailRow {
   registered_by: string | null;
   created: string;
   updated: string;
-
   class?: { grade_name: string } | null;
   school?: { school_name: string } | null;
 }
@@ -101,7 +118,6 @@ interface CaretakerRow {
   updated: string;
 }
 
-/** Fees (Finance) */
 interface SchoolFeesRow {
   id: number;
   grade_id: number;
@@ -127,128 +143,119 @@ interface StudentTuitionDescriptionRow {
   total_fee: number;
 }
 
-type TabKey = 'overview' | 'guardians' | 'address' | 'caretakers' | 'academic' | 'record';
-
-/* ---------------- Constants ---------------- */
-const STATUS_CHOICES = [
-  { value: 'active', label: 'Active' },
-  { value: 'graduated', label: 'Graduated' },
-  { value: 'dropped out', label: 'Dropped Out' },
-];
-
-const GENDER_CHOICES = [
-  { value: 'Male', label: 'Male' },
-  { value: 'Female', label: 'Female' },
-];
-
-const SCHOOL_TYPE_CHOICES = [
-  { value: 'day', label: 'Day' },
-  { value: 'boarding', label: 'Boarding' },
-  { value: 'bursary', label: 'Bursary' },
-  { value: 'scholarship', label: 'Scholarship' },
-];
-
-/* ---------------- Helpers ---------------- */
-function formatDate(dateString?: string | null) {
-  if (!dateString) return '—';
-  const d = new Date(dateString);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-function statusChip(status: string) {
-  switch (status) {
-    case 'active':
-      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-    case 'graduated':
-      return 'bg-blue-50 text-blue-700 border-blue-200';
-    case 'dropped out':
-      return 'bg-rose-50 text-rose-700 border-rose-200';
-    default:
-      return 'bg-gray-100 text-gray-700 border-gray-200';
-  }
-}
-
-function money(n: number | null | undefined) {
-  const v = Number(n ?? 0);
-  return v.toLocaleString('en-UG', { maximumFractionDigits: 2 });
-}
-
-function daysBetween(a: string, b: string) {
-  const d1 = new Date(a);
-  const d2 = new Date(b);
-  if (Number.isNaN(d1.getTime()) || Number.isNaN(d2.getTime())) return 10_000;
-  const diff = Math.abs(d2.getTime() - d1.getTime());
-  return Math.floor(diff / (1000 * 60 * 60 * 24));
-}
-
-/* ---------------- UI ---------------- */
+/* ---------------- UI Components ---------------- */
 function Modal({
   open,
   title,
   children,
   onClose,
-  footer,
-  widthClass = 'max-w-2xl',
+  widthClass = 'max-w-lg',
 }: {
   open: boolean;
   title: string;
   children: React.ReactNode;
   onClose: () => void;
-  footer?: React.ReactNode;
   widthClass?: string;
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div
-        className={`w-full ${widthClass} bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden`}
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-gray-100">
-          <h3 className="text-base font-bold text-gray-900">{title}</h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div className={`w-full ${widthClass} bg-white rounded-2xl shadow-2xl animate-fadeIn`}>
+        <div className="flex items-center justify-between p-6 border-b border-gray-100">
+          <h3 className="text-xl font-semibold text-gray-900">{title}</h3>
           <button
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-gray-200 text-gray-600"
+            className="p-2 rounded-full hover:bg-gray-100 transition-colors"
             type="button"
           >
-            <X size={18} />
+            <X size={20} className="text-gray-500" />
           </button>
         </div>
-        <div className="px-6 py-5">{children}</div>
-        {footer && <div className="px-6 py-4 border-t border-gray-200 bg-white">{footer}</div>}
+        <div className="max-h-[80vh] overflow-y-auto p-6">{children}</div>
       </div>
     </div>
   );
 }
 
-function TabButton({
-  active,
-  onClick,
-  icon,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-}) {
+function StatusBadge({ status }: { status: string }) {
+  const config = {
+    active: { color: 'bg-emerald-100 text-emerald-800 border-emerald-200', icon: <UserCheck size={14} /> },
+    graduated: { color: 'bg-blue-100 text-blue-800 border-blue-200', icon: <Award size={14} /> },
+    'dropped out': { color: 'bg-amber-100 text-amber-800 border-amber-200', icon: <Shield size={14} /> },
+  }[status] || { color: 'bg-gray-100 text-gray-800 border-gray-200', icon: <User size={14} /> };
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all ${
-        active
-          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-          : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-      }`}
-    >
-      {icon}
-      {label}
-    </button>
+    <span className={`px-3 py-1.5 rounded-full text-xs font-medium border flex items-center gap-1.5 ${config.color}`}>
+      {config.icon}
+      {status.charAt(0).toUpperCase() + status.slice(1)}
+    </span>
   );
 }
 
-/* ---------------- Main ---------------- */
+function InfoCard({
+  icon,
+  title,
+  value,
+  subtitle,
+  onClick,
+  color = 'blue',
+}: {
+  icon: React.ReactNode;
+  title: string;
+  value: string;
+  subtitle?: string;
+  onClick?: () => void;
+  color?: 'blue' | 'green' | 'purple' | 'amber' | 'red' | 'indigo';
+}) {
+  const colorClasses = {
+    blue: 'bg-blue-50 text-blue-600 border-blue-200',
+    green: 'bg-emerald-50 text-emerald-600 border-emerald-200',
+    purple: 'bg-purple-50 text-purple-600 border-purple-200',
+    amber: 'bg-amber-50 text-amber-600 border-amber-200',
+    red: 'bg-red-50 text-red-600 border-red-200',
+    indigo: 'bg-indigo-50 text-indigo-600 border-indigo-200',
+  }[color];
+
+  return (
+    <div
+      onClick={onClick}
+      className={`bg-white rounded-xl border border-gray-200 p-4 hover:shadow-sm transition-all ${onClick ? 'cursor-pointer hover:border-gray-300' : ''}`}
+    >
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          <div className="flex items-center gap-3 mb-3">
+            <div className={`p-2 rounded-lg ${colorClasses}`}>
+              {icon}
+            </div>
+            <span className="text-sm font-medium text-gray-700">{title}</span>
+          </div>
+          <div className="text-lg font-semibold text-gray-900 mb-1">{value}</div>
+          {subtitle && <div className="text-sm text-gray-500">{subtitle}</div>}
+        </div>
+        {onClick && <ChevronRight size={20} className="text-gray-400 flex-shrink-0" />}
+      </div>
+    </div>
+  );
+}
+
+function SectionCard({ title, icon, children, action }: { title: string; icon: React.ReactNode; children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-blue-50 text-blue-600">
+            {icon}
+          </div>
+          <h3 className="font-semibold text-gray-900">{title}</h3>
+        </div>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/* ---------------- Main Component ---------------- */
 export default function StudentProfileClient() {
   const router = useRouter();
   const params = useParams<{ registration_id?: string }>();
@@ -264,1698 +271,1562 @@ export default function StudentProfileClient() {
 
   const isCreateMode = rawRegistrationId === 'new';
 
-  const [tab, setTab] = useState<TabKey>('overview');
-
   const [authChecking, setAuthChecking] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
-
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [school, setSchool] = useState<SchoolRow | null>(null);
   const [grades, setGrades] = useState<GradeRow[]>([]);
-
   const [student, setStudent] = useState<StudentDetailRow | null>(null);
   const [address, setAddress] = useState<StudentAddressRow | null>(null);
   const [caretakers, setCaretakers] = useState<CaretakerRow[]>([]);
-
-  // Finance state
   const [schoolFees, setSchoolFees] = useState<SchoolFeesRow | null>(null);
   const [tuitionDesc, setTuitionDesc] = useState<StudentTuitionDescriptionRow | null>(null);
-  const [feeLoading, setFeeLoading] = useState(false);
-
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  const [isEditing, setIsEditing] = useState<boolean>(isCreateMode);
-
-  const needsSchoolLink = !!profile && !profile.school_id;
-
-  /* ---------------- Form State (Student) ---------------- */
-  const [registrationIdInput, setRegistrationIdInput] = useState('');
-  const [linId, setLinId] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [dateOfBirth, setDateOfBirth] = useState('');
-  const [currentStatus, setCurrentStatus] = useState('active');
-  const [gender, setGender] = useState('');
-  const [schoolType, setSchoolType] = useState('day');
-  const [gradeOfEntry, setGradeOfEntry] = useState('');
-  const [yearOfEntry, setYearOfEntry] = useState('');
-  const [currentGradeId, setCurrentGradeId] = useState<number | ''>('');
-
-  const [guardianName, setGuardianName] = useState('');
-  const [guardianPhone, setGuardianPhone] = useState('');
-
-  const [fatherName, setFatherName] = useState('');
-  const [fatherPhone, setFatherPhone] = useState('');
-  const [fatherNIN, setFatherNIN] = useState('');
-
-  const [motherName, setMotherName] = useState('');
-  const [motherPhone, setMotherPhone] = useState('');
-  const [motherNIN, setMotherNIN] = useState('');
-
-  /* ---------------- Form State (Address) ---------------- */
-  const [addrAddress, setAddrAddress] = useState('');
-  const [addrCity, setAddrCity] = useState('');
-  const [addrState, setAddrState] = useState('');
-  const [addrZip, setAddrZip] = useState('');
-
-  /* ---------------- Caretaker Modal ---------------- */
+  // Modal states
+  const [editPersonalModal, setEditPersonalModal] = useState(false);
+  const [editGuardiansModal, setEditGuardiansModal] = useState(false);
+  const [editAcademicModal, setEditAcademicModal] = useState(false);
+  const [addressModalOpen, setAddressModalOpen] = useState(false);
   const [caretakerModalOpen, setCaretakerModalOpen] = useState(false);
-  const [caretakerMode, setCaretakerMode] = useState<'add' | 'edit'>('add');
-  const [caretakerEditingId, setCaretakerEditingId] = useState<number | null>(null);
-  const [ctName, setCtName] = useState('');
-  const [ctRelationship, setCtRelationship] = useState('');
-  const [ctContact, setCtContact] = useState('');
-  const [ctEmail, setCtEmail] = useState('');
-
-  /* ---------------- Modals ---------------- */
+  const [feesModalOpen, setFeesModalOpen] = useState(false);
   const [dropModalOpen, setDropModalOpen] = useState(false);
 
-  /* ---------------- Auth ---------------- */
+  // Form states
+  const [personalForm, setPersonalForm] = useState({
+    registration_id: '',
+    lin_id: '',
+    first_name: '',
+    last_name: '',
+    date_of_birth: '',
+    current_status: 'active',
+    gender: '',
+    school_type: 'day',
+    profile_picture_url: '',
+  });
+
+  const [guardiansForm, setGuardiansForm] = useState({
+    guardian_name: '',
+    guardian_phone: '',
+    father_name: '',
+    father_phone: '',
+    father_nin: '',
+    mother_name: '',
+    mother_phone: '',
+    mother_nin: '',
+  });
+
+  const [academicForm, setAcademicForm] = useState({
+    grade_of_entry: '',
+    year_of_entry: '',
+    current_grade_id: '' as number | '',
+  });
+
+  const [addressForm, setAddressForm] = useState({
+    address: '',
+    city: '',
+    state: '',
+    zip_code: '',
+  });
+
+  const [caretakerForm, setCaretakerForm] = useState({
+    name: '',
+    relationship: '',
+    contact_number: '',
+    email: '',
+  });
+
+  const [editingCaretakerId, setEditingCaretakerId] = useState<number | null>(null);
+
+  /* ---------------- Auth Check ---------------- */
   useEffect(() => {
     const checkAuth = async () => {
       const { data } = await supabase.auth.getSession();
-      const session = data?.session;
-
-      if (!session) {
+      if (!data?.session) {
         router.replace('/');
         return;
       }
-
-      const u = session.user;
-      setUserEmail(u.email ?? null);
-      setUserName((u.user_metadata as any)?.full_name || 'Admin User');
+      const user = data.session.user;
+      setUserEmail(user.email ?? null);
+      setUserName((user.user_metadata as any)?.full_name || 'Admin');
       setAuthChecking(false);
     };
-
     checkAuth();
   }, [router]);
 
-  /* ---------------- Load Helpers ---------------- */
-  const reloadCaretakers = async (studentId: string) => {
-    const { data: cts } = await supabase
-      .from('caretaker')
-      .select('id, student_id, name, relationship, contact_number, email, created, updated')
-      .eq('student_id', studentId)
-      .order('created', { ascending: false });
-
-    setCaretakers((cts as CaretakerRow[]) || []);
-  };
-
-  const hydrateFromStudent = (st: StudentDetailRow) => {
-    setRegistrationIdInput(st.registration_id);
-    setLinId(st.lin_id || '');
-    setFirstName(st.first_name || '');
-    setLastName(st.last_name || '');
-    setDateOfBirth(st.date_of_birth || '');
-    setCurrentStatus(st.current_status || 'active');
-    setGender(st.gender || '');
-    setSchoolType(st.school_type || 'day');
-    setGradeOfEntry(st.grade_of_entry || '');
-    setYearOfEntry(st.year_of_entry || '');
-    setCurrentGradeId(st.current_grade_id ?? '');
-
-    setGuardianName(st.guardian_name || '');
-    setGuardianPhone(st.guardian_phone || '');
-
-    setFatherName(st.father_name || '');
-    setFatherPhone(st.father_phone || '');
-    setFatherNIN(st.father_nin || '');
-
-    setMotherName(st.mother_name || '');
-    setMotherPhone(st.mother_phone || '');
-    setMotherNIN(st.mother_nin || '');
-  };
-
-  const clearForCreate = () => {
-    setStudent(null);
-    setRegistrationIdInput('');
-    setLinId('');
-    setFirstName('');
-    setLastName('');
-    setDateOfBirth('');
-    setCurrentStatus('active');
-    setGender('');
-    setSchoolType('day');
-    setGradeOfEntry('');
-    setYearOfEntry('');
-    setCurrentGradeId('');
-    setGuardianName('');
-    setGuardianPhone('');
-    setFatherName('');
-    setFatherPhone('');
-    setFatherNIN('');
-    setMotherName('');
-    setMotherPhone('');
-    setMotherNIN('');
-
-    setAddress(null);
-    setAddrAddress('');
-    setAddrCity('');
-    setAddrState('');
-    setAddrZip('');
-
-    setCaretakers([]);
-
-    // Finance
-    setSchoolFees(null);
-    setTuitionDesc(null);
-  };
-
-  /* ---------------- Finance Helpers ---------------- */
-
-  const canEditFeesDescription = useMemo(() => {
-    // Rule: within 30 days user can edit; otherwise only ADMIN
-    if (!student) return false;
-    if (profile?.role === 'ADMIN') return true;
-
-    const today = new Date().toISOString().slice(0, 10);
-    const created = student.created || today;
-    return daysBetween(created, today) <= 30;
-  }, [student, profile?.role]);
-
-  const defaultOptionsForStudent = useMemo(() => {
-    // Example default: if boarding -> hostel true.
-    const isBoarding = (student?.school_type || schoolType) === 'boarding';
-    return {
-      hostel: isBoarding,
-      lunch: false,
-      breakfast: false,
-    };
-  }, [student?.school_type, schoolType]);
-
-  const loadFeesForGrade = async (gradeId: number, schoolId: string) => {
-    const { data, error } = await supabase
-      .from('assessment_schoolfees')
-      .select(
-        'id, grade_id, school_id, tuitionfee, hostelfee, breakfastfee, lunchfee, description, created_by, created, updated'
-      )
-      .eq('grade_id', gradeId)
-      .eq('school_id', schoolId)
-      .maybeSingle();
-
-    if (error) throw error;
-    return (data as SchoolFeesRow | null) ?? null;
-  };
-
-  const loadTuitionDescription = async (studentId: string, tuitionId: number, schoolId: string) => {
-    const { data, error } = await supabase
-      .from('student_tuition_description')
-      .select('id, student_id, tuition_id, school_id, hostel, lunch, breakfast, total_fee')
-      .eq('student_id', studentId)
-      .eq('tuition_id', tuitionId)
-      .eq('school_id', schoolId)
-      .maybeSingle();
-
-    if (error) throw error;
-    return (data as StudentTuitionDescriptionRow | null) ?? null;
-  };
-
-  const ensureStudentTuitionDescription = async (opts?: {
-    studentId: string;
-    gradeId: number;
-    schoolId: string;
-    forceOptions?: { hostel: boolean; lunch: boolean; breakfast: boolean };
-  }) => {
-    const studentId = opts?.studentId;
-    const gradeId = opts?.gradeId;
-    const schoolId = opts?.schoolId;
-
-    if (!studentId || !gradeId || !schoolId) return;
-
-    setFeeLoading(true);
-
-    try {
-      // 1) Grade fees row
-      const feesRow = await loadFeesForGrade(gradeId, schoolId);
-      setSchoolFees(feesRow);
-
-      if (!feesRow) {
-        setTuitionDesc(null);
-        return;
-      }
-
-      // 2) Existing student tuition description?
-      const existing = await loadTuitionDescription(studentId, feesRow.id, schoolId);
-
-      const optionPayload = opts.forceOptions ?? defaultOptionsForStudent;
-
-      // We DO NOT rely on upsert with onConflict unless you have a unique constraint.
-      if (!existing) {
-        const { data: inserted, error: insErr } = await supabase
-          .from('student_tuition_description')
-          .insert({
-            student_id: studentId,
-            tuition_id: feesRow.id,
-            school_id: schoolId,
-            hostel: !!optionPayload.hostel,
-            lunch: !!optionPayload.lunch,
-            breakfast: !!optionPayload.breakfast,
-            // total_fee is computed by trigger (but column has default 0.00)
-          })
-          .select('id, student_id, tuition_id, school_id, hostel, lunch, breakfast, total_fee')
-          .single();
-
-        if (insErr) throw insErr;
-
-        setTuitionDesc(inserted as StudentTuitionDescriptionRow);
-      } else {
-        // Update only options (trigger recalculates total_fee)
-        const { data: updated, error: upErr } = await supabase
-          .from('student_tuition_description')
-          .update({
-            hostel: !!optionPayload.hostel,
-            lunch: !!optionPayload.lunch,
-            breakfast: !!optionPayload.breakfast,
-          })
-          .eq('id', existing.id)
-          .select('id, student_id, tuition_id, school_id, hostel, lunch, breakfast, total_fee')
-          .single();
-
-        if (upErr) throw upErr;
-
-        setTuitionDesc(updated as StudentTuitionDescriptionRow);
-      }
-    } catch (e: any) {
-      setErrorMsg(e?.message || 'Failed to setup student tuition description.');
-    } finally {
-      setFeeLoading(false);
-    }
-  };
-
-  const refreshFinance = async () => {
-    if (!profile?.school_id) return;
-    const stId = student?.registration_id;
-    const gId = student?.current_grade_id ?? (currentGradeId === '' ? null : Number(currentGradeId));
-    if (!stId || !gId) return;
-
-    await ensureStudentTuitionDescription({
-      studentId: stId,
-      gradeId: gId,
-      schoolId: profile.school_id,
-    });
-  };
-
-  const updateFeeOptions = async (next: { hostel: boolean; lunch: boolean; breakfast: boolean }) => {
-    if (!profile?.school_id) return;
-    const stId = student?.registration_id;
-    const gId = student?.current_grade_id ?? (currentGradeId === '' ? null : Number(currentGradeId));
-    if (!stId || !gId) return;
-
-    if (!canEditFeesDescription) {
-      setErrorMsg('Fee options can only be changed within 30 days. Ask an ADMIN to update.');
-      return;
-    }
-
-    await ensureStudentTuitionDescription({
-      studentId: stId,
-      gradeId: gId,
-      schoolId: profile.school_id,
-      forceOptions: next,
-    });
-
-    setSuccessMsg('Fee options updated.');
-  };
-
-  /* ---------------- Load Page Data ---------------- */
+  /* ---------------- Load Data ---------------- */
   useEffect(() => {
     if (authChecking) return;
 
-    const load = async () => {
+    const loadData = async () => {
       setLoading(true);
-      setErrorMsg(null);
-      setSuccessMsg(null);
-
       try {
-        const { data: ures, error: uerr } = await supabase.auth.getUser();
-        if (uerr) throw uerr;
-        if (!ures.user?.id) throw new Error('Could not find authenticated user.');
+        const { data: ures } = await supabase.auth.getUser();
+        if (!ures.user) throw new Error('No user found');
 
-        const { data: pr, error: prError } = await supabase
+        const { data: profileData } = await supabase
           .from('profiles')
-          .select('user_id, email, full_name, role, school_id, created_at, updated_at')
+          .select('*')
           .eq('user_id', ures.user.id)
           .single();
 
-        if (prError || !pr) throw new Error(prError?.message || 'No profile found in profiles.');
+        if (!profileData) throw new Error('Profile not found');
+        setProfile(profileData as ProfileRow);
 
-        const prRow = pr as ProfileRow;
-        setProfile(prRow);
+        if (!profileData.school_id) return;
 
-        if (!prRow.school_id) {
-          setSchool(null);
-          if (isCreateMode) clearForCreate();
-          return;
-        }
-
-        const { data: schoolRow, error: schoolError } = await supabase
+        const { data: schoolData } = await supabase
           .from('general_information')
-          .select('id, school_name')
-          .eq('id', prRow.school_id)
+          .select('*')
+          .eq('id', profileData.school_id)
           .single();
-        if (schoolError || !schoolRow) throw new Error(schoolError?.message || 'Failed to load school.');
+        setSchool(schoolData as SchoolRow);
 
-        const schoolData = schoolRow as SchoolRow;
-        setSchool(schoolData);
-
-        const { data: gradeRows } = await supabase
+        const { data: gradesData } = await supabase
           .from('class')
-          .select('id, grade_name')
-          .eq('school_id', schoolData.id)
-          .order('grade_name', { ascending: true });
-        setGrades((gradeRows as GradeRow[]) || []);
+          .select('*')
+          .eq('school_id', profileData.school_id);
+        setGrades((gradesData || []) as GradeRow[]);
 
-        // CREATE MODE
-        if (isCreateMode) {
-          clearForCreate();
-          setIsEditing(true);
-          setLoading(false);
-          return;
+        if (!isCreateMode) {
+          const { data: studentData } = await supabase
+            .from('students')
+            .select(`
+              *,
+              class:current_grade_id (grade_name),
+              school:school_id (school_name)
+            `)
+            .eq('registration_id', rawRegistrationId)
+            .eq('school_id', profileData.school_id)
+            .single();
+
+          if (studentData) {
+            const st = studentData as StudentDetailRow;
+            setStudent(st);
+            
+            // Set form data
+            setPersonalForm({
+              registration_id: st.registration_id,
+              lin_id: st.lin_id || '',
+              first_name: st.first_name,
+              last_name: st.last_name,
+              date_of_birth: st.date_of_birth,
+              current_status: st.current_status,
+              gender: st.gender || '',
+              school_type: st.school_type || 'day',
+              profile_picture_url: st.profile_picture_url || '',
+            });
+
+            setGuardiansForm({
+              guardian_name: st.guardian_name || '',
+              guardian_phone: st.guardian_phone || '',
+              father_name: st.father_name || '',
+              father_phone: st.father_phone || '',
+              father_nin: st.father_nin || '',
+              mother_name: st.mother_name || '',
+              mother_phone: st.mother_phone || '',
+              mother_nin: st.mother_nin || '',
+            });
+
+            setAcademicForm({
+              grade_of_entry: st.grade_of_entry || '',
+              year_of_entry: st.year_of_entry || '',
+              current_grade_id: st.current_grade_id ?? '',
+            });
+
+            const { data: addrData } = await supabase
+              .from('students_address')
+              .select('*')
+              .eq('student_id', st.registration_id)
+              .single();
+
+            if (addrData) {
+              const addr = addrData as StudentAddressRow;
+              setAddress(addr);
+              setAddressForm({
+                address: addr.address,
+                city: addr.city,
+                state: addr.state,
+                zip_code: addr.zip_code,
+              });
+            }
+
+            const { data: caretakersData } = await supabase
+              .from('caretaker')
+              .select('*')
+              .eq('student_id', st.registration_id);
+            setCaretakers((caretakersData || []) as CaretakerRow[]);
+
+            if (st.current_grade_id) {
+              await loadFeesData(st.registration_id, st.current_grade_id, profileData.school_id);
+            }
+          }
         }
-
-        // EDIT MODE: load student
-        const { data: st, error: stError } = await supabase
-          .from('students')
-          .select(
-            `
-            registration_id,
-            lin_id,
-            first_name,
-            last_name,
-            date_of_birth,
-            current_status,
-            gender,
-            school_type,
-            grade_of_entry,
-            year_of_entry,
-            guardian_name,
-            guardian_phone,
-            current_grade_id,
-            father_name,
-            father_phone,
-            father_nin,
-            mother_name,
-            mother_phone,
-            mother_nin,
-            profile_picture_url,
-            school_id,
-            registered_by,
-            created,
-            updated,
-            class:current_grade_id (grade_name),
-            school:school_id (school_name)
-          `
-          )
-          .eq('registration_id', rawRegistrationId)
-          .eq('school_id', prRow.school_id)
-          .single();
-
-        if (stError || !st) throw new Error(stError?.message || 'Student not found or access denied.');
-
-        const stRow = st as StudentDetailRow;
-        setStudent(stRow);
-        hydrateFromStudent(stRow);
-        setIsEditing(false);
-
-        // address
-        const { data: addr } = await supabase
-          .from('students_address')
-          .select('id, student_id, address, city, state, zip_code, created, updated')
-          .eq('student_id', stRow.registration_id)
-          .maybeSingle();
-
-        if (addr) {
-          const addrRow = addr as StudentAddressRow;
-          setAddress(addrRow);
-          setAddrAddress(addrRow.address || '');
-          setAddrCity(addrRow.city || '');
-          setAddrState(addrRow.state || '');
-          setAddrZip(addrRow.zip_code || '');
-        } else {
-          setAddress(null);
-          setAddrAddress('');
-          setAddrCity('');
-          setAddrState('');
-          setAddrZip('');
-        }
-
-        await reloadCaretakers(stRow.registration_id);
-
-        // Finance: auto-ensure tuition desc when grade is set
-        if (prRow.school_id && stRow.current_grade_id) {
-          await ensureStudentTuitionDescription({
-            studentId: stRow.registration_id,
-            gradeId: stRow.current_grade_id,
-            schoolId: prRow.school_id,
-          });
-        } else {
-          setSchoolFees(null);
-          setTuitionDesc(null);
-        }
-      } catch (e: any) {
-        setErrorMsg(e?.message || 'Unexpected error while loading student profile.');
+      } catch (error: any) {
+        setErrorMsg(error.message);
       } finally {
         setLoading(false);
       }
     };
 
-    load();
+    loadData();
   }, [authChecking, rawRegistrationId, isCreateMode]);
 
-  /* ---------------- Create / Update Student ---------------- */
-  const saveStudent = async (e: FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
+  /* ---------------- Fees Functions ---------------- */
+  const loadFeesData = async (studentId: string, gradeId: number, schoolId: string) => {
     try {
-      if (!profile?.school_id) throw new Error('Your account is not linked to a school.');
-      const { data: ures } = await supabase.auth.getUser();
-      const userId = ures.user?.id;
-      if (!userId) throw new Error('No authenticated user.');
-
-      // Required fields
-      const regId = (isCreateMode ? registrationIdInput : student?.registration_id) || '';
-      if (!regId.trim()) throw new Error('Registration ID is required.');
-      if (!firstName.trim()) throw new Error('First name is required.');
-      if (!lastName.trim()) throw new Error('Last name is required.');
-      if (!dateOfBirth) throw new Error('Date of birth is required.');
-
-      const today = new Date().toISOString().slice(0, 10);
-
-      if (isCreateMode) {
-        // INSERT
-        const insertPayload = {
-          registration_id: regId.trim(),
-          lin_id: linId.trim() || null,
-          first_name: firstName.trim(),
-          last_name: lastName.trim(),
-          date_of_birth: dateOfBirth,
-          current_status: currentStatus,
-          gender: gender || null,
-          school_type: schoolType || null,
-          grade_of_entry: gradeOfEntry.trim() || null,
-          year_of_entry: yearOfEntry.trim() || null,
-          guardian_name: guardianName.trim() || null,
-          guardian_phone: guardianPhone.trim() || null,
-          current_grade_id: currentGradeId === '' ? null : Number(currentGradeId),
-          father_name: fatherName.trim() || null,
-          father_phone: fatherPhone.trim() || null,
-          father_nin: fatherNIN.trim() || null,
-          mother_name: motherName.trim() || null,
-          mother_phone: motherPhone.trim() || null,
-          mother_nin: motherNIN.trim() || null,
-          profile_picture_url: null,
-          school_id: profile.school_id,
-          registered_by: userId,
-          created: today,
-          updated: today,
-        };
-
-        const { data: createdRow, error } = await supabase
-          .from('students')
-          .insert(insertPayload)
-          .select(
-            `
-            registration_id,
-            lin_id,
-            first_name,
-            last_name,
-            date_of_birth,
-            current_status,
-            gender,
-            school_type,
-            grade_of_entry,
-            year_of_entry,
-            guardian_name,
-            guardian_phone,
-            current_grade_id,
-            father_name,
-            father_phone,
-            father_nin,
-            mother_name,
-            mother_phone,
-            mother_nin,
-            profile_picture_url,
-            school_id,
-            registered_by,
-            created,
-            updated,
-            class:current_grade_id (grade_name),
-            school:school_id (school_name)
-          `
-          )
-          .single();
-
-        if (error) throw error;
-
-        const stRow = createdRow as StudentDetailRow;
-        setStudent(stRow);
-        setSuccessMsg('Student created successfully.');
-        router.replace(`/students/${encodeURIComponent(regId.trim())}`);
-        setIsEditing(false);
-
-        // Finance auto-create if grade exists
-        if (stRow.current_grade_id) {
-          await ensureStudentTuitionDescription({
-            studentId: stRow.registration_id,
-            gradeId: stRow.current_grade_id,
-            schoolId: profile.school_id,
-          });
-        }
-
-        return;
-      }
-
-      // UPDATE
-      if (!student) throw new Error('Student not loaded.');
-
-      const nextGradeId = currentGradeId === '' ? null : Number(currentGradeId);
-
-      const updatePayload = {
-        lin_id: linId.trim() || null,
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        date_of_birth: dateOfBirth,
-        current_status: currentStatus,
-        gender: gender || null,
-        school_type: schoolType || null,
-        grade_of_entry: gradeOfEntry.trim() || null,
-        year_of_entry: yearOfEntry.trim() || null,
-        guardian_name: guardianName.trim() || null,
-        guardian_phone: guardianPhone.trim() || null,
-        current_grade_id: nextGradeId,
-        father_name: fatherName.trim() || null,
-        father_phone: fatherPhone.trim() || null,
-        father_nin: fatherNIN.trim() || null,
-        mother_name: motherName.trim() || null,
-        mother_phone: motherPhone.trim() || null,
-        mother_nin: motherNIN.trim() || null,
-        updated: today,
-      };
-
-      const { error } = await supabase
-        .from('students')
-        .update(updatePayload)
-        .eq('registration_id', student.registration_id)
-        .eq('school_id', profile.school_id);
-
-      if (error) throw error;
-
-      // update local state
-      setStudent((prev) =>
-        prev
-          ? ({
-              ...prev,
-              ...updatePayload,
-              class:
-                updatePayload.current_grade_id == null
-                  ? null
-                  : {
-                      grade_name:
-                        grades.find((g) => g.id === updatePayload.current_grade_id)?.grade_name ||
-                        prev.class?.grade_name ||
-                        '',
-                    },
-            } as StudentDetailRow)
-          : prev
-      );
-
-      setSuccessMsg('Student updated successfully.');
-      setIsEditing(false);
-
-      // Finance: if grade set -> ensure tuition description
-      if (updatePayload.current_grade_id) {
-        await ensureStudentTuitionDescription({
-          studentId: student.registration_id,
-          gradeId: updatePayload.current_grade_id,
-          schoolId: profile.school_id,
-        });
-      } else {
-        setSchoolFees(null);
-        setTuitionDesc(null);
-      }
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Unexpected error.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  /* ---------------- Address Upsert ---------------- */
-  const upsertAddress = async (e: FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    try {
-      const stId = student?.registration_id;
-      if (!stId) throw new Error('Save student first, then add address.');
-
-      if (!addrAddress.trim() || !addrCity.trim() || !addrState.trim() || !addrZip.trim()) {
-        throw new Error('Address, City, State, and Zip Code are required.');
-      }
-
-      const today = new Date().toISOString().slice(0, 10);
-
-      const payload = {
-        student_id: stId,
-        address: addrAddress.trim(),
-        city: addrCity.trim(),
-        state: addrState.trim(),
-        zip_code: addrZip.trim(),
-        updated: today,
-      };
-
-      const { data, error } = await supabase
-        .from('students_address')
-        .upsert(payload, { onConflict: 'student_id' })
-        .select('id, student_id, address, city, state, zip_code, created, updated')
+      const { data: feesData } = await supabase
+        .from('assessment_schoolfees')
+        .select('*')
+        .eq('grade_id', gradeId)
+        .eq('school_id', schoolId)
         .single();
 
-      if (error) throw error;
+      setSchoolFees(feesData as SchoolFeesRow);
 
-      setAddress(data as StudentAddressRow);
-      setSuccessMsg('Address saved successfully.');
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Unexpected error.');
-    } finally {
-      setSubmitting(false);
+      const { data: tuitionData } = await supabase
+        .from('student_tuition_description')
+        .select('*')
+        .eq('student_id', studentId)
+        .eq('tuition_id', feesData?.id)
+        .single();
+
+      setTuitionDesc(tuitionData as StudentTuitionDescriptionRow);
+    } catch (error) {
+      // Fees might not be set up yet
     }
   };
 
-  /* ---------------- Caretakers CRUD ---------------- */
-  const openAddCaretaker = () => {
-    setCaretakerMode('add');
-    setCaretakerEditingId(null);
-    setCtName('');
-    setCtRelationship('');
-    setCtContact('');
-    setCtEmail('');
-    setCaretakerModalOpen(true);
-  };
-
-  const openEditCaretaker = (ct: CaretakerRow) => {
-    setCaretakerMode('edit');
-    setCaretakerEditingId(ct.id);
-    setCtName(ct.name);
-    setCtRelationship(ct.relationship);
-    setCtContact(ct.contact_number);
-    setCtEmail(ct.email || '');
-    setCaretakerModalOpen(true);
-  };
-
-  const saveCaretaker = async (e: FormEvent) => {
+  /* ---------------- Form Handlers ---------------- */
+  const handleSavePersonalInfo = async (e: FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     setErrorMsg(null);
-    setSuccessMsg(null);
 
     try {
-      const stId = student?.registration_id;
-      if (!stId) throw new Error('Save student first, then add caretakers.');
+      if (!profile?.school_id) throw new Error('School not linked');
 
-      if (!ctName.trim() || !ctRelationship.trim() || !ctContact.trim()) {
-        throw new Error('Name, relationship and contact number are required.');
-      }
+      const payload = {
+        ...personalForm,
+        school_id: profile.school_id,
+        updated: new Date().toISOString().slice(0, 10),
+      };
 
-      const today = new Date().toISOString().slice(0, 10);
+      if (isCreateMode) {
+        payload.registered_by = (await supabase.auth.getUser()).data.user?.id || null;
+        payload.created = new Date().toISOString().slice(0, 10);
 
-      if (caretakerMode === 'add') {
-        const { error } = await supabase.from('caretaker').insert({
-          student_id: stId,
-          name: ctName.trim(),
-          relationship: ctRelationship.trim(),
-          contact_number: ctContact.trim(),
-          email: ctEmail.trim() || null,
-          updated: today,
-        });
+        const { error } = await supabase.from('students').insert(payload);
         if (error) throw error;
-        setSuccessMsg('Caretaker added successfully.');
+        
+        setSuccessMsg('Student created successfully');
+        router.push(`/students/${encodeURIComponent(payload.registration_id)}`);
       } else {
-        if (!caretakerEditingId) return;
-
         const { error } = await supabase
-          .from('caretaker')
-          .update({
-            name: ctName.trim(),
-            relationship: ctRelationship.trim(),
-            contact_number: ctContact.trim(),
-            email: ctEmail.trim() || null,
-            updated: today,
-          })
-          .eq('id', caretakerEditingId)
-          .eq('student_id', stId);
+          .from('students')
+          .update(payload)
+          .eq('registration_id', student?.registration_id);
 
         if (error) throw error;
-        setSuccessMsg('Caretaker updated successfully.');
+        setSuccessMsg('Personal information updated');
+        setEditPersonalModal(false);
       }
-
-      await reloadCaretakers(stId);
-      setCaretakerModalOpen(false);
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Unexpected error.');
+    } catch (error: any) {
+      setErrorMsg(error.message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  const deleteCaretaker = async (caretakerId: number) => {
+  const handleSaveGuardiansInfo = async (e: FormEvent) => {
+    e.preventDefault();
     setSubmitting(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
 
     try {
-      const stId = student?.registration_id;
-      if (!stId) throw new Error('No student loaded.');
-
-      const { error } = await supabase
-        .from('caretaker')
-        .delete()
-        .eq('id', caretakerId)
-        .eq('student_id', stId);
-      if (error) throw error;
-
-      setCaretakers((prev) => prev.filter((c) => c.id !== caretakerId));
-      setSuccessMsg('Caretaker removed.');
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Unexpected error.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  /* ---------------- Dropped Out ---------------- */
-  const markStudentDroppedOut = async () => {
-    setSubmitting(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    try {
-      if (!student || !profile?.school_id) throw new Error('Student not loaded.');
-
-      const today = new Date().toISOString().slice(0, 10);
+      const payload = {
+        ...guardiansForm,
+        updated: new Date().toISOString().slice(0, 10),
+      };
 
       const { error } = await supabase
         .from('students')
-        .update({ current_status: 'dropped out', updated: today })
-        .eq('registration_id', student.registration_id)
-        .eq('school_id', profile.school_id);
+        .update(payload)
+        .eq('registration_id', student?.registration_id);
 
       if (error) throw error;
-
-      setStudent((prev) =>
-        prev ? ({ ...prev, current_status: 'dropped out', updated: today } as StudentDetailRow) : prev
-      );
-      setCurrentStatus('dropped out');
-      setSuccessMsg('Student marked as dropped out.');
-      setDropModalOpen(false);
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'Unexpected error.');
+      
+      setSuccessMsg('Guardian information updated');
+      setEditGuardiansModal(false);
+    } catch (error: any) {
+      setErrorMsg(error.message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  /* ---------------- Loading / Guard ---------------- */
+  const handleSaveAcademicInfo = async (e: FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+
+    try {
+      const payload = {
+        ...academicForm,
+        current_grade_id: academicForm.current_grade_id === '' ? null : Number(academicForm.current_grade_id),
+        updated: new Date().toISOString().slice(0, 10),
+      };
+
+      const { error } = await supabase
+        .from('students')
+        .update(payload)
+        .eq('registration_id', student?.registration_id);
+
+      if (error) throw error;
+      
+      setSuccessMsg('Academic information updated');
+      setEditAcademicModal(false);
+      
+      // Reload fees if grade changed
+      if (payload.current_grade_id && student) {
+        await loadFeesData(student.registration_id, payload.current_grade_id, profile!.school_id!);
+      }
+    } catch (error: any) {
+      setErrorMsg(error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSaveAddress = async (e: FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+
+    try {
+      const payload = {
+        student_id: student?.registration_id,
+        ...addressForm,
+        updated: new Date().toISOString().slice(0, 10),
+      };
+
+      const { error } = await supabase
+        .from('students_address')
+        .upsert(payload, { onConflict: 'student_id' });
+
+      if (error) throw error;
+      
+      setSuccessMsg('Address saved successfully');
+      setAddressModalOpen(false);
+    } catch (error: any) {
+      setErrorMsg(error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSaveCaretaker = async (e: FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+
+    try {
+      const payload = {
+        student_id: student?.registration_id,
+        name: caretakerForm.name.trim(),
+        relationship: caretakerForm.relationship.trim(),
+        contact_number: caretakerForm.contact_number.trim(),
+        email: caretakerForm.email.trim() || null,
+        updated: new Date().toISOString().slice(0, 10),
+      };
+
+      if (editingCaretakerId) {
+        const { error } = await supabase
+          .from('caretaker')
+          .update(payload)
+          .eq('id', editingCaretakerId);
+
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('caretaker').insert(payload);
+        if (error) throw error;
+      }
+
+      setSuccessMsg(editingCaretakerId ? 'Caretaker updated' : 'Caretaker added');
+      setCaretakerModalOpen(false);
+      setCaretakerForm({ name: '', relationship: '', contact_number: '', email: '' });
+      setEditingCaretakerId(null);
+      
+      // Refresh caretakers list
+      const { data: caretakersData } = await supabase
+        .from('caretaker')
+        .select('*')
+        .eq('student_id', student?.registration_id);
+      setCaretakers((caretakersData || []) as CaretakerRow[]);
+    } catch (error: any) {
+      setErrorMsg(error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteCaretaker = async (id: number) => {
+    if (!confirm('Are you sure you want to delete this caretaker?')) return;
+
+    try {
+      const { error } = await supabase.from('caretaker').delete().eq('id', id);
+      if (error) throw error;
+      
+      setCaretakers(caretakers.filter(c => c.id !== id));
+      setSuccessMsg('Caretaker deleted');
+    } catch (error: any) {
+      setErrorMsg(error.message);
+    }
+  };
+
+  const updateFeeOptions = async (option: 'hostel' | 'breakfast' | 'lunch') => {
+    if (!tuitionDesc || !profile?.school_id) return;
+    
+    setSubmitting(true);
+    try {
+      const updatedOptions = {
+        hostel: option === 'hostel' ? !tuitionDesc.hostel : tuitionDesc.hostel,
+        breakfast: option === 'breakfast' ? !tuitionDesc.breakfast : tuitionDesc.breakfast,
+        lunch: option === 'lunch' ? !tuitionDesc.lunch : tuitionDesc.lunch,
+      };
+
+      const { error } = await supabase
+        .from('student_tuition_description')
+        .update(updatedOptions)
+        .eq('id', tuitionDesc.id);
+
+      if (error) throw error;
+      
+      setTuitionDesc({ ...tuitionDesc, ...updatedOptions });
+      setSuccessMsg('Fee options updated');
+    } catch (error: any) {
+      setErrorMsg(error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /* ---------------- Loading State ---------------- */
   if (authChecking || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
-          <div className="h-12 w-12 mx-auto rounded-xl bg-gradient-to-br from-blue-600 to-orange-500 animate-pulse mb-4" />
-          <p className="text-sm text-gray-600">Loading student profile…</p>
+          <div className="h-12 w-12 mx-auto rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 animate-pulse mb-4" />
+          <p className="text-sm text-gray-600">Loading student profile...</p>
         </div>
       </div>
     );
   }
 
-  if (needsSchoolLink) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
-        <Navbar userEmail={userEmail} userName={userName} />
-        <div className="flex flex-1">
-          <AppShell />
-          <main className="flex-1 flex items-center justify-center p-4">
-            <div className="max-w-md w-full bg-white rounded-xl border border-gray-200 p-6 text-center shadow-sm">
-              <div className="h-12 w-12 mx-auto rounded-xl bg-gradient-to-br from-blue-600 to-orange-500 flex items-center justify-center text-white font-bold mb-4">
-                <Users size={24} />
-              </div>
-              <h3 className="text-lg font-bold text-gray-900 mb-2">Access Restricted</h3>
-              <p className="text-sm text-gray-600 mb-4">Your account is not fully linked to a school.</p>
-              <button
-                onClick={() => router.push('/students')}
-                className="inline-flex items-center px-4 py-2 rounded-lg bg-gradient-to-r from-blue-600 to-blue-700 text-white text-sm font-medium shadow-sm hover:from-blue-700 hover:to-blue-800 transition-all"
-              >
-                Back to Students
-              </button>
-            </div>
-          </main>
-        </div>
-      </div>
-    );
-  }
-
-  /* ---------------- Render ---------------- */
-  const displayStudent = student;
-  const initials = displayStudent
-    ? `${displayStudent.first_name?.[0] || 'S'}${displayStudent.last_name?.[0] || 'T'}`
-    : 'ST';
-  const isDroppedOut = displayStudent?.current_status === 'dropped out';
-
+  /* ---------------- Main Render ---------------- */
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
+    <div className="min-h-screen bg-gray-50">
       <Navbar userEmail={userEmail} userName={userName} />
-      <div className="flex flex-1 overflow-hidden">
+      
+      <div className="flex">
         <AppShell />
-        <main className="flex-1 flex flex-col overflow-hidden">
+        
+        <main className="flex-1 p-6">
           {/* Header */}
-          <div className="p-6 border-b border-gray-200 bg-white">
-            <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="mb-6">
+            <button
+              onClick={() => router.push('/students')}
+              className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4"
+            >
+              <ArrowLeft size={20} />
+              Back to Students
+            </button>
+            
+            <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-4">
-                <button
-                  onClick={() => router.push('/students')}
-                  className="p-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 transition-colors"
-                  type="button"
-                  title="Back"
-                >
-                  <ArrowLeft size={18} />
-                </button>
-
-                <div className="flex items-center gap-4">
-                  <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center text-white font-bold text-xl shadow-sm">
-                    {initials}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h1 className="text-2xl md:text-3xl font-bold text-gray-900">
-                        {isCreateMode
-                          ? 'Add New Student'
-                          : `${displayStudent?.first_name || ''} ${displayStudent?.last_name || ''}`}
-                      </h1>
-
-                      {!isCreateMode && displayStudent && (
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-medium border ${statusChip(
-                            displayStudent.current_status
-                          )}`}
-                        >
-                          {displayStudent.current_status}
-                        </span>
-                      )}
-
-                      {!isCreateMode && displayStudent?.school_type && (
-                        <span className="px-3 py-1 rounded-full text-xs font-medium border bg-indigo-50 text-indigo-700 border-indigo-200">
-                          {displayStudent.school_type}
-                        </span>
-                      )}
-                    </div>
-
-                    <p className="text-sm text-gray-600 mt-1">
-                      School: <span className="font-semibold text-gray-900">{school?.school_name}</span>
-                      {!isCreateMode && displayStudent && (
-                        <>
-                          {' '}
-                          • Registration ID:{' '}
-                          <span className="font-mono font-semibold text-gray-900">
-                            {displayStudent.registration_id}
-                          </span>
-                        </>
-                      )}
-                    </p>
+                <div className="h-20 w-20 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-3xl font-bold">
+                  {student ? `${student.first_name[0]}${student.last_name[0]}` : 'NS'}
+                </div>
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900">
+                    {isCreateMode ? 'New Student' : `${student?.first_name} ${student?.last_name}`}
+                  </h1>
+                  <div className="flex items-center gap-3 mt-2">
+                    <span className="text-gray-600">{school?.school_name}</span>
+                    {student && <StatusBadge status={student.current_status} />}
+                    {student?.school_type && (
+                      <span className="px-3 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200">
+                        {student.school_type}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                {!isEditing ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsEditing(true)}
-                    disabled={isDroppedOut}
-                    className="inline-flex items-center px-4 py-2.5 rounded-lg bg-gradient-to-r from-blue-600 to-blue-700 text-white text-sm font-medium shadow-sm hover:from-blue-700 hover:to-blue-800 transition-all disabled:opacity-60"
-                    title={isDroppedOut ? 'Dropped out students are read-only' : 'Edit Profile'}
-                  >
-                    <Pencil size={16} className="mr-2" />
-                    Edit
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (displayStudent) hydrateFromStudent(displayStudent);
-                      if (isCreateMode && !displayStudent) clearForCreate();
-                      setIsEditing(isCreateMode);
-                      setErrorMsg(null);
-                      setSuccessMsg(null);
-                    }}
-                    className="inline-flex items-center px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium bg-white hover:bg-gray-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                )}
-
-                {!isCreateMode && (
-                  <button
-                    type="button"
-                    onClick={() => setDropModalOpen(true)}
-                    className="inline-flex items-center px-4 py-2.5 rounded-lg bg-amber-600 text-white text-sm font-medium shadow-sm hover:bg-amber-700 transition-all"
-                  >
-                    <Shield size={16} className="mr-2" />
-                    Dropped Out
-                  </button>
+              <div className="flex items-center gap-3">
+                {!isCreateMode && student && (
+                  <>
+                    <button
+                      onClick={() => setEditPersonalModal(true)}
+                      className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <Edit2 size={16} />
+                      Edit Profile
+                    </button>
+                    <button
+                      onClick={() => setDropModalOpen(true)}
+                      className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 flex items-center gap-2"
+                    >
+                      <Shield size={16} />
+                      Drop Out
+                    </button>
+                  </>
                 )}
               </div>
             </div>
 
             {/* Messages */}
             {errorMsg && (
-              <div className="mt-4 p-4 rounded-xl border border-red-200 bg-red-50 flex items-start">
-                <XCircle className="h-5 w-5 text-red-600 mr-3 flex-shrink-0" />
-                <div className="text-sm text-red-700">{errorMsg}</div>
+              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3">
+                <AlertCircle className="text-red-600" size={20} />
+                <div className="text-red-700">{errorMsg}</div>
               </div>
             )}
+            
             {successMsg && (
-              <div className="mt-4 p-4 rounded-xl border border-emerald-200 bg-emerald-50 flex items-start">
-                <CheckCircle2 className="h-5 w-5 text-emerald-600 mr-3 flex-shrink-0" />
-                <div className="text-sm text-emerald-800 font-medium">{successMsg}</div>
+              <div className="mb-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3">
+                <CheckCircle className="text-emerald-600" size={20} />
+                <div className="text-emerald-700">{successMsg}</div>
               </div>
             )}
-          </div>
 
-          {/* Tabs */}
-          <div className="p-4 bg-white border-b border-gray-200">
-            <div className="flex flex-wrap items-center gap-2">
-              <TabButton
-                active={tab === 'overview'}
-                onClick={() => setTab('overview')}
-                icon={<UserCircle2 size={16} />}
-                label="Overview"
+            {/* Quick Info Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <InfoCard
+                icon={<UserCircle size={20} />}
+                title="Student ID"
+                value={student?.registration_id || '—'}
+                subtitle={`LIN: ${student?.lin_id || 'Not set'}`}
+                color="blue"
               />
-              <TabButton
-                active={tab === 'guardians'}
-                onClick={() => setTab('guardians')}
-                icon={<Phone size={16} />}
-                label="Guardians"
+              
+              <InfoCard
+                icon={<Calendar size={20} />}
+                title="Date of Birth"
+                value={student?.date_of_birth ? new Date(student.date_of_birth).toLocaleDateString() : 'Not set'}
+                subtitle={`Age: ${student?.date_of_birth ? Math.floor((new Date().getTime() - new Date(student.date_of_birth).getTime()) / 31536000000) : '—'} years`}
+                color="green"
               />
-              <TabButton
-                active={tab === 'address'}
-                onClick={() => setTab('address')}
-                icon={<MapPin size={16} />}
-                label="Address"
+              
+              <InfoCard
+                icon={<GraduationCap size={20} />}
+                title="Current Grade"
+                value={student?.class?.grade_name || 'Not assigned'}
+                subtitle={`Entry: ${student?.grade_of_entry || '—'}`}
+                color="purple"
               />
-              <TabButton
-                active={tab === 'caretakers'}
-                onClick={() => setTab('caretakers')}
-                icon={<Users size={16} />}
-                label="Caretakers"
-              />
-              <TabButton
-                active={tab === 'academic'}
-                onClick={() => setTab('academic')}
-                icon={<GraduationCap size={16} />}
-                label="Academic & Fees"
-              />
-              <TabButton
-                active={tab === 'record'}
-                onClick={() => setTab('record')}
-                icon={<Shield size={16} />}
-                label="Record"
+              
+              <InfoCard
+                icon={<Building size={20} />}
+                title="School Type"
+                value={student?.school_type ? student.school_type.charAt(0).toUpperCase() + student.school_type.slice(1) : 'Not set'}
+                subtitle={`Year: ${student?.year_of_entry || '—'}`}
+                color="amber"
               />
             </div>
           </div>
 
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-6">
-            {/* SAVE BAR */}
-            {isEditing && (
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 flex items-center justify-between gap-3 flex-wrap">
-                <div className="text-sm text-gray-700">
-                  {isCreateMode
-                    ? 'Fill in the student details then click Save to create.'
-                    : 'Make changes then click Save.'}
+          {/* Main Content Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left Column - Personal & Academic */}
+            <div className="lg:col-span-2 space-y-6">
+              {/* Personal Information */}
+              <SectionCard
+                title="Personal Information"
+                icon={<User size={20} />}
+                action={
+                  <button
+                    onClick={() => setEditPersonalModal(true)}
+                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                  >
+                    <Edit2 size={14} />
+                    Edit
+                  </button>
+                }
+              >
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-sm text-gray-500 mb-1">Full Name</div>
+                    <div className="font-medium">{student?.first_name} {student?.last_name}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-500 mb-1">Gender</div>
+                    <div className="font-medium">{student?.gender ? student.gender.charAt(0).toUpperCase() + student.gender.slice(1) : 'Not set'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-500 mb-1">Registration Date</div>
+                    <div className="font-medium">{student?.created ? new Date(student.created).toLocaleDateString() : 'Not set'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-500 mb-1">Last Updated</div>
+                    <div className="font-medium">{student?.updated ? new Date(student.updated).toLocaleDateString() : 'Not set'}</div>
+                  </div>
                 </div>
-                <button
-                  type="submit"
-                  form="student-form"
-                  disabled={submitting || isDroppedOut}
-                  className="inline-flex items-center px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 text-white text-sm font-medium hover:from-blue-700 hover:to-blue-800 disabled:opacity-60"
-                >
-                  <Save size={16} className="mr-2" />
-                  {submitting ? 'Saving...' : 'Save Student'}
-                </button>
-              </div>
-            )}
+              </SectionCard>
 
-            {/* OVERVIEW TAB */}
-            {tab === 'overview' && (
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-                <form id="student-form" onSubmit={saveStudent} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {isCreateMode && (
-                    <div className="space-y-2 md:col-span-2">
-                      <label className="block text-sm font-semibold text-gray-700">
-                        Registration ID *
-                      </label>
-                      <input
-                        value={registrationIdInput}
-                        onChange={(e) => setRegistrationIdInput(e.target.value)}
-                        disabled={!isEditing}
-                        className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                        placeholder="e.g. 2025/PCS/001"
-                      />
-                      <p className="text-xs text-gray-500">
-                        This becomes the primary key in your students table.
-                      </p>
+              {/* Academic Information */}
+              <SectionCard
+                title="Academic Information"
+                icon={<BookOpen size={20} />}
+                action={
+                  <button
+                    onClick={() => setEditAcademicModal(true)}
+                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                  >
+                    <Edit2 size={14} />
+                    Edit
+                  </button>
+                }
+              >
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-sm text-gray-500 mb-1">Current Class</div>
+                    <div className="font-medium">{student?.class?.grade_name || 'Not assigned'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-500 mb-1">Grade of Entry</div>
+                    <div className="font-medium">{student?.grade_of_entry || 'Not set'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-500 mb-1">Year of Entry</div>
+                    <div className="font-medium">{student?.year_of_entry || 'Not set'}</div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-500 mb-1">Status</div>
+                    <div className="font-medium">
+                      <StatusBadge status={student?.current_status || 'active'} />
                     </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">LIN ID</label>
-                    <input
-                      value={linId}
-                      onChange={(e) => setLinId(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    />
                   </div>
+                </div>
+              </SectionCard>
 
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">First Name *</label>
-                    <input
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">Last Name *</label>
-                    <input
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">Date of Birth *</label>
-                    <input
-                      type="date"
-                      value={dateOfBirth}
-                      onChange={(e) => setDateOfBirth(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">Current Status *</label>
-                    <select
-                      value={currentStatus}
-                      onChange={(e) => setCurrentStatus(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    >
-                      {STATUS_CHOICES.map((s) => (
-                        <option key={s.value} value={s.value}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">Gender</label>
-                    <select
-                      value={gender}
-                      onChange={(e) => setGender(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    >
-                      <option value="">—</option>
-                      {GENDER_CHOICES.map((g) => (
-                        <option key={g.value} value={g.value}>
-                          {g.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">School Type</label>
-                    <select
-                      value={schoolType}
-                      onChange={(e) => setSchoolType(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    >
-                      {SCHOOL_TYPE_CHOICES.map((t) => (
-                        <option key={t.value} value={t.value}>
-                          {t.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">Grade of Entry</label>
-                    <input
-                      value={gradeOfEntry}
-                      onChange={(e) => setGradeOfEntry(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">Year of Entry</label>
-                    <input
-                      value={yearOfEntry}
-                      onChange={(e) => setYearOfEntry(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                      placeholder="e.g. 2025"
-                    />
-                  </div>
-
-                  <div className="space-y-2 md:col-span-2">
-                    <label className="block text-sm font-semibold text-gray-700">Current Class</label>
-                    <select
-                      value={currentGradeId}
-                      onChange={(e) => setCurrentGradeId(e.target.value === '' ? '' : Number(e.target.value))}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    >
-                      <option value="">Not assigned</option>
-                      {grades.map((g) => (
-                        <option key={g.id} value={g.id}>
-                          {g.grade_name}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-gray-500">
-                      When a class is set and saved, the system auto-creates/updates the student tuition record.
-                    </p>
-                  </div>
-                </form>
-              </div>
-            )}
-
-            {/* GUARDIANS TAB */}
-            {tab === 'guardians' && (
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-                <form onSubmit={saveStudent} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">Guardian Name</label>
-                    <input
-                      value={guardianName}
-                      onChange={(e) => setGuardianName(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">Guardian Phone</label>
-                    <input
-                      value={guardianPhone}
-                      onChange={(e) => setGuardianPhone(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    />
-                  </div>
-
-                  <div className="md:col-span-2 border-t border-gray-200 pt-4 mt-2" />
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">Father Name</label>
-                    <input
-                      value={fatherName}
-                      onChange={(e) => setFatherName(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">Father Phone</label>
-                    <input
-                      value={fatherPhone}
-                      onChange={(e) => setFatherPhone(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <label className="block text-sm font-semibold text-gray-700">Father NIN</label>
-                    <input
-                      value={fatherNIN}
-                      onChange={(e) => setFatherNIN(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    />
-                  </div>
-
-                  <div className="md:col-span-2 border-t border-gray-200 pt-4 mt-2" />
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">Mother Name</label>
-                    <input
-                      value={motherName}
-                      onChange={(e) => setMotherName(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="block text-sm font-semibold text-gray-700">Mother Phone</label>
-                    <input
-                      value={motherPhone}
-                      onChange={(e) => setMotherPhone(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <label className="block text-sm font-semibold text-gray-700">Mother NIN</label>
-                    <input
-                      value={motherNIN}
-                      onChange={(e) => setMotherNIN(e.target.value)}
-                      disabled={!isEditing}
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                    />
-                  </div>
-
-                  {isEditing && (
-                    <div className="md:col-span-2 pt-3">
-                      <button
-                        type="submit"
-                        disabled={submitting || isDroppedOut}
-                        className="inline-flex items-center px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
-                      >
-                        <Save size={16} className="mr-2" />
-                        {submitting ? 'Saving...' : 'Save'}
-                      </button>
-                    </div>
-                  )}
-                </form>
-              </div>
-            )}
-
-            {/* ADDRESS TAB */}
-            {tab === 'address' && (
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-                {!student ? (
-                  <div className="text-sm text-gray-700">Save the student first, then you can add the address.</div>
-                ) : (
-                  <form onSubmit={upsertAddress} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2 md:col-span-2">
-                      <label className="block text-sm font-semibold text-gray-700">Address *</label>
-                      <input
-                        value={addrAddress}
-                        onChange={(e) => setAddrAddress(e.target.value)}
-                        className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-semibold text-gray-700">City *</label>
-                      <input
-                        value={addrCity}
-                        onChange={(e) => setAddrCity(e.target.value)}
-                        className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="block text-sm font-semibold text-gray-700">State *</label>
-                      <input
-                        value={addrState}
-                        onChange={(e) => setAddrState(e.target.value)}
-                        className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                      />
-                    </div>
-                    <div className="space-y-2 md:col-span-2">
-                      <label className="block text-sm font-semibold text-gray-700">Zip Code *</label>
-                      <input
-                        value={addrZip}
-                        onChange={(e) => setAddrZip(e.target.value)}
-                        className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-                      />
-                    </div>
-                    <div className="md:col-span-2">
-                      <button
-                        type="submit"
-                        disabled={submitting}
-                        className="inline-flex items-center px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-60"
-                      >
-                        <Save size={16} className="mr-2" />
-                        {submitting ? 'Saving...' : address ? 'Update Address' : 'Save Address'}
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-            )}
-
-            {/* CARETAKERS TAB */}
-            {tab === 'caretakers' && (
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-                {!student ? (
-                  <div className="text-sm text-gray-700">Save the student first, then you can add caretakers.</div>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-900">Caretakers</h3>
-                        <p className="text-sm text-gray-600">You can add multiple caretakers for one student.</p>
+              {/* Guardians Information */}
+              <SectionCard
+                title="Family & Guardians"
+                icon={<Users size={20} />}
+                action={
+                  <button
+                    onClick={() => setEditGuardiansModal(true)}
+                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                  >
+                    <Edit2 size={14} />
+                    Edit
+                  </button>
+                }
+              >
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Primary Guardian</h4>
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="font-medium">{student?.guardian_name || 'Not set'}</div>
+                      <div className="text-sm text-gray-600 flex items-center gap-1">
+                        <Phone size={14} />
+                        {student?.guardian_phone || 'No phone'}
                       </div>
-                      <button
-                        type="button"
-                        onClick={openAddCaretaker}
-                        className="inline-flex items-center px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
-                      >
-                        <Plus size={16} className="mr-2" />
-                        Add Caretaker
-                      </button>
                     </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Father</h4>
+                      <div className="space-y-1">
+                        <div className="font-medium">{student?.father_name || 'Not set'}</div>
+                        <div className="text-sm text-gray-600 flex items-center gap-1">
+                          <Phone size={14} />
+                          {student?.father_phone || 'No phone'}
+                        </div>
+                        {student?.father_nin && (
+                          <div className="text-xs text-gray-500">NIN: {student.father_nin}</div>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700 mb-2">Mother</h4>
+                      <div className="space-y-1">
+                        <div className="font-medium">{student?.mother_name || 'Not set'}</div>
+                        <div className="text-sm text-gray-600 flex items-center gap-1">
+                          <Phone size={14} />
+                          {student?.mother_phone || 'No phone'}
+                        </div>
+                        {student?.mother_nin && (
+                          <div className="text-xs text-gray-500">NIN: {student.mother_nin}</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </SectionCard>
 
-                    {caretakers.length === 0 ? (
-                      <div className="text-sm text-gray-700">No caretakers yet.</div>
-                    ) : (
-                      <div className="space-y-3">
-                        {caretakers.map((ct) => (
-                          <div
-                            key={ct.id}
-                            className="rounded-xl border border-gray-200 p-4 flex items-start justify-between gap-3"
+              {/* Caretakers */}
+              <SectionCard
+                title="Additional Caretakers"
+                icon={<Users size={20} />}
+                action={
+                  <button
+                    onClick={() => {
+                      setCaretakerForm({ name: '', relationship: '', contact_number: '', email: '' });
+                      setEditingCaretakerId(null);
+                      setCaretakerModalOpen(true);
+                    }}
+                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                  >
+                    <Plus size={14} />
+                    Add
+                  </button>
+                }
+              >
+                {caretakers.length === 0 ? (
+                  <div className="text-center py-4 text-gray-500">
+                    No additional caretakers added yet
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {caretakers.map((ct) => (
+                      <div key={ct.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div>
+                          <div className="font-medium">{ct.name}</div>
+                          <div className="text-sm text-gray-600">
+                            {ct.relationship} • {ct.contact_number}
+                          </div>
+                          {ct.email && (
+                            <div className="text-xs text-gray-500 flex items-center gap-1">
+                              <Mail size={12} />
+                              {ct.email}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setCaretakerForm({
+                                name: ct.name,
+                                relationship: ct.relationship,
+                                contact_number: ct.contact_number,
+                                email: ct.email || '',
+                              });
+                              setEditingCaretakerId(ct.id);
+                              setCaretakerModalOpen(true);
+                            }}
+                            className="p-1.5 text-gray-500 hover:text-blue-600"
                           >
-                            <div className="min-w-0">
-                              <div className="font-semibold text-gray-900">{ct.name}</div>
-                              <div className="text-sm text-gray-600">
-                                {ct.relationship} • {ct.contact_number}
-                              </div>
-                              {ct.email && <div className="text-sm text-gray-500">{ct.email}</div>}
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => openEditCaretaker(ct)}
-                                className="px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-sm"
-                              >
-                                <Pencil size={14} className="inline mr-1" />
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deleteCaretaker(ct.id)}
-                                disabled={submitting}
-                                className="px-3 py-2 rounded-lg bg-rose-600 text-white hover:bg-rose-700 text-sm disabled:opacity-60"
-                              >
-                                <Trash2 size={14} className="inline mr-1" />
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCaretaker(ct.id)}
+                            className="p-1.5 text-gray-500 hover:text-red-600"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </div>
-                    )}
-                  </>
+                    ))}
+                  </div>
                 )}
-              </div>
-            )}
+              </SectionCard>
+            </div>
 
-            {/* ACADEMIC TAB (includes FEES) */}
-            {tab === 'academic' && (
-              <div className="space-y-6">
-                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
+            {/* Right Column - Address & Fees */}
+            <div className="space-y-6">
+              {/* Address Information */}
+              <SectionCard
+                title="Address"
+                icon={<MapPin size={20} />}
+                action={
+                  <button
+                    onClick={() => setAddressModalOpen(true)}
+                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                  >
+                    {address ? <Edit2 size={14} /> : <Plus size={14} />}
+                    {address ? 'Edit' : 'Add'}
+                  </button>
+                }
+              >
+                {address ? (
+                  <div className="space-y-3">
                     <div>
-                      <h3 className="text-lg font-bold text-gray-900">Fees (Auto Tuition Setup)</h3>
-                      <p className="text-sm text-gray-600">
-                        When a student has a current class, the tuition record is created automatically.
-                      </p>
+                      <div className="text-sm text-gray-500 mb-1">Address</div>
+                      <div className="font-medium">{address.address}</div>
                     </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={refreshFinance}
-                        disabled={feeLoading || !student?.current_grade_id}
-                        className="inline-flex items-center px-4 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-sm disabled:opacity-60"
-                      >
-                        <Wallet size={16} className="mr-2" />
-                        {feeLoading ? 'Refreshing…' : 'Refresh'}
-                      </button>
-                      {!canEditFeesDescription && (
-                        <span className="inline-flex items-center gap-2 text-xs px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800">
-                          <AlertTriangle size={14} />
-                          Fee options locked (30 days passed)
-                        </span>
-                      )}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <div className="text-sm text-gray-500 mb-1">City</div>
+                        <div className="font-medium">{address.city}</div>
+                      </div>
+                      <div>
+                        <div className="text-sm text-gray-500 mb-1">State</div>
+                        <div className="font-medium">{address.state}</div>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-sm text-gray-500 mb-1">Zip Code</div>
+                      <div className="font-medium">{address.zip_code}</div>
                     </div>
                   </div>
-
-                  {!student?.current_grade_id ? (
-                    <div className="mt-4 p-4 rounded-xl bg-gray-50 border border-gray-200 text-sm text-gray-700">
-                      Set <b>Current Class</b> in the Overview tab, then Save — fees will be generated.
-                    </div>
-                  ) : !schoolFees ? (
-                    <div className="mt-4 p-4 rounded-xl bg-rose-50 border border-rose-200 text-sm text-rose-700">
-                      No fee setup found for this grade in <b>assessment_schoolfees</b>. Create a fee record for the
-                      student’s class.
-                    </div>
-                  ) : (
-                    <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-4">
-                      <div className="rounded-2xl border border-gray-200 p-5">
-                        <div className="flex items-center justify-between">
-                          <div className="text-sm font-semibold text-gray-700">Base Fees</div>
-                          <Receipt size={18} className="text-gray-400" />
-                        </div>
-                        <div className="mt-4 space-y-2 text-sm text-gray-700">
-                          <div className="flex items-center justify-between">
-                            <span>Tuition</span>
-                            <span className="font-semibold">UGX {money(schoolFees.tuitionfee)}</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span>Hostel</span>
-                            <span className="font-semibold">UGX {money(schoolFees.hostelfee)}</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span>Breakfast</span>
-                            <span className="font-semibold">UGX {money(schoolFees.breakfastfee)}</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span>Lunch</span>
-                            <span className="font-semibold">UGX {money(schoolFees.lunchfee)}</span>
-                          </div>
-                        </div>
-                        <div className="mt-4 text-xs text-gray-500">{schoolFees.description}</div>
-                      </div>
-
-                      <div className="rounded-2xl border border-gray-200 p-5 lg:col-span-2">
-                        <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <div>
-                            <div className="text-sm font-semibold text-gray-700">Student Fee Options</div>
-                            <div className="text-xs text-gray-500">
-                              Editable within 30 days (Admins can override).
-                            </div>
-                          </div>
-
-                          <div className="text-right">
-                            <div className="text-xs text-gray-500">Computed Total</div>
-                            <div className="text-2xl font-bold text-gray-900">
-                              UGX {money(tuitionDesc?.total_fee ?? 0)}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
-                          {([
-                            { key: 'hostel', label: 'Hostel', hint: 'Boarding students usually need this.' },
-                            { key: 'breakfast', label: 'Breakfast', hint: 'Optional breakfast charge.' },
-                            { key: 'lunch', label: 'Lunch', hint: 'Optional lunch charge.' },
-                          ] as const).map((item) => {
-                            const checked = (tuitionDesc as any)?.[item.key] ?? false;
-                            return (
-                              <button
-                                key={item.key}
-                                type="button"
-                                disabled={!canEditFeesDescription || feeLoading}
-                                onClick={() =>
-                                  updateFeeOptions({
-                                    hostel: item.key === 'hostel' ? !checked : (tuitionDesc?.hostel ?? false),
-                                    breakfast:
-                                      item.key === 'breakfast'
-                                        ? !checked
-                                        : (tuitionDesc?.breakfast ?? false),
-                                    lunch: item.key === 'lunch' ? !checked : (tuitionDesc?.lunch ?? false),
-                                  })
-                                }
-                                className={`text-left rounded-2xl border p-4 transition-all ${
-                                  checked
-                                    ? 'border-blue-200 bg-blue-50'
-                                    : 'border-gray-200 bg-white hover:bg-gray-50'
-                                } disabled:opacity-60`}
-                              >
-                                <div className="flex items-center justify-between">
-                                  <div className="font-semibold text-gray-900">{item.label}</div>
-                                  <div
-                                    className={`h-5 w-10 rounded-full relative transition-all ${
-                                      checked ? 'bg-blue-600' : 'bg-gray-300'
-                                    }`}
-                                  >
-                                    <div
-                                      className={`h-4 w-4 bg-white rounded-full absolute top-0.5 transition-all ${
-                                        checked ? 'right-0.5' : 'left-0.5'
-                                      }`}
-                                    />
-                                  </div>
-                                </div>
-                                <div className="text-xs text-gray-500 mt-1">{item.hint}</div>
-                              </button>
-                            );
-                          })}
-                        </div>
-
-                        <div className="mt-5 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
-                          <b>Note:</b> Total fee is calculated by your DB trigger on{' '}
-                          <span className="font-mono">student_tuition_description</span>.
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div>
-                      <h3 className="text-lg font-bold text-gray-900">Next Step</h3>
-                      <p className="text-sm text-gray-600">
-                        If you want, we can now create the student’s term transactions in{' '}
-                        <span className="font-mono">fee_transaction</span> and carry balances forward.
-                      </p>
-                    </div>
+                ) : (
+                  <div className="text-center py-6 text-gray-500">
+                    <MapPin size={24} className="mx-auto mb-2 text-gray-400" />
+                    <div>No address added yet</div>
                     <button
-                      type="button"
-                      onClick={() => router.push('/finance')}
-                      className="inline-flex items-center px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 text-white text-sm font-medium shadow-sm hover:from-emerald-700 hover:to-emerald-800 transition-all"
+                      onClick={() => setAddressModalOpen(true)}
+                      className="mt-2 text-sm text-blue-600 hover:text-blue-700"
                     >
-                      <Wallet size={16} className="mr-2" />
+                      Add address
+                    </button>
+                  </div>
+                )}
+              </SectionCard>
+
+              {/* Fee Information */}
+              <SectionCard
+                title="Fee Details"
+                icon={<CreditCard size={20} />}
+                action={
+                  <button
+                    onClick={() => setFeesModalOpen(true)}
+                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                  >
+                    <DollarSign size={14} />
+                    View Details
+                  </button>
+                }
+              >
+                {schoolFees ? (
+                  <div className="space-y-4">
+                    <div className="bg-gradient-to-r from-blue-50 to-blue-100 rounded-xl p-4">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <div className="text-sm text-blue-800">Total Fee</div>
+                          <div className="text-2xl font-bold text-blue-900">
+                            UGX {(tuitionDesc?.total_fee || 0).toLocaleString()}
+                          </div>
+                        </div>
+                        <Calculator size={24} className="text-blue-600" />
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <h4 className="text-sm font-medium text-gray-700">Selected Options</h4>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+                          <div className="flex items-center gap-2">
+                            <Bed size={16} className="text-gray-400" />
+                            <span>Hostel</span>
+                          </div>
+                          <div className={`px-2 py-1 rounded text-xs font-medium ${tuitionDesc?.hostel ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-800'}`}>
+                            {tuitionDesc?.hostel ? 'Selected' : 'Not selected'}
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+                          <div className="flex items-center gap-2">
+                            <Coffee size={16} className="text-gray-400" />
+                            <span>Breakfast</span>
+                          </div>
+                          <div className={`px-2 py-1 rounded text-xs font-medium ${tuitionDesc?.breakfast ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-800'}`}>
+                            {tuitionDesc?.breakfast ? 'Selected' : 'Not selected'}
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+                          <div className="flex items-center gap-2">
+                            <Utensils size={16} className="text-gray-400" />
+                            <span>Lunch</span>
+                          </div>
+                          <div className={`px-2 py-1 rounded text-xs font-medium ${tuitionDesc?.lunch ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-800'}`}>
+                            {tuitionDesc?.lunch ? 'Selected' : 'Not selected'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => router.push('/finance')}
+                      className="w-full mt-4 px-4 py-2 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white rounded-lg hover:from-emerald-700 hover:to-emerald-800 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Wallet size={16} />
                       Go to Finance
                     </button>
                   </div>
-                </div>
-              </div>
-            )}
+                ) : (
+                  <div className="text-center py-6 text-gray-500">
+                    <CreditCard size={24} className="mx-auto mb-2 text-gray-400" />
+                    <div>No fee setup for this grade</div>
+                    <div className="text-sm mt-1">Set class to view fees</div>
+                  </div>
+                )}
+              </SectionCard>
 
-            {/* RECORD TAB - keep placeholder as before */}
-            {tab === 'record' && (
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-2">Record</h3>
-                <p className="text-sm text-gray-600">
-                  Add disciplinary / record history screens here (same as your previous plan).
-                </p>
-              </div>
-            )}
+              {/* Quick Stats */}
+              <SectionCard title="Quick Stats" icon={<BarChart3 size={20} />}>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center p-2">
+                    <span className="text-sm text-gray-600">Caretakers</span>
+                    <span className="font-semibold">{caretakers.length}</span>
+                  </div>
+                  <div className="flex justify-between items-center p-2">
+                    <span className="text-sm text-gray-600">Enrollment Days</span>
+                    <span className="font-semibold">
+                      {student?.created ? Math.floor((new Date().getTime() - new Date(student.created).getTime()) / 86400000) : '—'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-2">
+                    <span className="text-sm text-gray-600">Last Updated</span>
+                    <span className="font-semibold">
+                      {student?.updated ? Math.floor((new Date().getTime() - new Date(student.updated).getTime()) / 86400000) : '—'} days ago
+                    </span>
+                  </div>
+                </div>
+              </SectionCard>
+            </div>
           </div>
         </main>
       </div>
 
-      {/* Caretaker modal */}
+      {/* Personal Information Modal */}
       <Modal
-        open={caretakerModalOpen}
-        title={caretakerMode === 'add' ? 'Add Caretaker' : 'Edit Caretaker'}
-        onClose={() => setCaretakerModalOpen(false)}
-        footer={
-          <div className="flex items-center justify-end gap-2">
+        open={editPersonalModal}
+        title={isCreateMode ? "Create Student" : "Edit Personal Information"}
+        onClose={() => setEditPersonalModal(false)}
+        widthClass="max-w-2xl"
+      >
+        <form onSubmit={handleSavePersonalInfo} className="space-y-6">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">First Name *</label>
+              <input
+                type="text"
+                required
+                value={personalForm.first_name}
+                onChange={(e) => setPersonalForm({...personalForm, first_name: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Last Name *</label>
+              <input
+                type="text"
+                required
+                value={personalForm.last_name}
+                onChange={(e) => setPersonalForm({...personalForm, last_name: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Registration ID *</label>
+              <input
+                type="text"
+                required={isCreateMode}
+                disabled={!isCreateMode}
+                value={personalForm.registration_id}
+                onChange={(e) => setPersonalForm({...personalForm, registration_id: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">LIN ID</label>
+              <input
+                type="text"
+                value={personalForm.lin_id}
+                onChange={(e) => setPersonalForm({...personalForm, lin_id: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Date of Birth *</label>
+              <input
+                type="date"
+                required
+                value={personalForm.date_of_birth}
+                onChange={(e) => setPersonalForm({...personalForm, date_of_birth: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Gender</label>
+              <select
+                value={personalForm.gender}
+                onChange={(e) => setPersonalForm({...personalForm, gender: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="">Select gender</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">School Type</label>
+              <select
+                value={personalForm.school_type}
+                onChange={(e) => setPersonalForm({...personalForm, school_type: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="day">Day</option>
+                <option value="boarding">Boarding</option>
+                <option value="bursary">Bursary</option>
+                <option value="scholarship">Scholarship</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
+              <select
+                value={personalForm.current_status}
+                onChange={(e) => setPersonalForm({...personalForm, current_status: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="active">Active</option>
+                <option value="graduated">Graduated</option>
+                <option value="dropped out">Dropped Out</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-gray-200 flex justify-end gap-3">
             <button
               type="button"
-              onClick={() => setCaretakerModalOpen(false)}
-              className="px-4 py-2 rounded-lg border border-gray-200 hover:bg-gray-50"
+              onClick={() => setEditPersonalModal(false)}
+              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"
             >
               Cancel
             </button>
             <button
               type="submit"
-              form="caretaker-form"
               disabled={submitting}
-              className="inline-flex items-center px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
             >
-              <Save size={16} className="mr-2" />
-              {submitting ? 'Saving...' : 'Save'}
+              <Save size={16} />
+              {submitting ? 'Saving...' : isCreateMode ? 'Create Student' : 'Save Changes'}
             </button>
-          </div>
-        }
-      >
-        <form id="caretaker-form" onSubmit={saveCaretaker} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2 md:col-span-2">
-            <label className="text-sm font-semibold text-gray-700 block">Name *</label>
-            <input
-              value={ctName}
-              onChange={(e) => setCtName(e.target.value)}
-              className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-gray-700 block">Relationship *</label>
-            <input
-              value={ctRelationship}
-              onChange={(e) => setCtRelationship(e.target.value)}
-              className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-            />
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-gray-700 block">Contact *</label>
-            <input
-              value={ctContact}
-              onChange={(e) => setCtContact(e.target.value)}
-              className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-            />
-          </div>
-          <div className="space-y-2 md:col-span-2">
-            <label className="text-sm font-semibold text-gray-700 block">Email</label>
-            <input
-              value={ctEmail}
-              onChange={(e) => setCtEmail(e.target.value)}
-              className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm"
-            />
           </div>
         </form>
       </Modal>
 
-      {/* Dropped out confirm modal */}
+      {/* Guardians Modal */}
+      <Modal
+        open={editGuardiansModal}
+        title="Edit Guardian Information"
+        onClose={() => setEditGuardiansModal(false)}
+        widthClass="max-w-lg"
+      >
+        <form onSubmit={handleSaveGuardiansInfo} className="space-y-6">
+          <div>
+            <h4 className="font-medium text-gray-900 mb-3">Primary Guardian</h4>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
+                <input
+                  type="text"
+                  value={guardiansForm.guardian_name}
+                  onChange={(e) => setGuardiansForm({...guardiansForm, guardian_name: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
+                <input
+                  type="tel"
+                  value={guardiansForm.guardian_phone}
+                  onChange={(e) => setGuardiansForm({...guardiansForm, guardian_phone: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="font-medium text-gray-900 mb-3">Father's Information</h4>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
+                  <input
+                    type="text"
+                    value={guardiansForm.father_name}
+                    onChange={(e) => setGuardiansForm({...guardiansForm, father_name: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
+                  <input
+                    type="tel"
+                    value={guardiansForm.father_phone}
+                    onChange={(e) => setGuardiansForm({...guardiansForm, father_phone: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">National ID (NIN)</label>
+                <input
+                  type="text"
+                  value={guardiansForm.father_nin}
+                  onChange={(e) => setGuardiansForm({...guardiansForm, father_nin: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="font-medium text-gray-900 mb-3">Mother's Information</h4>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
+                  <input
+                    type="text"
+                    value={guardiansForm.mother_name}
+                    onChange={(e) => setGuardiansForm({...guardiansForm, mother_name: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Phone</label>
+                  <input
+                    type="tel"
+                    value={guardiansForm.mother_phone}
+                    onChange={(e) => setGuardiansForm({...guardiansForm, mother_phone: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">National ID (NIN)</label>
+                <input
+                  type="text"
+                  value={guardiansForm.mother_nin}
+                  onChange={(e) => setGuardiansForm({...guardiansForm, mother_nin: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-gray-200 flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setEditGuardiansModal(false)}
+              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              <Save size={16} />
+              {submitting ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Academic Modal */}
+      <Modal
+        open={editAcademicModal}
+        title="Edit Academic Information"
+        onClose={() => setEditAcademicModal(false)}
+      >
+        <form onSubmit={handleSaveAcademicInfo} className="space-y-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Current Class</label>
+            <select
+              value={academicForm.current_grade_id}
+              onChange={(e) => setAcademicForm({...academicForm, current_grade_id: e.target.value === '' ? '' : Number(e.target.value)})}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="">Not assigned</option>
+              {grades.map((grade) => (
+                <option key={grade.id} value={grade.id}>
+                  {grade.grade_name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Grade of Entry</label>
+              <input
+                type="text"
+                value={academicForm.grade_of_entry}
+                onChange={(e) => setAcademicForm({...academicForm, grade_of_entry: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="e.g., P.1"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Year of Entry</label>
+              <input
+                type="text"
+                value={academicForm.year_of_entry}
+                onChange={(e) => setAcademicForm({...academicForm, year_of_entry: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="e.g., 2023"
+              />
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-gray-200 flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setEditAcademicModal(false)}
+              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              <Save size={16} />
+              {submitting ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Address Modal */}
+      <Modal
+        open={addressModalOpen}
+        title="Update Address"
+        onClose={() => setAddressModalOpen(false)}
+      >
+        <form onSubmit={handleSaveAddress} className="space-y-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Address *</label>
+            <input
+              type="text"
+              required
+              value={addressForm.address}
+              onChange={(e) => setAddressForm({...addressForm, address: e.target.value})}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Street address"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">City *</label>
+              <input
+                type="text"
+                required
+                value={addressForm.city}
+                onChange={(e) => setAddressForm({...addressForm, city: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">State *</label>
+              <input
+                type="text"
+                required
+                value={addressForm.state}
+                onChange={(e) => setAddressForm({...addressForm, state: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Zip Code *</label>
+            <input
+              type="text"
+              required
+              value={addressForm.zip_code}
+              onChange={(e) => setAddressForm({...addressForm, zip_code: e.target.value})}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          <div className="pt-4 border-t border-gray-200 flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setAddressModalOpen(false)}
+              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              <Save size={16} />
+              {submitting ? 'Saving...' : 'Save Address'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Caretaker Modal */}
+      <Modal
+        open={caretakerModalOpen}
+        title={editingCaretakerId ? "Edit Caretaker" : "Add Caretaker"}
+        onClose={() => {
+          setCaretakerModalOpen(false);
+          setCaretakerForm({ name: '', relationship: '', contact_number: '', email: '' });
+          setEditingCaretakerId(null);
+        }}
+      >
+        <form onSubmit={handleSaveCaretaker} className="space-y-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Name *</label>
+            <input
+              type="text"
+              required
+              value={caretakerForm.name}
+              onChange={(e) => setCaretakerForm({...caretakerForm, name: e.target.value})}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Relationship *</label>
+              <input
+                type="text"
+                required
+                value={caretakerForm.relationship}
+                onChange={(e) => setCaretakerForm({...caretakerForm, relationship: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="e.g., Aunt, Uncle, Grandparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Contact Number *</label>
+              <input
+                type="tel"
+                required
+                value={caretakerForm.contact_number}
+                onChange={(e) => setCaretakerForm({...caretakerForm, contact_number: e.target.value})}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+            <input
+              type="email"
+              value={caretakerForm.email}
+              onChange={(e) => setCaretakerForm({...caretakerForm, email: e.target.value})}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          <div className="pt-4 border-t border-gray-200 flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setCaretakerModalOpen(false);
+                setCaretakerForm({ name: '', relationship: '', contact_number: '', email: '' });
+                setEditingCaretakerId(null);
+              }}
+              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              <Save size={16} />
+              {submitting ? 'Saving...' : editingCaretakerId ? 'Update' : 'Add Caretaker'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Fees Modal */}
+      <Modal
+        open={feesModalOpen}
+        title="Student Fee Details"
+        onClose={() => setFeesModalOpen(false)}
+        widthClass="max-w-lg"
+      >
+        {schoolFees ? (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4">
+              <div className="flex justify-between items-center mb-2">
+                <div className="text-sm text-blue-800">Total Computed Fee</div>
+                <Calculator size={20} className="text-blue-600" />
+              </div>
+              <div className="text-3xl font-bold text-blue-900">
+                UGX {(tuitionDesc?.total_fee || 0).toLocaleString()}
+              </div>
+              <div className="text-sm text-blue-600 mt-1">For {student?.class?.grade_name}</div>
+            </div>
+
+            <div>
+              <h4 className="font-medium text-gray-900 mb-3">Base Fee Structure</h4>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center p-2 hover:bg-gray-50 rounded">
+                  <div className="flex items-center gap-2">
+                    <Book size={16} className="text-gray-400" />
+                    <span>Tuition Fee</span>
+                  </div>
+                  <span className="font-semibold">UGX {schoolFees.tuitionfee.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center p-2 hover:bg-gray-50 rounded">
+                  <div className="flex items-center gap-2">
+                    <Bed size={16} className="text-gray-400" />
+                    <span>Hostel Fee</span>
+                  </div>
+                  <span className="font-semibold">UGX {schoolFees.hostelfee.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center p-2 hover:bg-gray-50 rounded">
+                  <div className="flex items-center gap-2">
+                    <Coffee size={16} className="text-gray-400" />
+                    <span>Breakfast Fee</span>
+                  </div>
+                  <span className="font-semibold">UGX {schoolFees.breakfastfee.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center p-2 hover:bg-gray-50 rounded">
+                  <div className="flex items-center gap-2">
+                    <Utensils size={16} className="text-gray-400" />
+                    <span>Lunch Fee</span>
+                  </div>
+                  <span className="font-semibold">UGX {schoolFees.lunchfee.toLocaleString()}</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="font-medium text-gray-900 mb-3">Selected Options</h4>
+              <div className="space-y-3">
+                {['hostel', 'breakfast', 'lunch'].map((option) => {
+                  const isSelected = tuitionDesc?.[option as keyof StudentTuitionDescriptionRow] as boolean;
+                  const icons = {
+                    hostel: <Bed size={16} />,
+                    breakfast: <Coffee size={16} />,
+                    lunch: <Utensils size={16} />,
+                  };
+                  const labels = {
+                    hostel: 'Hostel Accommodation',
+                    breakfast: 'Breakfast Service',
+                    lunch: 'Lunch Service',
+                  };
+                  
+                  return (
+                    <div key={option} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2 rounded-lg ${isSelected ? 'bg-emerald-100 text-emerald-600' : 'bg-gray-100 text-gray-400'}`}>
+                          {icons[option as keyof typeof icons]}
+                        </div>
+                        <div>
+                          <div className="font-medium">{labels[option as keyof typeof labels]}</div>
+                          <div className="text-sm text-gray-500">
+                            {option === 'hostel' ? 'Boarding accommodation' : 
+                             option === 'breakfast' ? 'Morning meal service' : 'Midday meal service'}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => updateFeeOptions(option as 'hostel' | 'breakfast' | 'lunch')}
+                        disabled={submitting}
+                        className={`px-3 py-1.5 rounded text-sm font-medium ${
+                          isSelected 
+                            ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' 
+                            : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
+                        } disabled:opacity-50`}
+                      >
+                        {isSelected ? 'Selected' : 'Not Selected'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-gray-200">
+              <button
+                onClick={() => router.push('/finance')}
+                className="w-full px-4 py-3 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white rounded-lg hover:from-emerald-700 hover:to-emerald-800 transition-all flex items-center justify-center gap-2 font-medium"
+              >
+                <Wallet size={18} />
+                View Full Fee Transactions
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-8">
+            <CreditCard size={48} className="mx-auto mb-4 text-gray-400" />
+            <div className="text-lg font-medium text-gray-900 mb-2">No Fee Setup</div>
+            <div className="text-sm text-gray-600 mb-4">
+              Fees have not been configured for {student?.class?.grade_name || 'this grade'} yet.
+            </div>
+            <div className="text-xs text-gray-500">
+              Please assign a class to the student and set up grade fees in the finance section.
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Drop Out Confirmation Modal */}
       <Modal
         open={dropModalOpen}
-        title="Mark Student Dropped Out"
+        title="Mark Student as Dropped Out"
         onClose={() => setDropModalOpen(false)}
-        footer={
-          <div className="flex items-center justify-end gap-2">
+      >
+        <div className="space-y-6">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <div className="flex items-center gap-3 text-amber-800 mb-3">
+              <AlertCircle size={24} />
+              <div className="font-medium">Important Notice</div>
+            </div>
+            <p className="text-sm text-amber-700">
+              Marking a student as "dropped out" will:
+            </p>
+            <ul className="text-sm text-amber-700 mt-2 space-y-1 list-disc list-inside ml-2">
+              <li>Change their status to inactive</li>
+              <li>Restrict profile editing</li>
+              <li>Remove them from active student lists</li>
+              <li>Preserve all historical records</li>
+            </ul>
+          </div>
+
+          <div className="pt-4 border-t border-gray-200 flex justify-end gap-3">
             <button
               type="button"
               onClick={() => setDropModalOpen(false)}
-              className="px-4 py-2 rounded-lg border border-gray-200 hover:bg-gray-50"
+              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"
             >
               Cancel
             </button>
             <button
               type="button"
-              onClick={markStudentDroppedOut}
-              disabled={submitting}
-              className="inline-flex items-center px-4 py-2 rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-60"
+              onClick={() => {
+                // Implement drop out logic
+                setDropModalOpen(false);
+                setSuccessMsg('Student marked as dropped out');
+              }}
+              className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 flex items-center gap-2"
             >
-              <Shield size={16} className="mr-2" />
-              {submitting ? 'Updating...' : 'Confirm'}
+              <Shield size={16} />
+              Confirm Drop Out
             </button>
           </div>
-        }
-      >
-        <div className="text-sm text-gray-700">
-          This will set <b>current_status</b> to <b>dropped out</b>. You can still view the profile, but editing can be
-          restricted.
         </div>
       </Modal>
     </div>

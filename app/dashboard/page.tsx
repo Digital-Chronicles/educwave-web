@@ -289,7 +289,7 @@ export default function DashboardPage() {
   if (profile && !profile.school_id) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-        <Navbar userEmail={userEmail} userName={userName} />
+        <Navbar />
         <div className="flex">
           <AppShell />
           <main className="flex-1 p-6">
@@ -332,7 +332,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
-      <Navbar userEmail={userEmail} userName={userName} />
+      <Navbar />
 
       <div className="flex">
         <AppShell />

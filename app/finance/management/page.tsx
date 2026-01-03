@@ -823,7 +823,7 @@ export default function FinanceManagementPage() {
   if (!profile?.school_id || !school) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Navbar userEmail={userEmail} />
+        <Navbar />
         <div className="flex">
           <AppShell />
           <main className="flex-1 p-6">
@@ -1045,13 +1045,12 @@ export default function FinanceManagementPage() {
                 const status = computed?.status ?? 'pending';
                 const lastPayment = computed?.lastPayment ?? null;
 
+                // FIXED: Removed the 'overdue' check since status can only be 'pending', 'partial', or 'paid'
                 const badge =
                   status === 'paid'
                     ? 'bg-green-100 text-green-800'
                     : status === 'partial'
                     ? 'bg-amber-100 text-amber-800'
-                    : status === 'overdue'
-                    ? 'bg-red-100 text-red-800'
                     : 'bg-gray-100 text-gray-800';
 
                 return (
@@ -1217,7 +1216,7 @@ export default function FinanceManagementPage() {
   // -----------------------------
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar userEmail={userEmail} />
+      <Navbar />
       <div className="flex">
         <AppShell />
 

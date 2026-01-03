@@ -39,13 +39,13 @@ interface SchoolRow {
 
 interface ClassRow {
   id: number;
-  grade_name: string; // ✅ your schema
+  grade_name: string;
 }
 
 interface SubjectRow {
   id: number;
   name: string;
-  grade_id: number | null; // ✅ your schema
+  grade_id: number | null;
 }
 
 interface TermExamSessionRow {
@@ -56,13 +56,25 @@ interface TermExamSessionRow {
   end_date: string;
 }
 
+// Fixed interface to handle array response
 interface ExamSessionRow {
   id: number;
   term_id: number;
   exam_type: 'BOT' | 'MOT' | 'EOT';
   start_date: string;
   end_date: string;
-  term?: { term_name: string; year: number } | null;
+  term?: { term_name: string; year: number }[] | null;
+}
+
+// Helper type for parsed term data
+interface ExamSessionWithTerm {
+  id: number;
+  term_id: number;
+  exam_type: 'BOT' | 'MOT' | 'EOT';
+  start_date: string;
+  end_date: string;
+  term_name: string;
+  term_year: number;
 }
 
 interface StudentRow {
@@ -152,6 +164,7 @@ export default function MarksEntryPage() {
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
   const [termSessions, setTermSessions] = useState<TermExamSessionRow[]>([]);
   const [examSessions, setExamSessions] = useState<ExamSessionRow[]>([]);
+  const [parsedExamSessions, setParsedExamSessions] = useState<ExamSessionWithTerm[]>([]);
 
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
@@ -242,18 +255,13 @@ export default function MarksEntryPage() {
       setSchool(sch as SchoolRow);
 
       const [classRes, subjRes, termRes, sessionRes] = await Promise.all([
-        // ✅ class.grade_name
         supabase.from('class').select('id, grade_name').eq('school_id', sch.id).order('id'),
-
-        // ✅ subject.grade_id
         supabase.from('subject').select('id, name, grade_id').eq('school_id', sch.id).order('name'),
-
         supabase
           .from('term_exam_session')
           .select('id, term_name, year, start_date, end_date')
           .eq('school_id', sch.id)
           .order('id', { ascending: false }),
-
         supabase
           .from('exam_session')
           .select('id, term_id, exam_type, start_date, end_date, term:term_exam_session(term_name, year)')
@@ -269,7 +277,22 @@ export default function MarksEntryPage() {
       setClasses((classRes.data ?? []) as ClassRow[]);
       setSubjects((subjRes.data ?? []) as SubjectRow[]);
       setTermSessions((termRes.data ?? []) as TermExamSessionRow[]);
-      setExamSessions((sessionRes.data ?? []) as ExamSessionRow[]);
+      
+      // Handle the exam sessions with array term data
+      const sessionData = (sessionRes.data ?? []) as ExamSessionRow[];
+      setExamSessions(sessionData);
+
+      // Parse the exam sessions to flatten the term array
+      const parsedSessions: ExamSessionWithTerm[] = sessionData.map(session => ({
+        id: session.id,
+        term_id: session.term_id,
+        exam_type: session.exam_type,
+        start_date: session.start_date,
+        end_date: session.end_date,
+        term_name: session.term?.[0]?.term_name || '',
+        term_year: session.term?.[0]?.year || 0
+      }));
+      setParsedExamSessions(parsedSessions);
 
       setLoading(false);
     };
@@ -279,8 +302,8 @@ export default function MarksEntryPage() {
 
   const selectedExamSession = useMemo(() => {
     if (!examSessionId) return null;
-    return examSessions.find((x) => Number(x.id) === Number(examSessionId)) ?? null;
-  }, [examSessions, examSessionId]);
+    return parsedExamSessions.find((x) => Number(x.id) === Number(examSessionId)) ?? null;
+  }, [parsedExamSessions, examSessionId]);
 
   const canLoadGrid = useMemo(() => {
     if (!termExamId || !examSessionId || !classId || !subjectId) return false;
@@ -288,7 +311,7 @@ export default function MarksEntryPage() {
     return Number(termExamId) === Number(selectedExamSession.term_id);
   }, [termExamId, examSessionId, classId, subjectId, selectedExamSession]);
 
-  // ✅ filter subjects by subject.grade_id
+  // Filter subjects by subject.grade_id
   const subjectsForClass = useMemo(() => {
     if (!classId) return subjects;
     return subjects.filter((s) => Number(s.grade_id ?? 0) === Number(classId));
@@ -630,9 +653,15 @@ export default function MarksEntryPage() {
   if (authChecking || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="flex flex-col items-center gap-2">
-          <div className="h-9 w-9 rounded-full border-2 border-gray-300 border-t-blue-600 animate-spin" />
-          <p className="text-sm text-gray-500">Loading Marks Entry...</p>
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative">
+            <div className="h-16 w-16 rounded-full border-4 border-gray-200"></div>
+            <div className="absolute top-0 left-0 h-16 w-16 rounded-full border-4 border-blue-600 border-t-transparent animate-spin"></div>
+          </div>
+          <div className="text-center">
+            <p className="font-medium text-gray-900">Loading Marks Entry</p>
+            <p className="text-sm text-gray-500 mt-1">Preparing your workspace...</p>
+          </div>
         </div>
       </div>
     );
@@ -642,24 +671,28 @@ export default function MarksEntryPage() {
   if (!profile?.school_id || !school) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Navbar userEmail={userEmail} />
+        {/* FIXED: Removed userEmail prop from Navbar */}
+        <Navbar />
         <div className="flex">
           <AppShell />
           <main className="flex-1 p-6">
-            <div className="max-w-4xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <FileText className="w-8 h-8 text-blue-600" />
+            <div className="max-w-4xl mx-auto">
+              <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-8 text-center">
+                <div className="w-20 h-20 bg-gradient-to-br from-blue-100 to-blue-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <FileText className="w-10 h-10 text-blue-600" />
+                </div>
+                <h3 className="text-2xl font-bold text-gray-900 mb-3">School Configuration Required</h3>
+                <p className="text-gray-600 mb-8 max-w-md mx-auto">
+                  Your account needs to be linked to a school before you can enter marks.
+                </p>
+                <button
+                  onClick={() => router.push('/management/school-settings')}
+                  className="inline-flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium rounded-xl hover:from-blue-700 hover:to-blue-800 transition-all shadow-md hover:shadow-lg"
+                >
+                  <FileText className="w-5 h-5" />
+                  Configure School Settings
+                </button>
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">School Configuration Required</h3>
-              <p className="text-gray-600 mb-6">
-                Your account needs to be linked to a school before you can enter marks.
-              </p>
-              <button
-                onClick={() => router.push('/management/school-settings')}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-              >
-                Configure School Settings
-              </button>
             </div>
           </main>
         </div>
@@ -668,8 +701,9 @@ export default function MarksEntryPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navbar userEmail={userEmail} />
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      {/* FIXED: Removed userEmail prop from Navbar */}
+      <Navbar />
 
       <div className="flex">
         <AppShell />
@@ -677,115 +711,159 @@ export default function MarksEntryPage() {
         <main className="flex-1 p-6">
           <div className="max-w-7xl mx-auto space-y-6">
             {/* Header */}
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
-                  <Link href="/assessments" className="hover:text-gray-700 inline-flex items-center gap-1">
-                    <ArrowLeft className="w-4 h-4" />
-                    Assessments
-                  </Link>
-                  <ChevronRight className="w-4 h-4" />
-                  <span className="text-gray-700 font-medium">Enter Marks</span>
+            <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-6">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <div className="flex items-center gap-2 text-sm text-gray-500 mb-3">
+                    <Link 
+                      href="/assessments" 
+                      className="hover:text-blue-600 inline-flex items-center gap-1 transition-colors"
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                      Assessments
+                    </Link>
+                    <ChevronRight className="w-4 h-4" />
+                    <span className="text-blue-600 font-medium">Enter Marks</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-gradient-to-br from-blue-100 to-blue-50 rounded-xl">
+                      <BookOpen className="w-8 h-8 text-blue-600" />
+                    </div>
+                    <div>
+                      <h1 className="text-3xl font-bold text-gray-900">Marks Entry</h1>
+                      <p className="text-gray-600 mt-1">
+                        For <span className="font-semibold text-blue-600">{school.school_name}</span>
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <h1 className="text-2xl font-bold text-gray-900">Marks Entry</h1>
-                <p className="text-gray-600">
-                  Enter and save marks for <span className="font-medium">{school.school_name}</span>
-                </p>
-              </div>
 
-              <button
-                onClick={handleSave}
-                disabled={saving || !canLoadGrid}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
-              >
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {saving ? 'Saving...' : 'Save Marks'}
-              </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !canLoadGrid}
+                  className="inline-flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 transition-all shadow-md hover:shadow-lg"
+                >
+                  {saving ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Save className="w-5 h-5" />
+                  )}
+                  {saving ? 'Saving...' : 'Save Marks'}
+                </button>
+              </div>
             </div>
 
             {/* Alerts */}
             {errorMsg && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
-                <XCircle className="w-5 h-5 text-red-600 mt-0.5" />
-                <p className="text-sm text-red-700">{errorMsg}</p>
+              <div className="p-5 bg-gradient-to-r from-red-50 to-red-100 border border-red-200 rounded-2xl shadow-sm flex items-start gap-3 animate-fadeIn">
+                <div className="p-2 bg-red-100 rounded-lg">
+                  <XCircle className="w-6 h-6 text-red-600" />
+                </div>
+                <p className="text-sm text-red-800 font-medium flex-1">{errorMsg}</p>
               </div>
             )}
 
             {successMsg && (
-              <div className="p-4 bg-green-50 border border-green-200 rounded-lg flex items-start gap-2">
-                <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5" />
-                <p className="text-sm text-green-700">{successMsg}</p>
+              <div className="p-5 bg-gradient-to-r from-green-50 to-green-100 border border-green-200 rounded-2xl shadow-sm flex items-start gap-3 animate-fadeIn">
+                <div className="p-2 bg-green-100 rounded-lg">
+                  <CheckCircle2 className="w-6 h-6 text-green-600" />
+                </div>
+                <p className="text-sm text-green-800 font-medium flex-1">{successMsg}</p>
               </div>
             )}
 
             {importMsg && (
-              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-sm text-blue-700">{importMsg}</p>
+              <div className="p-5 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-2xl shadow-sm">
+                <div className="flex items-center gap-2 mb-2">
+                  <Upload className="w-5 h-5 text-blue-600" />
+                  <p className="text-sm text-blue-800 font-medium">{importMsg}</p>
+                </div>
                 {importErrs.length > 0 && (
-                  <details className="mt-2">
-                    <summary className="text-sm cursor-pointer text-blue-700 underline">
+                  <details className="mt-3">
+                    <summary className="text-sm cursor-pointer text-blue-700 font-medium hover:text-blue-800 inline-flex items-center gap-2">
                       View skipped rows/cells ({importErrs.length})
+                      <ChevronRight className="w-4 h-4 group-open:rotate-90 transition-transform" />
                     </summary>
-                    <ul className="mt-2 space-y-1 text-xs text-blue-800 max-h-56 overflow-auto pr-2">
-                      {importErrs.slice(0, 200).map((x, i) => (
-                        <li key={i}>• {x}</li>
-                      ))}
-                      {importErrs.length > 200 && <li>• ...and more</li>}
-                    </ul>
+                    <div className="mt-3 p-4 bg-white rounded-lg border border-blue-100 max-h-64 overflow-auto">
+                      <ul className="space-y-2">
+                        {importErrs.slice(0, 100).map((x, i) => (
+                          <li key={i} className="text-xs text-gray-700 p-2 bg-gray-50 rounded">
+                            • {x}
+                          </li>
+                        ))}
+                        {importErrs.length > 100 && (
+                          <li className="text-xs text-gray-500 italic">
+                            • ...and {importErrs.length - 100} more errors
+                          </li>
+                        )}
+                      </ul>
+                    </div>
                   </details>
                 )}
               </div>
             )}
 
             {/* Filters */}
-            <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-              <div className="p-5 border-b border-gray-200 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Filter className="w-4 h-4 text-gray-500" />
-                  <h2 className="font-semibold text-gray-900">Select Assessment</h2>
-                </div>
+            <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+              <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-blue-100 rounded-lg">
+                      <Filter className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900">Select Assessment</h2>
+                      <p className="text-sm text-gray-500">Choose the assessment parameters to load the marks grid</p>
+                    </div>
+                  </div>
 
-                <div className="text-sm text-gray-500">
-                  {termExamId &&
-                  examSessionId &&
-                  selectedExamSession &&
-                  Number(termExamId) !== Number(selectedExamSession.term_id)
-                    ? 'Exam Session does not match Term'
-                    : canLoadGrid
-                      ? 'Ready'
-                      : 'Pick all fields'}
+                  <div className="px-4 py-2 bg-gradient-to-r from-blue-50 to-blue-100 rounded-xl">
+                    <div className="text-sm font-medium text-blue-700">
+                      {termExamId &&
+                      examSessionId &&
+                      selectedExamSession &&
+                      Number(termExamId) !== Number(selectedExamSession.term_id)
+                        ? '⚠️ Session-Term Mismatch'
+                        : canLoadGrid
+                          ? '✅ Ready to Load'
+                          : 'Select all fields'}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="p-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Term *</label>
+              <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-gray-900">
+                    Term <span className="text-red-500">*</span>
+                  </label>
                   <select
                     value={termExamId}
                     onChange={(e) => setTermExamId(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all hover:border-gray-300"
                   >
-                    <option value="">Select term</option>
+                    <option value="" className="text-gray-400">Select term</option>
                     {termSessions.map((t) => (
-                      <option key={t.id} value={t.id}>
+                      <option key={t.id} value={t.id} className="py-2">
                         {t.term_name.replace('_', ' ')} {t.year}
                       </option>
                     ))}
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Exam Session *</label>
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-gray-900">
+                    Exam Session <span className="text-red-500">*</span>
+                  </label>
                   <select
                     value={examSessionId}
                     onChange={(e) => setExamSessionId(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all hover:border-gray-300"
                   >
-                    <option value="">Select session</option>
-                    {examSessions.map((es) => (
-                      <option key={es.id} value={es.id}>
-                        {es.exam_type}
-                        {es.term ? ` — ${String(es.term.term_name).replace('_', ' ')} ${es.term.year}` : ''}
+                    <option value="" className="text-gray-400">Select session</option>
+                    {parsedExamSessions.map((es) => (
+                      <option key={es.id} value={es.id} className="py-2">
+                        {es.exam_type} — {es.term_name.replace('_', ' ')} {es.term_year}
                       </option>
                     ))}
                   </select>
@@ -794,197 +872,326 @@ export default function MarksEntryPage() {
                     examSessionId &&
                     selectedExamSession &&
                     Number(termExamId) !== Number(selectedExamSession.term_id) && (
-                      <p className="text-xs text-red-600 mt-2">
-                        This exam session belongs to a different term. Pick the correct session.
-                      </p>
+                      <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                        <p className="text-xs text-red-700 font-medium">
+                          ⚠️ This exam session belongs to a different term. Please select the correct session.
+                        </p>
+                      </div>
                     )}
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Class *</label>
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-gray-900">
+                    Class <span className="text-red-500">*</span>
+                  </label>
                   <select
                     value={classId}
                     onChange={(e) => {
                       setClassId(e.target.value);
                       setSubjectId('');
                     }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all hover:border-gray-300"
                   >
-                    <option value="">Select class</option>
+                    <option value="" className="text-gray-400">Select class</option>
                     {classes.map((g) => (
-                      <option key={g.id} value={g.id}>
+                      <option key={g.id} value={g.id} className="py-2">
                         {g.grade_name}
                       </option>
                     ))}
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Subject *</label>
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-gray-900">
+                    Subject <span className="text-red-500">*</span>
+                  </label>
                   <select
                     value={subjectId}
                     onChange={(e) => setSubjectId(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={!classId}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all hover:border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <option value="">Select subject</option>
+                    <option value="" className="text-gray-400">Select subject</option>
                     {subjectsForClass.map((s) => (
-                      <option key={s.id} value={s.id}>
+                      <option key={s.id} value={s.id} className="py-2">
                         {s.name}
                       </option>
                     ))}
                   </select>
+                  {!classId && (
+                    <p className="text-xs text-gray-500 mt-1">Select a class first</p>
+                  )}
                 </div>
               </div>
             </div>
 
             {/* Grid */}
-            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-              <div className="p-5 border-b border-gray-200 flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900">Enter Marks</h3>
-                  <p className="text-sm text-gray-500">Import CSV or type marks directly.</p>
-                </div>
+            <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+              <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900 mb-2">Marks Entry Grid</h3>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <Users className="w-4 h-4 text-gray-500" />
+                        <span className="text-sm text-gray-600">
+                          <span className="font-semibold text-gray-900">{filteredStudents.length}</span> students
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-gray-500" />
+                        <span className="text-sm text-gray-600">
+                          <span className="font-semibold text-gray-900">{questions.length}</span> questions
+                        </span>
+                      </div>
+                      <div className="px-3 py-1.5 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg">
+                        <span className="text-sm font-medium text-blue-700">
+                          {filledCells}/{totalCells} cells filled
+                        </span>
+                      </div>
+                    </div>
+                  </div>
 
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    onClick={downloadCSVTemplate}
-                    disabled={!canLoadGrid || questions.length === 0}
-                    className="inline-flex items-center gap-2 px-3 py-2 border border-gray-300 bg-white rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50"
-                    type="button"
-                  >
-                    <Download className="w-4 h-4" />
-                    Template CSV
-                  </button>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="relative">
+                      <Search className="w-5 h-5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        value={studentSearch}
+                        onChange={(e) => setStudentSearch(e.target.value)}
+                        placeholder="Search student name or reg no..."
+                        className="pl-10 pr-4 py-3 border-2 border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 w-72 transition-all"
+                      />
+                    </div>
 
-                  <label
-                    className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer ${
-                      importing || !canLoadGrid ? 'bg-blue-300 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'
-                    }`}
-                  >
-                    <Upload className="w-4 h-4" />
-                    {importing ? 'Importing...' : 'Import CSV'}
-                    <input
-                      type="file"
-                      accept=".csv,text/csv"
-                      className="hidden"
-                      disabled={importing || !canLoadGrid}
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (!f) return;
-                        handleCSVImport(f);
-                        e.currentTarget.value = '';
-                      }}
-                    />
-                  </label>
+                    <div className="h-8 border-l border-gray-300"></div>
 
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      value={studentSearch}
-                      onChange={(e) => setStudentSearch(e.target.value)}
-                      placeholder="Search student name or reg no..."
-                      className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-72"
-                    />
+                    <button
+                      onClick={downloadCSVTemplate}
+                      disabled={!canLoadGrid || questions.length === 0}
+                      className="inline-flex items-center gap-2 px-4 py-3 border-2 border-gray-200 bg-white rounded-xl text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition-all"
+                      type="button"
+                    >
+                      <Download className="w-4 h-4" />
+                      Template CSV
+                    </button>
+
+                    <label
+                      className={`inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium cursor-pointer transition-all ${
+                        importing || !canLoadGrid 
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                          : 'bg-gradient-to-r from-blue-600 to-blue-700 text-white hover:from-blue-700 hover:to-blue-800 shadow-md hover:shadow-lg'
+                      }`}
+                    >
+                      <Upload className="w-4 h-4" />
+                      {importing ? 'Importing...' : 'Import CSV'}
+                      <input
+                        type="file"
+                        accept=".csv,text/csv"
+                        className="hidden"
+                        disabled={importing || !canLoadGrid}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (!f) return;
+                          handleCSVImport(f);
+                          e.currentTarget.value = '';
+                        }}
+                      />
+                    </label>
                   </div>
                 </div>
               </div>
 
               {!canLoadGrid ? (
-                <div className="p-10 text-center text-sm text-gray-500">
-                  Select Term, Exam Session (matching term), Class and Subject to load the marks grid.
+                <div className="p-16 text-center">
+                  <div className="w-20 h-20 mx-auto mb-6 bg-gradient-to-br from-gray-100 to-gray-50 rounded-2xl flex items-center justify-center">
+                    <Filter className="w-10 h-10 text-gray-400" />
+                  </div>
+                  <h4 className="text-lg font-semibold text-gray-900 mb-2">Select Assessment Parameters</h4>
+                  <p className="text-gray-600 max-w-md mx-auto">
+                    Choose Term, Exam Session (matching term), Class and Subject to load the marks grid.
+                  </p>
                 </div>
               ) : questions.length === 0 ? (
-                <div className="p-10 text-center text-sm text-gray-500">
-                  No questions found for the selected filters. Create questions first.
+                <div className="p-16 text-center">
+                  <div className="w-20 h-20 mx-auto mb-6 bg-gradient-to-br from-yellow-100 to-yellow-50 rounded-2xl flex items-center justify-center">
+                    <FileText className="w-10 h-10 text-yellow-600" />
+                  </div>
+                  <h4 className="text-lg font-semibold text-gray-900 mb-2">No Questions Found</h4>
+                  <p className="text-gray-600 max-w-md mx-auto">
+                    No questions found for the selected filters. Please create questions first in the assessment setup.
+                  </p>
                 </div>
               ) : filteredStudents.length === 0 ? (
-                <div className="p-10 text-center text-sm text-gray-500">No students found (or search returned none).</div>
+                <div className="p-16 text-center">
+                  <div className="w-20 h-20 mx-auto mb-6 bg-gradient-to-br from-red-100 to-red-50 rounded-2xl flex items-center justify-center">
+                    <Users className="w-10 h-10 text-red-600" />
+                  </div>
+                  <h4 className="text-lg font-semibold text-gray-900 mb-2">No Students Found</h4>
+                  <p className="text-gray-600 max-w-md mx-auto">
+                    No students found for the selected class (or search returned none).
+                  </p>
+                </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="text-left py-3 px-4 text-sm font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 min-w-[320px]">
-                          Student
-                        </th>
-                        {questions.map((q) => (
-                          <th key={q.id} className="text-left py-3 px-4 text-sm font-medium text-gray-700">
-                            <div className="flex flex-col">
-                              <span>Q{q.question_number}</span>
-                              <span className="text-xs text-gray-500">
-                                Max: {q.max_score}
-                                {q.topic?.name ? ` • ${q.topic.name}` : ''}
-                              </span>
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
+                        <tr>
+                          <th className="text-left py-4 px-6 text-sm font-bold text-gray-900 sticky left-0 bg-gradient-to-r from-gray-50 to-gray-100 z-10 min-w-[280px] border-r border-gray-200">
+                            <div className="flex items-center gap-2">
+                              <Users className="w-4 h-4" />
+                              Student Information
                             </div>
                           </th>
-                        ))}
-                      </tr>
-                    </thead>
-
-                    <tbody className="divide-y divide-gray-200">
-                      {filteredStudents.map((st) => (
-                        <tr key={st.registration_id} className="hover:bg-gray-50">
-                          <td className="py-3 px-4 sticky left-0 bg-white z-10 min-w-[320px]">
-                            <div className="font-medium text-gray-900">
-                              {st.first_name} {st.last_name}
-                            </div>
-                            <div className="text-xs text-gray-500">{st.registration_id}</div>
-                          </td>
-
-                          {questions.map((q) => {
-                            const v = marks?.[st.registration_id]?.[q.id] ?? '';
-                            const max = Number(q.max_score ?? 0);
-                            const invalid = v !== '' && (Number(v) < 0 || Number(v) > max);
-
-                            return (
-                              <td key={q.id} className="py-3 px-4">
-                                <input
-                                  value={v}
-                                  onChange={(e) => setScore(st.registration_id, q.id, e.target.value)}
-                                  type="number"
-                                  min={0}
-                                  max={max}
-                                  className={`w-24 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 ${
-                                    invalid ? 'border-red-300 focus:ring-red-300' : 'border-gray-300 focus:ring-blue-500'
-                                  }`}
-                                  placeholder="—"
-                                />
-                                {invalid && <div className="text-xs text-red-600 mt-1">0–{max}</div>}
-                              </td>
-                            );
-                          })}
+                          {questions.map((q) => (
+                            <th key={q.id} className="text-left py-4 px-6 text-sm font-bold text-gray-900 border-b border-gray-200">
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold">Q{q.question_number}</span>
+                                  <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded">
+                                    Max: {q.max_score}
+                                  </span>
+                                </div>
+                                {q.topic?.name && (
+                                  <span className="text-xs text-gray-500 font-normal truncate max-w-[120px]">
+                                    {q.topic.name}
+                                  </span>
+                                )}
+                              </div>
+                            </th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+
+                      <tbody className="divide-y divide-gray-100">
+                        {filteredStudents.map((st) => (
+                          <tr key={st.registration_id} className="hover:bg-gradient-to-r from-blue-50/30 to-blue-50/10 transition-colors">
+                            <td className="py-4 px-6 sticky left-0 bg-white z-10 min-w-[280px] border-r border-gray-200">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-gradient-to-br from-blue-100 to-blue-50 rounded-lg flex items-center justify-center">
+                                  <span className="text-sm font-semibold text-blue-600">
+                                    {st.first_name[0]}{st.last_name[0]}
+                                  </span>
+                                </div>
+                                <div>
+                                  <div className="font-semibold text-gray-900">
+                                    {st.first_name} {st.last_name}
+                                  </div>
+                                  <div className="text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded inline-block mt-1">
+                                    {st.registration_id}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+
+                            {questions.map((q) => {
+                              const v = marks?.[st.registration_id]?.[q.id] ?? '';
+                              const max = Number(q.max_score ?? 0);
+                              const invalid = v !== '' && (Number(v) < 0 || Number(v) > max);
+
+                              return (
+                                <td key={q.id} className="py-4 px-6">
+                                  <div className="relative">
+                                    <input
+                                      value={v}
+                                      onChange={(e) => setScore(st.registration_id, q.id, e.target.value)}
+                                      type="number"
+                                      min={0}
+                                      max={max}
+                                      className={`w-full px-4 py-3 border-2 rounded-xl text-sm focus:outline-none focus:ring-2 transition-all ${
+                                        invalid 
+                                          ? 'border-red-300 focus:border-red-400 focus:ring-red-100 bg-red-50' 
+                                          : 'border-gray-200 focus:border-blue-500 focus:ring-blue-100 hover:border-gray-300'
+                                      }`}
+                                      placeholder="Enter mark"
+                                    />
+                                    {invalid && (
+                                      <div className="absolute -bottom-6 left-0 text-xs text-red-600 font-medium bg-red-50 px-2 py-1 rounded">
+                                        0–{max} only
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="p-6 border-t border-gray-200 bg-gradient-to-r from-gray-50 to-white">
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                      <div className="text-sm text-gray-600">
+                        <span className="font-semibold text-gray-900">{filledCells}</span> of{' '}
+                        <span className="font-semibold text-gray-900">{totalCells}</span> cells filled
+                        {filledCells > 0 && totalCells > 0 && (
+                          <span className="ml-2 px-2 py-1 bg-gradient-to-r from-green-50 to-green-100 text-green-700 font-medium rounded-lg">
+                            {Math.round((filledCells / totalCells) * 100)}% complete
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => {
+                            // Reset all marks
+                            setMarks(prev => {
+                              const newMarks: MarksMap = {};
+                              for (const student of filteredStudents) {
+                                newMarks[student.registration_id] = {};
+                                for (const q of questions) {
+                                  newMarks[student.registration_id][q.id] = '';
+                                }
+                              }
+                              return newMarks;
+                            });
+                          }}
+                          disabled={filledCells === 0}
+                          className="px-4 py-3 border-2 border-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-50 disabled:opacity-50 transition-all"
+                        >
+                          Clear All
+                        </button>
+                        
+                        <button
+                          onClick={handleSave}
+                          disabled={saving || !canLoadGrid || filledCells === 0}
+                          className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-medium rounded-xl hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 transition-all shadow-md hover:shadow-lg flex items-center gap-2"
+                        >
+                          {saving ? (
+                            <>
+                              <Loader2 className="w-5 h-5 animate-spin" />
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-5 h-5" />
+                              Save Marks ({filledCells} entries)
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </>
               )}
-
-              <div className="p-5 border-t border-gray-200 flex items-center justify-between gap-3 flex-wrap">
-                <div className="text-sm text-gray-600">
-                  {canLoadGrid ? (
-                    <>
-                      Filled <span className="font-medium">{filledCells}</span> of{' '}
-                      <span className="font-medium">{totalCells}</span> visible cells
-                    </>
-                  ) : (
-                    '—'
-                  )}
-                </div>
-
-                <button
-                  onClick={handleSave}
-                  disabled={saving || !canLoadGrid}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                  {saving ? 'Saving...' : 'Save Marks'}
-                </button>
-              </div>
             </div>
 
-            <div className="text-xs text-gray-500">
-              Note: Exam Session must match the selected Term (we enforce this to avoid mixing data).
+            {/* Footer Note */}
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-2xl">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-200 rounded-lg">
+                  <BookOpen className="w-5 h-5 text-blue-700" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-blue-900">
+                    Note: Exam Session must match the selected Term to ensure data integrity.
+                  </p>
+                  <p className="text-xs text-blue-700 mt-1">
+                    This prevents mixing marks across different terms and sessions.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </main>

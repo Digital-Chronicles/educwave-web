@@ -51,11 +51,21 @@ interface TermExamSessionRow {
   year: number;
 }
 
+// Fixed interface to handle array response
 interface ExamSessionRow {
   id: number;
   term_id: number;
   exam_type: 'BOT' | 'MOT' | 'EOT';
-  term?: { term_name: string; year: number } | null;
+  term?: { term_name: string; year: number }[] | null; // Changed to array
+}
+
+// Helper interface for parsed data
+interface ParsedExamSession {
+  id: number;
+  term_id: number;
+  exam_type: 'BOT' | 'MOT' | 'EOT';
+  term_name: string;
+  term_year: number;
 }
 
 interface StudentRow {
@@ -90,6 +100,7 @@ export default function PercentageEntryPage() {
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
   const [termSessions, setTermSessions] = useState<TermExamSessionRow[]>([]);
   const [examSessions, setExamSessions] = useState<ExamSessionRow[]>([]);
+  const [parsedExamSessions, setParsedExamSessions] = useState<ParsedExamSession[]>([]);
 
   const [termExamId, setTermExamId] = useState('');
   const [examSessionId, setExamSessionId] = useState('');
@@ -104,9 +115,6 @@ export default function PercentageEntryPage() {
 
   const [studentSearch, setStudentSearch] = useState('');
 
-  // -------------------------
-  // AUTH CHECK
-  // -------------------------
   useEffect(() => {
     (async () => {
       const {
@@ -123,9 +131,6 @@ export default function PercentageEntryPage() {
     })();
   }, [router]);
 
-  // -------------------------
-  // LOAD PROFILE + SCHOOL + BASE DATA
-  // -------------------------
   useEffect(() => {
     if (authChecking) return;
 
@@ -204,7 +209,20 @@ export default function PercentageEntryPage() {
       setClasses((classRes.data ?? []) as ClassRow[]);
       setSubjects((subjRes.data ?? []) as SubjectRow[]);
       setTermSessions((termRes.data ?? []) as TermExamSessionRow[]);
-      setExamSessions((sessionRes.data ?? []) as ExamSessionRow[]);
+      
+      // Handle the exam sessions with array term data
+      const sessionData = (sessionRes.data ?? []) as ExamSessionRow[];
+      setExamSessions(sessionData);
+
+      // Parse the exam sessions to flatten the term array
+      const parsedSessions: ParsedExamSession[] = sessionData.map(session => ({
+        id: session.id,
+        term_id: session.term_id,
+        exam_type: session.exam_type,
+        term_name: session.term?.[0]?.term_name || '',
+        term_year: session.term?.[0]?.year || 0
+      }));
+      setParsedExamSessions(parsedSessions);
 
       setLoading(false);
     };
@@ -214,8 +232,8 @@ export default function PercentageEntryPage() {
 
   const selectedExamSession = useMemo(() => {
     if (!examSessionId) return null;
-    return examSessions.find((x) => Number(x.id) === Number(examSessionId)) ?? null;
-  }, [examSessions, examSessionId]);
+    return parsedExamSessions.find((x) => Number(x.id) === Number(examSessionId)) ?? null;
+  }, [parsedExamSessions, examSessionId]);
 
   const canLoad = useMemo(() => {
     if (!school?.id) return false;
@@ -229,9 +247,6 @@ export default function PercentageEntryPage() {
     return subjects.filter((s) => Number(s.grade_id ?? 0) === Number(classId));
   }, [subjects, classId]);
 
-  // -------------------------
-  // LOAD STUDENTS + AUTO-CREATE PLACEHOLDER QUESTION + EXISTING RESULTS
-  // -------------------------
   useEffect(() => {
     if (!canLoad || !school?.id) {
       setStudents([]);
@@ -245,7 +260,6 @@ export default function PercentageEntryPage() {
       setSuccessMsg(null);
 
       try {
-        // 1) Load students
         const { data: st, error: sErr } = await supabase
           .from('students')
           .select('registration_id, first_name, last_name, current_grade_id')
@@ -258,12 +272,10 @@ export default function PercentageEntryPage() {
         const studentsList = (st ?? []) as StudentRow[];
         setStudents(studentsList);
 
-        // init percent map
         const initial: PercentMap = {};
         for (const s of studentsList) initial[s.registration_id] = '';
         setPercent(initial);
 
-        // 2) Find placeholder question (NOTE: not filtering exam_type_id due to your unique constraint)
         let { data: pq, error: qErr } = await supabase
           .from('assessment_question')
           .select('id, question_number, max_score')
@@ -279,9 +291,7 @@ export default function PercentageEntryPage() {
 
         let found = (pq?.[0] ?? null) as PlaceholderQuestionRow | null;
 
-        // 3) Auto-create if missing
         if (!found) {
-          // topic_id is required (NOT NULL)
           const { data: topicRows, error: tErr } = await supabase
             .from('assessment_topics')
             .select('id')
@@ -302,7 +312,7 @@ export default function PercentageEntryPage() {
 
           const payload = {
             term_exam_id: Number(termExamId),
-            exam_type_id: Number(examSessionId), // keep current session
+            exam_type_id: Number(examSessionId),
             question_number: 'PERCENTAGE',
             topic_id: Number(topicId),
             grade_id: Number(classId),
@@ -326,7 +336,6 @@ export default function PercentageEntryPage() {
 
         setPlaceholderQuestion(found);
 
-        // 4) Load existing results for THIS exam_session (session-specific)
         if (found?.id) {
           const { data: existing, error: exErr } = await supabase
             .from('assessment_examresult')
@@ -413,7 +422,7 @@ export default function PercentageEntryPage() {
           subject_id: Number(subjectId),
           topic_id: null,
           exam_session_id: Number(examSessionId),
-          score: Math.round(pct), // score is integer NOT NULL
+          score: Math.round(pct),
           total_score: null,
           max_possible: 100,
           percentage: Number(pct.toFixed(2)),
@@ -441,9 +450,6 @@ export default function PercentageEntryPage() {
     }
   };
 
-  // -------------------------
-  // UI: LOADING
-  // -------------------------
   if (authChecking || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -455,13 +461,10 @@ export default function PercentageEntryPage() {
     );
   }
 
-  // -------------------------
-  // UI: NO SCHOOL
-  // -------------------------
   if (!profile?.school_id || !school) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Navbar userEmail={userEmail} />
+        <Navbar />
         <div className="flex">
           <AppShell />
           <main className="flex-1 p-6">
@@ -486,19 +489,15 @@ export default function PercentageEntryPage() {
     );
   }
 
-  // -------------------------
-  // UI
-  // -------------------------
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar userEmail={userEmail} />
+      <Navbar />
 
       <div className="flex">
         <AppShell />
 
         <main className="flex-1 p-6">
           <div className="max-w-6xl mx-auto space-y-6">
-            {/* Header */}
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <div className="flex items-center gap-2 text-sm text-gray-500 mb-2">
@@ -511,7 +510,7 @@ export default function PercentageEntryPage() {
                 </div>
                 <h1 className="text-2xl font-bold text-gray-900">Percentage Entry</h1>
                 <p className="text-gray-600">
-                  Quick entry when teachers don’t have time for question-by-question marks.
+                  Quick entry when teachers don't have time for question-by-question marks.
                 </p>
               </div>
 
@@ -525,7 +524,6 @@ export default function PercentageEntryPage() {
               </button>
             </div>
 
-            {/* Alerts */}
             {errorMsg && (
               <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
                 <XCircle className="w-5 h-5 text-red-600 mt-0.5" />
@@ -539,7 +537,6 @@ export default function PercentageEntryPage() {
               </div>
             )}
 
-            {/* Filters */}
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
               <div className="p-5 border-b border-gray-200 flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -574,10 +571,9 @@ export default function PercentageEntryPage() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Select session</option>
-                    {examSessions.map((es) => (
+                    {parsedExamSessions.map((es) => (
                       <option key={es.id} value={es.id}>
-                        {es.exam_type}
-                        {es.term ? ` — ${String(es.term.term_name).replace('_', ' ')} ${es.term.year}` : ''}
+                        {es.exam_type} {es.term_name ? ` — ${es.term_name.replace('_', ' ')} ${es.term_year}` : ''}
                       </option>
                     ))}
                   </select>
@@ -642,7 +638,6 @@ export default function PercentageEntryPage() {
               )}
             </div>
 
-            {/* Table */}
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
               <div className="p-5 border-b border-gray-200 flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2">

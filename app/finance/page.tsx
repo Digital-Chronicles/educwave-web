@@ -755,7 +755,7 @@ export default function FinancePage() {
   if (showNoSchool) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Navbar userEmail={userEmail} />
+        <Navbar />
         <div className="flex">
           <AppShell />
           <main className="flex-1 p-6">
@@ -794,7 +794,7 @@ export default function FinancePage() {
   if (!canRenderApp) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Navbar userEmail={userEmail} />
+        <Navbar />
         <div className="flex">
           <AppShell />
           <main className="flex-1 p-6">
@@ -1077,7 +1077,7 @@ export default function FinancePage() {
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-semibold text-gray-900">Student Tuition Description</h3>
-        <p className="text-sm text-gray-500">Each row is a student’s fee profile with computed total_fee.</p>
+        <p className="text-sm text-gray-500">Each row is a student's fee profile with computed total_fee.</p>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -1212,7 +1212,7 @@ export default function FinancePage() {
   // ----------------------------------------------------
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar userEmail={userEmail} />
+      <Navbar />
       <div className="flex">
         <AppShell />
 

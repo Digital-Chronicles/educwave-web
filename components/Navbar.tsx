@@ -15,6 +15,11 @@ import {
   Settings,
   Sun,
   UserCircle,
+  School,
+  Users,
+  BookOpen,
+  CreditCard,
+  Sparkles,
 } from 'lucide-react';
 
 type GeneralInformationRow = {
@@ -46,6 +51,7 @@ type SearchItem = {
   title: string;
   subtitle?: string;
   href: string;
+  icon?: React.ReactNode;
 };
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -66,11 +72,18 @@ const ROLE_HINTS = ['ADMIN', 'ACADEMIC', 'TEACHER', 'FINANCE', 'STUDENT', 'PAREN
 // Keep this in sync with h-16
 const NAVBAR_HEIGHT_PX = 64;
 
+const MODULE_ICONS: Record<string, React.ReactNode> = {
+  students: <Users size={14} />,
+  finance: <CreditCard size={14} />,
+  academics: <BookOpen size={14} />,
+};
+
 export default function Navbar() {
   const router = useRouter();
 
   // Theme
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [themeTransition, setThemeTransition] = useState(false);
 
   // Menus
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -112,12 +125,14 @@ export default function Navbar() {
   }, []);
 
   const toggleTheme = () => {
+    setThemeTransition(true);
     setIsDarkMode((prev) => {
       const next = !prev;
       document.documentElement.classList.toggle('dark', next);
       localStorage.setItem('theme', next ? 'dark' : 'light');
       return next;
     });
+    setTimeout(() => setThemeTransition(false), 300);
   };
 
   // ---------- CLOSE MENUS ON OUTSIDE CLICK / ESC ----------
@@ -237,6 +252,19 @@ export default function Navbar() {
     [profile]
   );
 
+  const roleColor = useMemo(() => {
+    const role = (profile?.role || 'STUDENT').toUpperCase();
+    switch (role) {
+      case 'ADMIN': return 'from-red-500 to-pink-600';
+      case 'TEACHER': return 'from-emerald-500 to-teal-600';
+      case 'ACADEMIC': return 'from-blue-500 to-indigo-600';
+      case 'FINANCE': return 'from-amber-500 to-orange-600';
+      case 'STUDENT': return 'from-violet-500 to-purple-600';
+      case 'PARENT': return 'from-cyan-500 to-sky-600';
+      default: return 'from-gray-500 to-slate-600';
+    }
+  }, [profile]);
+
   const schoolName = useMemo(() => school?.school_name || 'School', [school]);
 
   // ---------- SCHOOL-SCOPED SEARCH ----------
@@ -306,11 +334,12 @@ export default function Navbar() {
         if (pRoleRes?.error) throw pRoleRes.error;
 
         const sItems: SearchItem[] = (((sRes.data as StudentRow[]) || []) as StudentRow[]).map((s) => ({
-          kind: 'student',
+          kind: 'student' as const,
           id: s.registration_id,
           title: `${s.first_name} ${s.last_name}`,
           subtitle: `${s.registration_id}${s.guardian_phone ? ` • ${s.guardian_phone}` : ''}`,
           href: `/students/${encodeURIComponent(s.registration_id)}`,
+          icon: <Users size={14} className="text-blue-500" />,
         }));
 
         const profileMap = new Map<string, ProfileRow>();
@@ -318,17 +347,39 @@ export default function Navbar() {
         for (const p of ((((pRoleRes as any)?.data as ProfileRow[]) || []) as ProfileRow[])) profileMap.set(p.user_id, p);
 
         const pItems: SearchItem[] = Array.from(profileMap.values()).map((p) => ({
-          kind: 'profile',
+          kind: 'profile' as const,
           id: p.user_id,
           title: p.full_name || p.email || 'Profile',
           subtitle: `${(p.role || 'STUDENT').toString().toUpperCase()}${p.email ? ` • ${p.email}` : ''}`,
           href: `/users/${p.user_id}`,
+          icon: <UserCircle size={14} className="text-emerald-500" />,
         }));
 
         const moduleLinks: SearchItem[] = [
-          { kind: 'module', id: 'students', title: 'Students', subtitle: 'Open Students module', href: '/students' },
-          { kind: 'module', id: 'finance-management', title: 'Finance Management', subtitle: 'Manage tuitions & transactions', href: '/finance/management' },
-          { kind: 'module', id: 'finance-stats', title: 'Finance Stats', subtitle: 'Finance dashboard & reports', href: '/finance/stats' },
+          { 
+            kind: 'module' as const, 
+            id: 'students', 
+            title: 'Students', 
+            subtitle: 'Manage student records',
+            href: '/students',
+            icon: <Users size={14} className="text-violet-500" />,
+          },
+          { 
+            kind: 'module' as const, 
+            id: 'finance-management', 
+            title: 'Finance Management', 
+            subtitle: 'Tuitions & transactions',
+            href: '/finance/management',
+            icon: <CreditCard size={14} className="text-amber-500" />,
+          },
+          { 
+            kind: 'module' as const, 
+            id: 'finance-stats', 
+            title: 'Finance Analytics', 
+            subtitle: 'Reports & dashboard',
+            href: '/finance/stats',
+            icon: <Sparkles size={14} className="text-blue-500" />,
+          },
         ].filter((m) => m.title.toLowerCase().includes(term.toLowerCase()));
 
         const merged = [...sItems, ...pItems, ...moduleLinks].slice(0, maxResults);
@@ -391,33 +442,38 @@ export default function Navbar() {
   return (
     <>
       {/* FIXED NAVBAR */}
-      <header className="fixed top-0 left-0 right-0 z-50 border-b border-slate-200/70 bg-white/85 backdrop-blur-xl dark:border-slate-800/70 dark:bg-slate-950/70">
+      <header className="fixed top-0 left-0 right-0 z-50 border-b border-slate-200/70 bg-white/90 backdrop-blur-xl supports-[backdrop-filter]:bg-white/85 dark:border-slate-800/70 dark:bg-slate-950/90 supports-[backdrop-filter]:dark:bg-slate-950/85 transition-all duration-300 shadow-sm hover:shadow-md">
         <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-3 px-4 lg:px-6">
           {/* Left: Brand */}
           <button
             onClick={goHome}
-            className="hidden md:flex items-center gap-3 rounded-xl px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-900 transition"
+            className="group hidden md:flex items-center gap-3 rounded-2xl px-3 py-2 hover:bg-slate-100/80 dark:hover:bg-slate-900/80 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
             title="Go to dashboard"
           >
-            <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-blue-600 to-orange-500 flex items-center justify-center text-white font-bold shadow-sm">
-              <span className="text-sm">{schoolName.slice(0, 1).toUpperCase()}</span>
+            <div className="relative">
+              <div className={`h-11 w-11 rounded-2xl bg-gradient-to-br ${roleColor} flex items-center justify-center text-white font-bold shadow-lg group-hover:shadow-xl transition-all duration-300 group-hover:scale-105`}>
+                <span className="text-sm font-semibold">{schoolName.slice(0, 1).toUpperCase()}</span>
+              </div>
+              <div className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-white dark:bg-slate-900 border-2 border-white dark:border-slate-950 flex items-center justify-center">
+                <School size={10} className="text-slate-600 dark:text-slate-400" />
+              </div>
             </div>
             <div className="hidden lg:block text-left leading-tight">
-              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate max-w-[260px]">
+              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate max-w-[260px] group-hover:text-slate-700 dark:group-hover:text-slate-300 transition-colors">
                 {profileLoading ? 'Loading…' : schoolName}
               </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {profileLoading ? 'Loading…' : `Welcome back, ${displayName.split(' ')[0] || 'User'}`}
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
+                {profileLoading ? 'Loading…' : `Welcome back, ${displayName.split(' ')[0] || 'User'} 👋`}
               </p>
             </div>
           </button>
 
           {/* Center: Search */}
           <div ref={searchWrapRef} className="relative flex-1">
-            <div className="relative w-full max-w-xl">
+            <div className="relative w-full max-w-xl mx-auto">
               <Search
                 size={18}
-                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 transition-colors"
               />
 
               <input
@@ -431,9 +487,11 @@ export default function Navbar() {
                 onKeyDown={onSearchKeyDown}
                 placeholder="Search students, staff, modules..."
                 className={cn(
-                  'w-full rounded-2xl border border-slate-200 bg-white/70 px-10 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition',
-                  'focus:border-blue-500/60 focus:bg-white',
-                  'dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100 dark:focus:bg-slate-900'
+                  'w-full rounded-2xl border border-slate-200 bg-white/80 px-11 py-3 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all duration-300',
+                  'focus:border-blue-500 focus:bg-white focus:shadow-lg focus:shadow-blue-500/10',
+                  'dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-100 dark:placeholder:text-slate-500',
+                  'dark:focus:border-blue-400 dark:focus:bg-slate-900 dark:focus:shadow-blue-400/10',
+                  searchOpen && 'rounded-b-2xl rounded-t-2xl'
                 )}
               />
 
@@ -451,7 +509,7 @@ export default function Navbar() {
                     setSearchOpen(false);
                     searchInputRef.current?.focus();
                   }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 h-6 w-6 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs text-slate-500 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-all duration-200"
                   aria-label="Clear search"
                 >
                   ✕
@@ -461,29 +519,38 @@ export default function Navbar() {
 
             {/* Suggestions dropdown */}
             {searchOpen && q.trim().length > 0 && (
-              <div className="absolute left-0 right-0 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-950 z-50 max-w-xl">
-                <div className="px-3 py-2 text-xs text-slate-500 border-b border-slate-100 dark:border-slate-900">
+              <div className="absolute left-0 right-0 mt-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950 z-50 max-w-xl mx-auto animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="px-4 py-2.5 text-xs text-slate-500 border-b border-slate-100 dark:border-slate-900 bg-slate-50/50 dark:bg-slate-900/50">
                   {canSearch ? (
                     <>
-                      Results in{' '}
-                      <span className="font-semibold text-slate-900 dark:text-slate-100">{schoolName}</span> for{' '}
-                      <span className="font-semibold text-slate-900 dark:text-slate-100">“{q.trim()}”</span>
+                      <span className="font-medium text-slate-700 dark:text-slate-300">Results in</span>{' '}
+                      <span className="font-semibold text-blue-600 dark:text-blue-400">{schoolName}</span>{' '}
+                      <span className="font-medium text-slate-700 dark:text-slate-300">for</span>{' '}
+                      <span className="font-semibold text-slate-900 dark:text-slate-100">"{q.trim()}"</span>
                     </>
                   ) : (
                     <>Type at least 2 characters</>
                   )}
                 </div>
 
-                {searchError && <div className="px-3 py-3 text-sm text-red-600">{searchError}</div>}
+                {searchError && (
+                  <div className="px-4 py-3 text-sm text-red-600 bg-red-50/50 dark:bg-red-500/10 dark:text-red-400">
+                    ⚠️ {searchError}
+                  </div>
+                )}
 
                 {!searchError && canSearch && items.length === 0 && !searchLoading && (
-                  <div className="px-3 py-3 text-sm text-slate-600 dark:text-slate-300">
-                    No results in your school. Press <span className="font-semibold">Enter</span> to search anyway.
+                  <div className="px-4 py-6 text-center">
+                    <Search size={24} className="mx-auto text-slate-400 dark:text-slate-600 mb-2" />
+                    <p className="text-sm text-slate-600 dark:text-slate-300 mb-1">No results in your school</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Press <span className="font-semibold">Enter</span> to search anyway
+                    </p>
                   </div>
                 )}
 
                 {!searchError && items.length > 0 && (
-                  <div className="max-h-80 overflow-auto">
+                  <div className="max-h-80 overflow-auto py-1">
                     {items.map((it, idx) => (
                       <button
                         key={`${it.kind}-${it.id}`}
@@ -491,20 +558,28 @@ export default function Navbar() {
                         onMouseEnter={() => setActiveIndex(idx)}
                         onClick={() => openItem(it)}
                         className={cn(
-                          'w-full text-left px-3 py-2.5 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition',
+                          'w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-all duration-200 group',
                           idx === activeIndex && 'bg-blue-50 dark:bg-blue-500/10'
                         )}
                       >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+                        <div className="flex items-center gap-3">
+                          <div className="h-8 w-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
+                            {it.icon || <Search size={14} className="text-slate-500" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
                               {it.title}
                             </p>
                             {it.subtitle && (
-                              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{it.subtitle}</p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{it.subtitle}</p>
                             )}
                           </div>
-                          <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                          <span className={cn(
+                            "shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                            it.kind === 'student' && "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300",
+                            it.kind === 'profile' && "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
+                            it.kind === 'module' && "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
+                          )}>
                             {it.kind}
                           </span>
                         </div>
@@ -513,15 +588,22 @@ export default function Navbar() {
                   </div>
                 )}
 
-                <div className="border-t border-slate-100 dark:border-slate-900 px-3 py-2 flex items-center justify-between">
+                <div className="border-t border-slate-100 dark:border-slate-900 px-4 py-3 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
                   <button
                     type="button"
                     onClick={() => goToResultsPage(q)}
-                    className="text-xs font-semibold text-blue-700 hover:underline dark:text-blue-300"
+                    className="text-xs font-semibold text-blue-700 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200 hover:underline flex items-center gap-1 transition-all hover:gap-2"
                   >
                     View all results
+                    <ChevronDown size={12} className="rotate-270" />
                   </button>
-                  <span className="text-[11px] text-slate-500">↑ ↓ navigate • Enter open</span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                    <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">↑</kbd>
+                    <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">↓</kbd>
+                    <span>navigate •</span>
+                    <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">↵</kbd>
+                    <span>open</span>
+                  </span>
                 </div>
               </div>
             )}
@@ -531,30 +613,37 @@ export default function Navbar() {
           <div className="flex items-center gap-2">
             <button
               onClick={toggleTheme}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white/70 text-slate-700 hover:bg-slate-100 transition dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-800"
+              className={cn(
+                "relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-slate-700 hover:bg-slate-100 transition-all duration-300 hover:scale-105 active:scale-95 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800",
+                themeTransition && "animate-pulse"
+              )}
               title="Toggle theme"
             >
               {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+              <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-blue-500 animate-ping opacity-75" />
             </button>
 
             <button
-              className="hidden md:inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white/70 text-slate-700 hover:bg-slate-100 transition dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-800"
+              className="hidden md:inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-slate-700 hover:bg-slate-100 transition-all duration-300 hover:scale-105 active:scale-95 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800 group"
               title="Help & Support"
               onClick={() => router.push('/help')}
             >
-              <HelpCircle size={18} />
+              <HelpCircle size={18} className="group-hover:rotate-12 transition-transform" />
             </button>
 
             <button
-              className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white/70 text-slate-700 hover:bg-slate-100 transition dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-800"
+              className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-slate-700 hover:bg-slate-100 transition-all duration-300 hover:scale-105 active:scale-95 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800 group"
               title="Notifications (click to clear)"
               onClick={() => setNotifications(0)}
             >
-              <Bell size={18} />
+              <Bell size={18} className="group-hover:animate-shake" />
               {notifications > 0 && (
-                <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-orange-500 px-1.5 text-[11px] font-semibold text-white shadow-sm">
-                  {notifications}
-                </span>
+                <>
+                  <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-red-500 px-1.5 text-[11px] font-semibold text-white shadow-lg group-hover:scale-110 transition-transform">
+                    {notifications}
+                  </span>
+                  <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-red-500 px-1.5 text-[11px] font-semibold text-white shadow-lg animate-ping opacity-60" />
+                </>
               )}
             </button>
 
@@ -562,71 +651,99 @@ export default function Navbar() {
             <div className="relative" ref={userMenuRef}>
               <button
                 onClick={() => setIsUserMenuOpen((v) => !v)}
-                className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/70 px-2 py-1.5 hover:bg-slate-100 transition dark:border-slate-800 dark:bg-slate-900/60 dark:hover:bg-slate-800"
+                className="group inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 hover:bg-slate-100 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] dark:border-slate-800 dark:bg-slate-900/80 dark:hover:bg-slate-800"
                 aria-expanded={isUserMenuOpen}
               >
-                <div className="h-9 w-9 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-800 text-white flex items-center justify-center text-sm font-semibold shadow-sm">
-                  {profileLoading ? '…' : userInitials}
+                <div className="relative">
+                  <div className={`h-9 w-9 rounded-2xl bg-gradient-to-br ${roleColor} text-white flex items-center justify-center text-sm font-semibold shadow-lg group-hover:shadow-xl transition-all duration-300 group-hover:scale-105`}>
+                    {profileLoading ? '…' : userInitials}
+                  </div>
+                  <div className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-white dark:bg-slate-900 border-2 border-white dark:border-slate-950">
+                    <div className="h-full w-full rounded-full bg-green-500 animate-pulse" />
+                  </div>
                 </div>
                 <div className="hidden md:block text-left leading-tight">
-                  <p className="max-w-[160px] truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  <p className="max-w-[160px] truncate text-sm font-semibold text-slate-900 dark:text-slate-100 group-hover:text-slate-700 dark:group-hover:text-slate-300 transition-colors">
                     {profileLoading ? 'Loading…' : displayName}
                   </p>
-                  <p className="max-w-[160px] truncate text-xs text-slate-500 dark:text-slate-400">
+                  <p className="max-w-[160px] truncate text-xs text-slate-500 dark:text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
                     {displayEmail || '—'}
                   </p>
                 </div>
                 <ChevronDown
                   size={16}
-                  className={cn('text-slate-400 transition-transform', isUserMenuOpen && 'rotate-180')}
+                  className={cn('text-slate-400 dark:text-slate-500 transition-transform duration-300', isUserMenuOpen && 'rotate-180')}
                 />
               </button>
 
               {isUserMenuOpen && (
-                <div className="absolute right-0 mt-2 w-72 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-950">
-                  <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-900">
-                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{displayName}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{displayEmail || '—'}</p>
-                    <div className="mt-2 inline-flex items-center rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                <div className="absolute right-0 mt-2 w-72 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950 animate-in fade-in slide-in-from-top-5 duration-200">
+                  <div className="px-4 py-4 border-b border-slate-100 dark:border-slate-900 bg-gradient-to-r from-slate-50 to-white dark:from-slate-900/50 dark:to-slate-950">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className={`h-12 w-12 rounded-2xl bg-gradient-to-br ${roleColor} flex items-center justify-center text-white font-semibold shadow-lg`}>
+                        {userInitials}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{displayName}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{displayEmail || '—'}</p>
+                      </div>
+                    </div>
+                    <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 dark:bg-blue-500/10 px-3 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300">
+                      <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
                       {roleLabel}
                     </div>
                   </div>
 
                   <div className="p-2">
                     <button
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition"
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition-all duration-200 group"
                       onClick={() => {
                         setIsUserMenuOpen(false);
                         router.push('/profile');
                       }}
                     >
-                      <UserCircle size={18} className="text-slate-500 dark:text-slate-400" />
-                      My Profile
+                      <div className="h-9 w-9 rounded-xl bg-blue-100 dark:bg-blue-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <UserCircle size={18} className="text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <div className="text-left">
+                        <p className="font-medium">My Profile</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">View & edit your profile</p>
+                      </div>
                     </button>
 
                     <button
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition"
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition-all duration-200 group"
                       onClick={() => {
                         setIsUserMenuOpen(false);
                         router.push('/settings');
                       }}
                     >
-                      <Settings size={18} className="text-slate-500 dark:text-slate-400" />
-                      Account Settings
+                      <div className="h-9 w-9 rounded-xl bg-emerald-100 dark:bg-emerald-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <Settings size={18} className="text-emerald-600 dark:text-emerald-400" />
+                      </div>
+                      <div className="text-left">
+                        <p className="font-medium">Settings</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Preferences & security</p>
+                      </div>
                     </button>
                   </div>
 
-                  <div className="border-t border-slate-100 p-2 dark:border-slate-900">
+                  <div className="border-t border-slate-100 p-2 dark:border-slate-900 bg-gradient-to-r from-slate-50/50 to-transparent dark:from-slate-900/30">
                     <button
                       onClick={async () => {
                         setIsUserMenuOpen(false);
                         await supabase.auth.signOut();
                         router.replace('/');
                       }}
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-slate-700 hover:bg-orange-50 hover:text-orange-700 dark:text-slate-200 dark:hover:bg-orange-500/10 dark:hover:text-orange-300 transition"
+                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-gradient-to-r hover:from-orange-50 hover:to-red-50 hover:text-orange-700 dark:text-slate-200 dark:hover:from-orange-500/10 dark:hover:to-red-500/10 dark:hover:text-orange-300 transition-all duration-200 group"
                     >
-                      <LogOut size={18} className="text-slate-500 dark:text-slate-400" />
-                      Sign Out
+                      <div className="h-9 w-9 rounded-xl bg-orange-100 dark:bg-orange-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <LogOut size={18} className="text-orange-600 dark:text-orange-400" />
+                      </div>
+                      <div className="text-left">
+                        <p className="font-medium">Sign Out</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">End current session</p>
+                      </div>
                     </button>
                   </div>
                 </div>
@@ -640,10 +757,15 @@ export default function Navbar() {
       <div className="no-print" style={{ height: NAVBAR_HEIGHT_PX }} />
 
       {/* Mobile bottom bar */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/90 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/80">
-        <div className="mx-auto flex max-w-[1400px] items-center justify-between px-6 py-2">
-          <button onClick={goHome} className="flex flex-col items-center gap-1 text-blue-600 dark:text-blue-400">
-            <Home size={20} />
+      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-xl supports-[backdrop-filter]:bg-white/90 dark:border-slate-800 dark:bg-slate-950/95 supports-[backdrop-filter]:dark:bg-slate-950/90 shadow-2xl animate-in fade-in slide-in-from-bottom-5 duration-300">
+        <div className="mx-auto flex max-w-[1400px] items-center justify-between px-6 py-3">
+          <button 
+            onClick={goHome} 
+            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-all duration-200 hover:scale-105 active:scale-95 group"
+          >
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 dark:from-blue-500/20 dark:to-blue-500/10 flex items-center justify-center group-hover:from-blue-200 group-hover:to-blue-100 dark:group-hover:from-blue-500/30 transition-all">
+              <Home size={20} className="text-blue-600 dark:text-blue-400" />
+            </div>
             <span className="text-[11px] font-medium">Home</span>
           </button>
 
@@ -653,19 +775,23 @@ export default function Navbar() {
               setTimeout(() => searchInputRef.current?.focus(), 250);
               setSearchOpen(true);
             }}
-            className="flex flex-col items-center gap-1 text-slate-600 dark:text-slate-300"
+            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 transition-all duration-200 hover:scale-105 active:scale-95 group"
           >
-            <Search size={20} />
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-emerald-100 to-emerald-50 dark:from-emerald-500/20 dark:to-emerald-500/10 flex items-center justify-center group-hover:from-emerald-200 group-hover:to-emerald-100 dark:group-hover:from-emerald-500/30 transition-all">
+              <Search size={20} className="text-emerald-600 dark:text-emerald-400" />
+            </div>
             <span className="text-[11px] font-medium">Search</span>
           </button>
 
           <button
             onClick={() => setNotifications(0)}
-            className="relative flex flex-col items-center gap-1 text-slate-600 dark:text-slate-300"
+            className="relative flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-orange-600 dark:hover:text-orange-400 transition-all duration-200 hover:scale-105 active:scale-95 group"
           >
-            <Bell size={20} />
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-orange-100 to-orange-50 dark:from-orange-500/20 dark:to-orange-500/10 flex items-center justify-center group-hover:from-orange-200 group-hover:to-orange-100 dark:group-hover:from-orange-500/30 transition-all">
+              <Bell size={20} className="text-orange-600 dark:text-orange-400" />
+            </div>
             {notifications > 0 && (
-              <span className="absolute -top-1 right-0 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-semibold text-white">
+              <span className="absolute -top-1 -right-1 inline-flex h-5 min-w-[16px] items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-red-500 text-[10px] font-bold text-white shadow-lg animate-bounce">
                 {notifications}
               </span>
             )}
@@ -674,9 +800,11 @@ export default function Navbar() {
 
           <button
             onClick={() => setIsUserMenuOpen(true)}
-            className="flex flex-col items-center gap-1 text-slate-600 dark:text-slate-300"
+            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-all duration-200 hover:scale-105 active:scale-95 group"
           >
-            <UserCircle size={20} />
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-violet-100 to-violet-50 dark:from-violet-500/20 dark:to-violet-500/10 flex items-center justify-center group-hover:from-violet-200 group-hover:to-violet-100 dark:group-hover:from-violet-500/30 transition-all">
+              <UserCircle size={20} className="text-violet-600 dark:text-violet-400" />
+            </div>
             <span className="text-[11px] font-medium">Profile</span>
           </button>
         </div>

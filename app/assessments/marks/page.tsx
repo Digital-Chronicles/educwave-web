@@ -86,7 +86,7 @@ interface QuestionRow {
   grade_id: number;
   subject_id: number | null;
   term_exam_id?: number | null;
-  exam_type_id?: number | null; // (your assessment_question likely uses this name)
+  exam_type_id?: number | null;
   topic?: { name: string } | null;
 }
 
@@ -97,7 +97,7 @@ interface ExamResultRow {
   grade_id: number;
   subject_id: number | null;
   topic_id: number | null;
-  exam_session_id: number | null; // ✅ correct in your schema
+  exam_session_id: number | null;
   score: number;
   max_possible: number;
   total_score: number | null;
@@ -119,34 +119,28 @@ export default function AssessmentMarksPage() {
   const [school, setSchool] = useState<SchoolRow | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Tabs
   const [activeTab, setActiveTab] = useState<TabKey>('matrix');
 
-  // Base data
   const [grades, setGrades] = useState<GradeRow[]>([]);
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
   const [topics, setTopics] = useState<TopicRow[]>([]);
   const [terms, setTerms] = useState<TermExamRow[]>([]);
   const [examSessions, setExamSessions] = useState<ExamSessionRow[]>([]);
 
-  // Working data (filtered load)
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [results, setResults] = useState<ExamResultRow[]>([]);
 
-  // Filters
   const [selectedGradeId, setSelectedGradeId] = useState<string>('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
-  const [selectedTermId, setSelectedTermId] = useState<string>(''); // term_exam_session.id
-  const [selectedExamSessionId, setSelectedExamSessionId] = useState<string>(''); // exam_session.id
+  const [selectedTermId, setSelectedTermId] = useState<string>('');
+  const [selectedExamSessionId, setSelectedExamSessionId] = useState<string>('');
 
   const [studentSearch, setStudentSearch] = useState('');
   const [topicSearch, setTopicSearch] = useState('');
 
-  // Printing
   const printRef = useRef<HTMLDivElement | null>(null);
 
-  // 1) Auth
   useEffect(() => {
     const run = async () => {
       const {
@@ -165,7 +159,6 @@ export default function AssessmentMarksPage() {
     run();
   }, [router]);
 
-  // 2) Load profile + school + base catalog (grades/subjects/topics/terms/exams)
   useEffect(() => {
     if (authChecking) return;
 
@@ -298,7 +291,6 @@ export default function AssessmentMarksPage() {
     load();
   }, [authChecking]);
 
-  // Helpers
   const subjectsForSelectedGrade = useMemo(() => {
     if (!selectedGradeId) return subjects;
     return subjects.filter((s) => s.grade_id === Number(selectedGradeId));
@@ -313,14 +305,12 @@ export default function AssessmentMarksPage() {
     return Boolean(school?.id && selectedGradeId && selectedSubjectId && selectedTermId && selectedExamSessionId);
   }, [school?.id, selectedGradeId, selectedSubjectId, selectedTermId, selectedExamSessionId]);
 
-  // 3) Load matrix data (students, questions, results) after filters
   useEffect(() => {
     if (!school?.id) return;
 
     const loadMatrix = async () => {
       setErrorMsg(null);
 
-      // Clear when filters incomplete
       if (!canLoadMatrix) {
         setStudents([]);
         setQuestions([]);
@@ -335,7 +325,6 @@ export default function AssessmentMarksPage() {
         const termId = Number(selectedTermId);
         const examSessionId = Number(selectedExamSessionId);
 
-        // Students for grade
         const studentsRes = await supabase
           .from('students')
           .select('registration_id, first_name, last_name')
@@ -345,9 +334,6 @@ export default function AssessmentMarksPage() {
 
         if (studentsRes.error) throw studentsRes.error;
 
-        // Questions for grade + subject + term + exam session
-        // NOTE: your assessment_question table wasn't posted, but your earlier code uses term_exam_id & exam_type_id.
-        // We'll filter on those if they exist. If your column names differ, tell me and I'll adjust.
         const questionsRes = await supabase
           .from('assessment_question')
           .select('id, question_number, max_score, topic_id, grade_id, subject_id')
@@ -362,8 +348,6 @@ export default function AssessmentMarksPage() {
 
         const qRows = (questionsRes.data ?? []) as QuestionRow[];
 
-        // Results (question-level) for this grade/subject/session
-        // ✅ correct column: exam_session_id
         const resultsRes = await supabase
           .from('assessment_examresult')
           .select(
@@ -393,7 +377,6 @@ export default function AssessmentMarksPage() {
     loadMatrix();
   }, [school?.id, canLoadMatrix, selectedGradeId, selectedSubjectId, selectedTermId, selectedExamSessionId]);
 
-  // ---------- MATRIX COMPUTATIONS ----------
   const studentById = useMemo(() => {
     const m = new Map<string, StudentRow>();
     for (const s of students) m.set(s.registration_id, s);
@@ -449,7 +432,6 @@ export default function AssessmentMarksPage() {
     return avg;
   }, [students, questions, studentQuestionScore]);
 
-  // Positions (with ties like classic marksheet: 1,1,3...)
   const positions = useMemo(() => {
     const rows = students
       .map((s) => {
@@ -469,7 +451,6 @@ export default function AssessmentMarksPage() {
     return posMap;
   }, [students, studentTotals]);
 
-  // Filtered students for display
   const filteredStudents = useMemo(() => {
     const q = studentSearch.trim().toLowerCase();
     if (!q) return students;
@@ -479,7 +460,6 @@ export default function AssessmentMarksPage() {
     });
   }, [students, studentSearch]);
 
-  // ---------- TOPIC STUDENT INSIGHTS ----------
   const topicNameById = useMemo(() => {
     const m = new Map<number, string>();
     for (const t of topics) m.set(t.id, t.name);
@@ -487,7 +467,6 @@ export default function AssessmentMarksPage() {
   }, [topics]);
 
   const topicStudentInsights = useMemo(() => {
-    // topicId -> studentId -> {scoreSum, maxSum}
     const map = new Map<number, Map<string, { s: number; m: number }>>();
 
     for (const stu of students) {
@@ -508,7 +487,6 @@ export default function AssessmentMarksPage() {
       }
     }
 
-    // Build named result
     const out: Array<{
       topicId: number;
       topicName: string;
@@ -537,17 +515,14 @@ export default function AssessmentMarksPage() {
       });
     }
 
-    // search filter
     const q = topicSearch.trim().toLowerCase();
     const filtered = q ? out.filter((x) => x.topicName.toLowerCase().includes(q)) : out;
 
-    // sort best first
     filtered.sort((a, b) => b.avgPct - a.avgPct);
 
     return filtered;
   }, [students, questions, studentQuestionScore, topicNameById, topicSearch]);
 
-  // Printing (matrix only)
   const handlePrintMatrix = () => {
     if (!printRef.current) return;
 
@@ -582,7 +557,6 @@ export default function AssessmentMarksPage() {
     w.close();
   };
 
-  // ---------- UI STATES ----------
   if (authChecking || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -597,7 +571,8 @@ export default function AssessmentMarksPage() {
   if (!profile?.school_id || !school) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Navbar userEmail={userEmail} />
+        {/* FIXED: Removed userEmail prop */}
+        <Navbar />
         <div className="flex">
           <AppShell />
           <main className="flex-1 p-6">
@@ -633,7 +608,6 @@ export default function AssessmentMarksPage() {
     );
   }
 
-  // ---------- RENDER: MATRIX ----------
   const renderResultsMatrix = () => {
     if (!canLoadMatrix) {
       return (
@@ -668,7 +642,6 @@ export default function AssessmentMarksPage() {
           </button>
         </div>
 
-        {/* Printable only area */}
         <div ref={printRef} className="p-4">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
@@ -758,7 +731,6 @@ export default function AssessmentMarksPage() {
     );
   };
 
-  // ---------- RENDER: TOPIC STUDENT INSIGHTS ----------
   const renderTopicInsights = () => {
     if (!canLoadMatrix) {
       return (
@@ -869,14 +841,14 @@ export default function AssessmentMarksPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar userEmail={userEmail} />
+      {/* FIXED: Removed userEmail prop */}
+      <Navbar />
 
       <div className="flex">
         <AppShell />
 
         <main className="flex-1 p-6">
           <div className="max-w-7xl mx-auto">
-            {/* Header */}
             <div className="mb-8">
               <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
                 <div>
@@ -892,7 +864,6 @@ export default function AssessmentMarksPage() {
                 </button>
               </div>
 
-              {/* Filters */}
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
                 <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
                   <div>
@@ -1002,7 +973,6 @@ export default function AssessmentMarksPage() {
                 </div>
               </div>
 
-              {/* Tabs */}
               <div className="mt-6 flex items-center gap-1 border-b border-gray-200">
                 {(['matrix', 'topics'] as TabKey[]).map((k) => (
                   <button
@@ -1026,7 +996,6 @@ export default function AssessmentMarksPage() {
               </div>
             )}
 
-            {/* Content */}
             {activeTab === 'matrix' && (
               <div className="space-y-6">
                 {renderResultsMatrix()}

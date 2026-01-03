@@ -29,15 +29,15 @@ type AppRole = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PAREN
 type TabKey = 'overview' | 'topics' | 'questions' | 'performance';
 
 interface ProfileRow {
-  user_id: string; // uuid
+  user_id: string;
   email: string | null;
   full_name: string | null;
   role: AppRole;
-  school_id: string | null; // uuid
+  school_id: string | null;
 }
 
 interface SchoolRow {
-  id: string; // uuid
+  id: string;
   school_name: string;
 }
 
@@ -50,7 +50,7 @@ interface SubjectRow {
   id: number;
   name: string;
   grade_id: number | null;
-  grade?: { grade_name: string } | null;
+  grade?: { grade_name: string }[] | null;
 }
 
 interface TopicRow {
@@ -58,8 +58,8 @@ interface TopicRow {
   name: string;
   grade_id: number;
   subject_id: number;
-  grade?: { grade_name: string } | null;
-  subject?: { name: string } | null;
+  grade?: { grade_name: string }[] | null;
+  subject?: { name: string }[] | null;
 }
 
 interface TermExamRow {
@@ -71,7 +71,14 @@ interface TermExamRow {
 interface ExamSessionRow {
   id: number;
   exam_type: 'BOT' | 'MOT' | 'EOT';
-  term?: { term_name: string; year: number } | null;
+  term?: { term_name: string; year: number }[] | null;
+}
+
+interface ParsedExamSession {
+  id: number;
+  exam_type: 'BOT' | 'MOT' | 'EOT';
+  term_name: string;
+  term_year: number;
 }
 
 interface QuestionRow {
@@ -83,14 +90,14 @@ interface QuestionRow {
   grade_id: number;
   subject_id: number;
   max_score: number;
-  term_exam?: { term_name: string; year: number } | null;
-  exam_type?: {
+  term_exam?: { term_name: string; year: number }[] | null;
+  exam_type?: Array<{ // Fixed: Changed to array
     exam_type: string;
-    term?: { term_name: string; year: number } | null;
-  } | null;
-  topic?: { name: string } | null;
-  grade?: { grade_name: string } | null;
-  subject?: { name: string } | null;
+    term?: { term_name: string; year: number }[] | null;
+  }> | null;
+  topic?: { name: string }[] | null;
+  grade?: { grade_name: string }[] | null;
+  subject?: { name: string }[] | null;
 }
 
 export default function AssessmentsPage() {
@@ -105,13 +112,13 @@ export default function AssessmentsPage() {
 
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Data
   const [grades, setGrades] = useState<GradeRow[]>([]);
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
   const [topics, setTopics] = useState<TopicRow[]>([]);
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [termExams, setTermExams] = useState<TermExamRow[]>([]);
   const [examSessions, setExamSessions] = useState<ExamSessionRow[]>([]);
+  const [parsedExamSessions, setParsedExamSessions] = useState<ParsedExamSession[]>([]);
 
   const [totalGrades, setTotalGrades] = useState(0);
   const [totalSubjects, setTotalSubjects] = useState(0);
@@ -120,26 +127,21 @@ export default function AssessmentsPage() {
   const [totalResults, setTotalResults] = useState(0);
   const [overallAverage, setOverallAverage] = useState<number | null>(null);
 
-  // Filters + Search
   const [selectedGradeId, setSelectedGradeId] = useState<string>('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
   const [topicSearch, setTopicSearch] = useState('');
   const [questionSearch, setQuestionSearch] = useState('');
 
-  // Tabs
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
 
-  // Modals
   const [showTopicModal, setShowTopicModal] = useState(false);
   const [showQuestionModal, setShowQuestionModal] = useState(false);
 
-  // Topic form
   const [topicName, setTopicName] = useState('');
   const [topicGradeId, setTopicGradeId] = useState('');
   const [topicSubjectId, setTopicSubjectId] = useState('');
   const [savingTopic, setSavingTopic] = useState(false);
 
-  // Question form
   const [questionTermExamId, setQuestionTermExamId] = useState('');
   const [questionExamSessionId, setQuestionExamSessionId] = useState('');
   const [questionGradeId, setQuestionGradeId] = useState('');
@@ -149,7 +151,6 @@ export default function AssessmentsPage() {
   const [questionMaxScore, setQuestionMaxScore] = useState('5');
   const [savingQuestion, setSavingQuestion] = useState(false);
 
-  // 1️⃣ Auth check
   useEffect(() => {
     const run = async () => {
       const {
@@ -168,7 +169,6 @@ export default function AssessmentsPage() {
     run();
   }, [router]);
 
-  // 2️⃣ Load data after auth
   useEffect(() => {
     if (authChecking) return;
 
@@ -193,7 +193,6 @@ export default function AssessmentsPage() {
         return;
       }
 
-      // ✅ Load profile by auth uid
       const { data: p, error: pErr } = await supabase
         .from('profiles')
         .select('user_id, email, full_name, role, school_id')
@@ -213,13 +212,11 @@ export default function AssessmentsPage() {
       setProfile(prof);
 
       if (!prof.school_id) {
-        // keep school null so UI shows configuration required
         setSchool(null);
         setLoading(false);
         return;
       }
 
-      // ✅ Load school
       const { data: s, error: sErr } = await supabase
         .from('general_information')
         .select('id, school_name')
@@ -236,7 +233,6 @@ export default function AssessmentsPage() {
       setSchool(schoolData);
 
       try {
-        // Grades
         const { data: gradeRows, error: gradesError } = await supabase
           .from('class')
           .select('id, grade_name')
@@ -247,7 +243,6 @@ export default function AssessmentsPage() {
         setGrades((gradeRows ?? []) as GradeRow[]);
         setTotalGrades(gradeRows?.length ?? 0);
 
-        // Subjects
         const { data: subjectRows, error: subjectsError } = await supabase
           .from('subject')
           .select(
@@ -265,7 +260,6 @@ export default function AssessmentsPage() {
         setSubjects((subjectRows ?? []) as unknown as SubjectRow[]);
         setTotalSubjects(subjectRows?.length ?? 0);
 
-        // Topics
         const { data: topicRows, error: topicsError } = await supabase
           .from('assessment_topics')
           .select(
@@ -285,7 +279,6 @@ export default function AssessmentsPage() {
         setTopics((topicRows ?? []) as unknown as TopicRow[]);
         setTotalTopics(topicRows?.length ?? 0);
 
-        // Questions (recent 30)
         const {
           data: questionRows,
           error: questionsError,
@@ -321,7 +314,6 @@ export default function AssessmentsPage() {
         setQuestions((questionRows ?? []) as unknown as QuestionRow[]);
         setTotalQuestions(questionsCountVal ?? questionRows?.length ?? 0);
 
-        // Term exams
         const { data: termRows, error: termError } = await supabase
           .from('term_exam_session')
           .select('id, term_name, year')
@@ -332,7 +324,6 @@ export default function AssessmentsPage() {
         if (termError) throw termError;
         setTermExams((termRows ?? []) as TermExamRow[]);
 
-        // Exam sessions
         const { data: examSessRows, error: examSessError } = await supabase
           .from('exam_session')
           .select(
@@ -346,9 +337,18 @@ export default function AssessmentsPage() {
           .order('id', { ascending: false });
 
         if (examSessError) throw examSessError;
-        setExamSessions((examSessRows ?? []) as ExamSessionRow[]);
+        
+        const sessionData = (examSessRows ?? []) as ExamSessionRow[];
+        setExamSessions(sessionData);
 
-        // Results stats
+        const parsedSessions: ParsedExamSession[] = sessionData.map(session => ({
+          id: session.id,
+          exam_type: session.exam_type,
+          term_name: session.term?.[0]?.term_name || '',
+          term_year: session.term?.[0]?.year || 0
+        }));
+        setParsedExamSessions(parsedSessions);
+
         const { data: resultRows, error: resultsError } = await supabase
           .from('assessment_examresult')
           .select('score, max_possible')
@@ -379,7 +379,6 @@ export default function AssessmentsPage() {
     loadData();
   }, [authChecking]);
 
-  // Derived
   const subjectsForSelectedGrade = useMemo(() => {
     if (!selectedGradeId) return subjects;
     return subjects.filter((s) => s.grade_id === Number(selectedGradeId));
@@ -407,8 +406,8 @@ export default function AssessmentsPage() {
       const searchOk =
         !q ||
         t.name.toLowerCase().includes(q) ||
-        (t.subject?.name ?? '').toLowerCase().includes(q) ||
-        (t.grade?.grade_name ?? '').toLowerCase().includes(q);
+        (t.subject?.[0]?.name ?? '').toLowerCase().includes(q) ||
+        (t.grade?.[0]?.grade_name ?? '').toLowerCase().includes(q);
       return gOk && sOk && searchOk;
     });
   }, [topics, selectedGradeId, selectedSubjectId, topicSearch]);
@@ -421,17 +420,16 @@ export default function AssessmentsPage() {
       const searchOk =
         !q ||
         `${x.question_number}`.toLowerCase().includes(q) ||
-        (x.topic?.name ?? '').toLowerCase().includes(q) ||
-        (x.subject?.name ?? '').toLowerCase().includes(q) ||
-        (x.grade?.grade_name ?? '').toLowerCase().includes(q) ||
-        (x.term_exam?.term_name ?? '').toLowerCase().includes(q) ||
-        `${x.term_exam?.year ?? ''}`.toLowerCase().includes(q) ||
-        (x.exam_type?.exam_type ?? '').toLowerCase().includes(q);
+        (x.topic?.[0]?.name ?? '').toLowerCase().includes(q) ||
+        (x.subject?.[0]?.name ?? '').toLowerCase().includes(q) ||
+        (x.grade?.[0]?.grade_name ?? '').toLowerCase().includes(q) ||
+        (x.term_exam?.[0]?.term_name ?? '').toLowerCase().includes(q) ||
+        `${x.term_exam?.[0]?.year ?? ''}`.toLowerCase().includes(q) ||
+        (x.exam_type?.[0]?.exam_type ?? '').toLowerCase().includes(q); // Access first element
       return gOk && sOk && searchOk;
     });
   }, [questions, selectedGradeId, selectedSubjectId, questionSearch]);
 
-  // ➕ Create Topic
   const handleCreateTopic = async (e: FormEvent) => {
     e.preventDefault();
     if (!school) return;
@@ -481,7 +479,6 @@ export default function AssessmentsPage() {
     }
   };
 
-  // ➕ Create Question
   const handleCreateQuestion = async (e: FormEvent) => {
     e.preventDefault();
     if (!school) return;
@@ -559,7 +556,6 @@ export default function AssessmentsPage() {
     }
   };
 
-  // Loading state
   if (authChecking || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -571,11 +567,10 @@ export default function AssessmentsPage() {
     );
   }
 
-  // No school configured
   if (!profile?.school_id || !school) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Navbar userEmail={userEmail} />
+        <Navbar />
         <div className="flex">
           <AppShell />
           <main className="flex-1 p-6">
@@ -613,7 +608,6 @@ export default function AssessmentsPage() {
     );
   }
 
-  // UI helpers
   const renderOverview = () => (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -693,7 +687,7 @@ export default function AssessmentsPage() {
                       <div>
                         <h4 className="font-medium text-gray-900">Question {q.question_number}</h4>
                         <p className="text-sm text-gray-500">
-                          {q.topic?.name} • {q.subject?.name}
+                          {q.topic?.[0]?.name} • {q.subject?.[0]?.name}
                         </p>
                       </div>
                     </div>
@@ -823,7 +817,7 @@ export default function AssessmentsPage() {
                 <option value="">All Subjects</option>
                 {subjectsForSelectedGrade.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name} {s.grade?.grade_name ? `(${s.grade.grade_name})` : ''}
+                    {s.name} {s.grade?.[0]?.grade_name ? `(${s.grade[0].grade_name})` : ''}
                   </option>
                 ))}
               </select>
@@ -863,11 +857,11 @@ export default function AssessmentsPage() {
                       </div>
                     </td>
                     <td className="py-4 px-4">
-                      <div className="text-sm text-gray-900">{topic.subject?.name}</div>
+                      <div className="text-sm text-gray-900">{topic.subject?.[0]?.name}</div>
                     </td>
                     <td className="py-4 px-4">
                       <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                        {topic.grade?.grade_name}
+                        {topic.grade?.[0]?.grade_name}
                       </span>
                     </td>
                     <td className="py-4 px-4">
@@ -960,7 +954,7 @@ export default function AssessmentsPage() {
                 <option value="">All Subjects</option>
                 {subjectsForSelectedGrade.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name} {s.grade?.grade_name ? `(${s.grade.grade_name})` : ''}
+                    {s.name} {s.grade?.[0]?.grade_name ? `(${s.grade[0].grade_name})` : ''}
                   </option>
                 ))}
               </select>
@@ -1003,25 +997,25 @@ export default function AssessmentsPage() {
                         <div className="font-medium text-gray-900">
                           Question {question.question_number}
                         </div>
-                        <div className="text-xs text-gray-500">{question.subject?.name}</div>
+                        <div className="text-xs text-gray-500">{question.subject?.[0]?.name}</div>
                       </div>
                     </div>
                   </td>
                   <td className="py-4 px-4">
-                    <div className="text-sm text-gray-900">{question.topic?.name}</div>
+                    <div className="text-sm text-gray-900">{question.topic?.[0]?.name}</div>
                   </td>
                   <td className="py-4 px-4">
                     <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                      {question.grade?.grade_name}
+                      {question.grade?.[0]?.grade_name}
                     </span>
                   </td>
                   <td className="py-4 px-4">
                     <div className="text-sm text-gray-900">
-                      {question.term_exam
-                        ? `${question.term_exam.term_name.replace('_', ' ')} ${question.term_exam.year}`
+                      {question.term_exam?.[0]
+                        ? `${question.term_exam[0].term_name.replace('_', ' ')} ${question.term_exam[0].year}`
                         : '—'}
                     </div>
-                    <div className="text-xs text-gray-500">{question.exam_type?.exam_type}</div>
+                    <div className="text-xs text-gray-500">{question.exam_type?.[0]?.exam_type}</div> {/* Access first element */}
                   </td>
                   <td className="py-4 px-4">
                     <div className="text-sm font-medium text-gray-900">{question.max_score}</div>
@@ -1116,7 +1110,7 @@ export default function AssessmentsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar userEmail={userEmail} />
+      <Navbar />
 
       <div className="flex">
         <AppShell />
@@ -1156,7 +1150,6 @@ export default function AssessmentsPage() {
                     View Marks Analysis
                   </Link>
 
-
                   <button
                     onClick={() => setShowTopicModal(true)}
                     className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-lg hover:bg-gray-50"
@@ -1173,7 +1166,6 @@ export default function AssessmentsPage() {
                     New Question
                   </button>
                 </div>
-
               </div>
 
               <div className="flex items-center gap-1 border-b border-gray-200">
@@ -1181,10 +1173,11 @@ export default function AssessmentsPage() {
                   <button
                     key={k}
                     onClick={() => setActiveTab(k)}
-                    className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === k
+                    className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+                      activeTab === k
                         ? 'border-blue-600 text-blue-600'
                         : 'border-transparent text-gray-500 hover:text-gray-700'
-                      }`}
+                    }`}
                   >
                     {k === 'overview'
                       ? 'Overview'
@@ -1271,7 +1264,7 @@ export default function AssessmentsPage() {
                   <option value="">Select subject</option>
                   {subjectsForTopicGrade.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.name} {s.grade?.grade_name ? `(${s.grade.grade_name})` : ''}
+                      {s.name} {s.grade?.[0]?.grade_name ? `(${s.grade[0].grade_name})` : ''}
                     </option>
                   ))}
                 </select>
@@ -1342,9 +1335,9 @@ export default function AssessmentsPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">Select session</option>
-                  {examSessions.map((es) => (
+                  {parsedExamSessions.map((es) => (
                     <option key={es.id} value={es.id}>
-                      {es.exam_type} {es.term ? `- ${es.term.term_name.replace('_', ' ')} ${es.term.year}` : ''}
+                      {es.exam_type} {es.term_name ? `- ${es.term_name.replace('_', ' ')} ${es.term_year}` : ''}
                     </option>
                   ))}
                 </select>
@@ -1386,7 +1379,7 @@ export default function AssessmentsPage() {
                   {(questionGradeId ? subjects.filter((s) => s.grade_id === Number(questionGradeId)) : subjects).map(
                     (s) => (
                       <option key={s.id} value={s.id}>
-                        {s.name} {s.grade?.grade_name ? `(${s.grade.grade_name})` : ''}
+                        {s.name} {s.grade?.[0]?.grade_name ? `(${s.grade[0].grade_name})` : ''}
                       </option>
                     )
                   )}

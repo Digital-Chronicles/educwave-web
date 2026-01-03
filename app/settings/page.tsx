@@ -333,7 +333,8 @@ export default function SettingsPage() {
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col">
-      <Navbar userEmail={userEmail} />
+      {/* Remove the userEmail prop from Navbar */}
+      <Navbar />
 
       <div className="flex flex-1">
         <AppShell />
@@ -345,6 +346,11 @@ export default function SettingsPage() {
               <p className="text-xs text-slate-500">
                 Your profile is auto-created on first login. Then you can create one school and link it to your profile.
               </p>
+              {userEmail && (
+                <p className="text-xs text-slate-400 mt-1">
+                  Signed in as: <span className="font-medium text-slate-600">{userEmail}</span>
+                </p>
+              )}
             </div>
 
             {errorMsg && (
@@ -524,7 +530,7 @@ export default function SettingsPage() {
                 </form>
 
                 <div className="mt-3 text-[11px] text-slate-400">
-                  If insert/update fails with “permission denied”, your RLS policies for <b>profiles</b> and <b>general_information</b> must allow the logged-in user.
+                  If insert/update fails with "permission denied", your RLS policies for <b>profiles</b> and <b>general_information</b> must allow the logged-in user.
                 </div>
               </div>
             </section>

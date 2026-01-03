@@ -559,7 +559,7 @@ export default function TeachersPage() {
   if (!profile || !profile.school_id || !school) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
-        <Navbar userEmail={userEmail} userName={userName} />
+        <Navbar/>
         <div className="flex flex-1">
           <AppShell />
           <main className="flex-1 flex items-center justify-center p-6">
@@ -604,7 +604,7 @@ export default function TeachersPage() {
   // ---------------------------
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
-      <Navbar userEmail={userEmail} userName={userName} />
+      <Navbar/>
 
       <div className="flex flex-1 overflow-hidden">
         <AppShell />

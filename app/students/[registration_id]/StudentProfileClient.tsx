@@ -510,25 +510,31 @@ export default function StudentProfileClient() {
     try {
       if (!profile?.school_id) throw new Error('School not linked');
 
-      const payload = {
+      // Create base payload
+      const basePayload = {
         ...personalForm,
         school_id: profile.school_id,
         updated: new Date().toISOString().slice(0, 10),
       };
 
       if (isCreateMode) {
-        payload.registered_by = (await supabase.auth.getUser()).data.user?.id || null;
-        payload.created = new Date().toISOString().slice(0, 10);
+        // Create full payload for insert
+        const insertPayload = {
+          ...basePayload,
+          registered_by: (await supabase.auth.getUser()).data.user?.id || null,
+          created: new Date().toISOString().slice(0, 10),
+        };
 
-        const { error } = await supabase.from('students').insert(payload);
+        const { error } = await supabase.from('students').insert(insertPayload);
         if (error) throw error;
         
         setSuccessMsg('Student created successfully');
-        router.push(`/students/${encodeURIComponent(payload.registration_id)}`);
+        router.push(`/students/${encodeURIComponent(insertPayload.registration_id)}`);
       } else {
+        // For update, use base payload only
         const { error } = await supabase
           .from('students')
-          .update(payload)
+          .update(basePayload)
           .eq('registration_id', student?.registration_id);
 
         if (error) throw error;
@@ -726,7 +732,8 @@ export default function StudentProfileClient() {
   /* ---------------- Main Render ---------------- */
   return (
     <div className="min-h-screen bg-gray-50">
-      <Navbar userEmail={userEmail} userName={userName} />
+      {/* Removed props from Navbar since it likely doesn't need them */}
+      <Navbar />
       
       <div className="flex">
         <AppShell />
@@ -1816,10 +1823,30 @@ export default function StudentProfileClient() {
             </button>
             <button
               type="button"
-              onClick={() => {
-                // Implement drop out logic
-                setDropModalOpen(false);
-                setSuccessMsg('Student marked as dropped out');
+              onClick={async () => {
+                try {
+                  const { error } = await supabase
+                    .from('students')
+                    .update({ 
+                      current_status: 'dropped out',
+                      updated: new Date().toISOString().slice(0, 10)
+                    })
+                    .eq('registration_id', student?.registration_id);
+
+                  if (error) throw error;
+                  
+                  setDropModalOpen(false);
+                  setSuccessMsg('Student marked as dropped out');
+                  // Refresh student data
+                  if (student) {
+                    setStudent({
+                      ...student,
+                      current_status: 'dropped out'
+                    });
+                  }
+                } catch (error: any) {
+                  setErrorMsg(error.message);
+                }
               }}
               className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 flex items-center gap-2"
             >

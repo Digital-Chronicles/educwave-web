@@ -884,7 +884,7 @@ export default function TeacherDetailClient() {
   if (errorMsg || !teacher || !school) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-orange-50 flex flex-col">
-        <Navbar userEmail={userEmail} userName={userName} />
+        <Navbar/>
         <div className="flex flex-1">
           <AppShell />
           <main className="flex-1 flex items-center justify-center p-6">
@@ -922,7 +922,7 @@ export default function TeacherDetailClient() {
   /* ---------------- Render ---------------- */
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-orange-50 flex flex-col">
-      <Navbar userEmail={userEmail} userName={userName} />
+      <Navbar/>
 
       <div className="flex flex-1 overflow-hidden">
         <AppShell />

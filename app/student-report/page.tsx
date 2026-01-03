@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
@@ -8,19 +8,25 @@ import AppShell from '@/components/AppShell';
 import {
   AlertCircle,
   Award,
-  BarChart3,
   BookOpen,
   Calendar,
-  CheckCircle2,
   ChevronDown,
   Download,
   FileText,
-  GraduationCap,
   Printer,
-  TrendingUp,
-  User,
   School,
-  Hash,
+  User,
+  Wand2,
+  Sparkles,
+  TrendingUp,
+  Target,
+  Filter,
+  BarChart3,
+  Clock,
+  GraduationCap,
+  Edit,
+  Save,
+  RefreshCw,
 } from 'lucide-react';
 
 type AppRole = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
@@ -66,15 +72,14 @@ interface ExamSessionRow {
   id: number;
   exam_type: 'BOT' | 'MOT' | 'EOT';
   term_id: number;
-  term?: { term_name: string; year: number } | null;
-  start_date: string;
-  end_date: string;
 }
 
 interface StudentRow {
   registration_id: string;
   first_name: string;
   last_name: string;
+  date_of_birth?: string | null;
+  gender?: string | null;
 }
 
 interface QuestionRow {
@@ -82,6 +87,7 @@ interface QuestionRow {
   max_score: number;
   grade_id: number;
   subject_id: number | null;
+  exam_type_id: number;
 }
 
 interface ExamResultRow {
@@ -89,37 +95,45 @@ interface ExamResultRow {
   student_id: string;
   question_id: number | null;
   grade_id: number;
-  subject_id: number | null;
   exam_session_id: number | null;
   score: number;
 }
 
-interface ReportCardRow {
-  id: number;
-  class_teacher_comment: string | null;
-  headteacher_comment: string | null;
-  subject_comments: any | null;
+interface TeacherJoinRow {
+  initials: string | null;
+  first_name: string | null;
+  last_name: string | null;
 }
 
-/** -----------------------------------------
- * Helpers
- * ---------------------------------------- */
+interface SubjectTeacherAssignmentRow {
+  subject_id: number;
+  teacher_user_id: string;
+  teachers?: TeacherJoinRow[] | null;
+}
+
 const fmtName = (s: StudentRow) => `${s.first_name ?? ''} ${s.last_name ?? ''}`.trim();
+
+function formatDate(dateStr: string | null) {
+  if (!dateStr) return '—';
+  return new Date(dateStr).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
 
 function termLabel(t?: TermExamRow | null) {
   if (!t) return '—';
-  if (t.term_name === 'TERM_1') return `Term 1 • ${t.year}`;
-  if (t.term_name === 'TERM_2') return `Term 2 • ${t.year}`;
-  return `Term 3 • ${t.year}`;
+  const tn = t.term_name === 'TERM_1' ? 'Term 1' : t.term_name === 'TERM_2' ? 'Term 2' : 'Term 3';
+  return `${tn} ${t.year}`;
 }
 
 function examTypeLabel(t: 'BOT' | 'MOT' | 'EOT') {
-  if (t === 'BOT') return 'B.O.T';
-  if (t === 'MOT') return 'M.O.T';
-  return 'E.O.T';
+  if (t === 'BOT') return 'BOT';
+  if (t === 'MOT') return 'MOT';
+  return 'EOT';
 }
 
-// UNEB grading (simple)
 function unebSubjectGrade(pct: number): number {
   if (pct >= 80) return 1;
   if (pct >= 70) return 2;
@@ -150,26 +164,18 @@ function unebDivisionFromAggregate(agg: number) {
   return 'U';
 }
 
-function subjectRemarkFromGrade(g: number) {
-  if (g <= 2) return 'Excellent work.';
-  if (g <= 4) return 'Good effort.';
-  if (g <= 6) return 'Fair attempt.';
-  return 'Weak. Improve.';
-}
-
-function overallRemark(pct: number) {
-  if (pct >= 85) return 'Outstanding performance. Maintain the excellent effort.';
-  if (pct >= 75) return 'Very good overall. With more focus, you can reach the top.';
-  if (pct >= 60) return 'Average performance. Improve revision habits and class participation.';
-  if (pct >= 50) return 'Below expectations. More practice is required across subjects.';
-  return 'Weak overall performance. A serious improvement plan is required.';
+function worsenDivisionOnce(div: string) {
+  if (div === 'Division 1') return 'Division 2';
+  if (div === 'Division 2') return 'Division 3';
+  if (div === 'Division 3') return 'Division 4';
+  return 'U';
 }
 
 function gradePillClass(txt: string) {
-  if (txt.startsWith('D')) return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
-  if (txt.startsWith('C')) return 'bg-blue-50 text-blue-700 ring-blue-200';
-  if (txt.startsWith('P')) return 'bg-amber-50 text-amber-700 ring-amber-200';
-  return 'bg-rose-50 text-rose-700 ring-rose-200';
+  if (txt.startsWith('D')) return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+  if (txt.startsWith('C')) return 'bg-blue-50 text-blue-700 border border-blue-200';
+  if (txt.startsWith('P')) return 'bg-amber-50 text-amber-700 border border-amber-200';
+  return 'bg-rose-50 text-rose-700 border border-rose-200';
 }
 
 function divisionPillClass(division: string) {
@@ -180,137 +186,204 @@ function divisionPillClass(division: string) {
   return 'bg-slate-600';
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, n));
+function gradeColor(pct: number) {
+  if (pct >= 80) return 'text-emerald-600';
+  if (pct >= 60) return 'text-blue-600';
+  if (pct >= 50) return 'text-amber-600';
+  return 'text-rose-600';
+}
+
+function overallRemark(pct: number) {
+  if (pct >= 85) return 'Outstanding performance. Maintain the excellent effort.';
+  if (pct >= 75) return 'Very good overall. With more focus, you can reach the top.';
+  if (pct >= 60) return 'Average performance. Improve revision habits and class participation.';
+  if (pct >= 50) return 'Below expectations. More practice is required across subjects.';
+  return 'Weak overall performance. A serious improvement plan is required.';
+}
+
+function stableHash(input: string) {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h);
+}
+
+function pickStable(list: string[], key: string) {
+  if (!list.length) return '';
+  return list[stableHash(key) % list.length];
+}
+
+function perfBand(pct: number) {
+  if (pct >= 85) return 'excellent';
+  if (pct >= 70) return 'very_good';
+  if (pct >= 60) return 'good';
+  if (pct >= 50) return 'fair';
+  return 'poor';
+}
+
+function subjectFocus(subjectName: string) {
+  const s = subjectName.toLowerCase();
+  if (s.includes('english')) {
+    return {
+      strengths: ['comprehension', 'grammar', 'composition', 'spelling'],
+      improve: ['read daily', 'write compositions', 'grammar drills', 'build vocabulary'],
+    };
+  }
+  if (s.includes('math')) {
+    return {
+      strengths: ['problem solving', 'accuracy', 'speed', 'number work'],
+      improve: ['practice daily', 'show working', 'master basics', 'attempt challenging questions'],
+    };
+  }
+  if (s.includes('science')) {
+    return {
+      strengths: ['concept understanding', 'practical knowledge', 'interpretation', 'application'],
+      improve: ['revise key topics', 'draw & label', 'attempt past papers', 'understand processes'],
+    };
+  }
+  if (s.includes('social') || s.includes('sst')) {
+    return {
+      strengths: ['content recall', 'map work', 'interpretation', 'explanation'],
+      improve: ['read regularly', 'write full answers', 'practice maps', 'revise consistently'],
+    };
+  }
+  return {
+    strengths: ['understanding', 'consistency', 'focus', 'effort'],
+    improve: ['revise', 'practice', 'consult teacher', 'manage time'],
+  };
+}
+
+function autoSubjectComment(subjectName: string, termPct: number, stableKey: string) {
+  const band = perfBand(termPct);
+  const p = Math.round(termPct);
+  const focus = subjectFocus(subjectName);
+
+  const excellent = [
+    `${subjectName}: Excellent (${p}%). Keep it up.`,
+    `${subjectName}: Outstanding (${p}%). Maintain.`,
+    `Excellent ${subjectName} (${p}%).`,
+  ];
+
+  const veryGood = [
+    `${subjectName}: Very good (${p}%).`,
+    `${subjectName}: Strong (${p}%). Keep going.`,
+    `Good ${subjectName} (${p}%).`,
+  ];
+
+  const good = [
+    `${subjectName}: Satisfactory (${p}%).`,
+    `${subjectName}: Average (${p}%). Improve.`,
+    `Fair ${subjectName} (${p}%).`,
+  ];
+
+  const fair = [
+    `${subjectName}: Below average (${p}%).`,
+    `${subjectName}: Needs work (${p}%).`,
+    `${subjectName} needs attention (${p}%).`,
+  ];
+
+  const poor = [
+    `${subjectName}: Poor (${p}%).`,
+    `${subjectName}: Weak (${p}%).`,
+    `${subjectName} needs help (${p}%).`,
+  ];
+
+  const pool =
+    band === 'excellent'
+      ? excellent
+      : band === 'very_good'
+        ? veryGood
+        : band === 'good'
+          ? good
+          : band === 'fair'
+            ? fair
+            : poor;
+
+  return pickStable(pool, stableKey + band);
+}
+
+function autoClassTeacherComment(overallPct: number, division: string) {
+  const p = Math.round(overallPct);
+  const band = perfBand(overallPct);
+
+  const pools: Record<string, string[]> = {
+    excellent: [`Excellent (${p}%, ${division}).`, `Outstanding (${p}%, ${division}).`],
+    very_good: [`Very good (${p}%, ${division}).`, `Good work (${p}%, ${division}).`],
+    good: [`Satisfactory (${p}%, ${division}).`, `Average (${p}%, ${division}).`],
+    fair: [`Needs improvement (${p}%, ${division}).`, `Below expectations (${p}%, ${division}).`],
+    poor: [`Unsatisfactory (${p}%, ${division}).`, `Poor (${p}%, ${division}).`],
+  };
+
+  return pickStable(pools[band] ?? pools.poor, `${division}|${p}|class`);
+}
+
+function autoHeadTeacherComment(overallPct: number, division: string) {
+  const p = Math.round(overallPct);
+  const band = perfBand(overallPct);
+
+  const pools: Record<string, string[]> = {
+    excellent: [`Excellent (${p}%, ${division}).`, `Outstanding (${p}%, ${division}).`],
+    very_good: [`Well done (${p}%, ${division}).`, `Good (${p}%, ${division}).`],
+    good: [`Fair (${p}%, ${division}).`, `Average (${p}%, ${division}).`],
+    fair: [`Needs improvement (${p}%, ${division}).`, `Below standard (${p}%, ${division}).`],
+    poor: [`Poor (${p}%, ${division}).`, `Unsatisfactory (${p}%, ${division}).`],
+  };
+
+  return pickStable(pools[band] ?? pools.poor, `${division}|${p}|head`);
 }
 
 function tinyToast(message: string) {
   const el = document.createElement('div');
   el.className =
-    'fixed top-4 right-4 z-[9999] rounded-xl bg-slate-900 text-white px-4 py-3 shadow-2xl flex items-center gap-2';
+    'fixed top-4 right-4 z-[9999] rounded-xl bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 py-3 shadow-2xl flex items-center gap-2 no-print animate-in slide-in-from-right-10 duration-300';
   el.innerHTML = `<span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/10">✓</span><span class="text-sm">${message}</span>`;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2200);
+  setTimeout(() => el.remove(), 2000);
 }
 
-/** -----------------------------------------
- * Student Autocomplete
- * ---------------------------------------- */
-function StudentAutocomplete({
-  value,
-  onChange,
-  disabled,
-  items,
-  placeholder = 'Search student by name or Reg No…',
-}: {
-  value: string;
-  onChange: (id: string) => void;
-  disabled?: boolean;
-  items: StudentRow[];
-  placeholder?: string;
-}) {
-  const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
-
-  const selected = useMemo(
-    () => items.find((s) => s.registration_id === value) ?? null,
-    [items, value]
-  );
-
-  useEffect(() => {
-    if (selected) setQuery(`${fmtName(selected)} — ${selected.registration_id}`);
-    else setQuery('');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.registration_id]);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return items.slice(0, 25);
-    return items
-      .filter((s) => {
-        const name = fmtName(s).toLowerCase();
-        const reg = s.registration_id.toLowerCase();
-        return name.includes(q) || reg.includes(q);
-      })
-      .slice(0, 25);
-  }, [items, query]);
-
-  return (
-    <div className="relative">
-      <div className="relative">
-        <User className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-        <input
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          disabled={disabled}
-          placeholder={placeholder}
-          className="w-full rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-10 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-slate-900/10 disabled:bg-slate-50"
-        />
-        <ChevronDown className="h-4 w-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
-      </div>
-
-      {open && !disabled && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
-            <div className="max-h-72 overflow-auto">
-              {filtered.length === 0 ? (
-                <div className="px-4 py-3 text-sm text-slate-600">No matches</div>
-              ) : (
-                filtered.map((s) => {
-                  const isActive = s.registration_id === value;
-                  return (
-                    <button
-                      key={s.registration_id}
-                      type="button"
-                      onClick={() => {
-                        onChange(s.registration_id);
-                        setOpen(false);
-                      }}
-                      className={[
-                        'w-full text-left px-4 py-3 flex items-center justify-between gap-3',
-                        'hover:bg-slate-50',
-                        isActive ? 'bg-slate-50' : 'bg-white',
-                      ].join(' ')}
-                    >
-                      <div className="min-w-0">
-                        <div className="text-sm font-semibold text-slate-900 truncate">{fmtName(s)}</div>
-                        <div className="text-xs text-slate-500 truncate">{s.registration_id}</div>
-                      </div>
-
-                      {isActive && (
-                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
-                          Selected
-                        </span>
-                      )}
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
+function teacherDisplayName(t?: TeacherJoinRow | null) {
+  if (!t) return '';
+  return `${t.initials ?? ''} ${t.first_name ?? ''} ${t.last_name ?? ''}`.trim();
 }
 
-/** -----------------------------------------
- * Page
- * ---------------------------------------- */
+function buildLocalKey(schoolId: string, gradeId: string, termId: string, studentId: string) {
+  return `student_report_comments::${schoolId}::${gradeId}::${termId}::${studentId}`;
+}
+
+type LocalCommentsPayload = {
+  subjectComments: Record<number, string>;
+  classTeacherComment: string;
+  headTeacherComment: string;
+};
+
+function analyzePerformance(subjectRows: any[]) {
+  const bestSubject = subjectRows.reduce((best, current) => 
+    current.termPct > best.termPct ? current : best
+  );
+  
+  const worstSubject = subjectRows.reduce((worst, current) => 
+    current.termPct < worst.termPct ? current : worst
+  );
+
+  const strengths = subjectRows.filter(s => s.termPct >= 70);
+  const improvements = subjectRows.filter(s => s.termPct < 50);
+
+  return {
+    bestSubject,
+    worstSubject,
+    strengthCount: strengths.length,
+    improvementCount: improvements.length,
+  };
+}
+
 export default function StudentReportPage() {
   const router = useRouter();
-  const a4Ref = useRef<HTMLDivElement | null>(null);
 
-  // Session
-  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
-  // Data
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [school, setSchool] = useState<SchoolRow | null>(null);
 
@@ -323,21 +396,21 @@ export default function StudentReportPage() {
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [results, setResults] = useState<ExamResultRow[]>([]);
 
-  // UI
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [selectedGradeId, setSelectedGradeId] = useState('');
   const [selectedTermId, setSelectedTermId] = useState('');
-  const [selectedExamSessionId, setSelectedExamSessionId] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState('');
 
-  const [reportRowId, setReportRowId] = useState<number | null>(null);
-  const [teacherComment, setTeacherComment] = useState('');
-  const [headComment, setHeadComment] = useState('');
-  const [savingComments, setSavingComments] = useState(false);
+  const [subjectComments, setSubjectComments] = useState<Record<number, string>>({});
+  const [classTeacherComment, setClassTeacherComment] = useState('');
+  const [headTeacherComment, setHeadTeacherComment] = useState('');
 
-  /** Auth */
+  const [subjectTeacherById, setSubjectTeacherById] = useState<Record<number, string>>({});
+  const [isEditing, setIsEditing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();
@@ -350,7 +423,6 @@ export default function StudentReportPage() {
     })();
   }, [router]);
 
-  /** Profile + Setup */
   useEffect(() => {
     if (authChecking) return;
 
@@ -374,6 +446,7 @@ export default function StudentReportPage() {
 
         if (!prof.school_id) {
           setSchool(null);
+          setLoading(false);
           return;
         }
 
@@ -396,11 +469,7 @@ export default function StudentReportPage() {
             .eq('school_id', sch.id)
             .order('year', { ascending: false })
             .order('term_name'),
-          supabase
-            .from('exam_session')
-            .select(`id, term_id, exam_type, start_date, end_date, term:term_exam_session ( term_name, year )`)
-            .eq('school_id', sch.id)
-            .order('id', { ascending: false }),
+          supabase.from('exam_session').select('id, term_id, exam_type').eq('school_id', sch.id).order('id'),
         ]);
 
         if (gradeRes.error) throw gradeRes.error;
@@ -411,7 +480,7 @@ export default function StudentReportPage() {
         setGrades((gradeRes.data ?? []) as GradeRow[]);
         setSubjects((subjectRes.data ?? []) as SubjectRow[]);
         setTerms((termRes.data ?? []) as TermExamRow[]);
-        setExamSessions((examSessRes.data ?? []) as unknown as ExamSessionRow[]);
+        setExamSessions((examSessRes.data ?? []) as ExamSessionRow[]);
       } catch (e: any) {
         setErrorMsg(e.message || 'Failed to load setup.');
       } finally {
@@ -424,13 +493,10 @@ export default function StudentReportPage() {
     () => (selectedTermId ? terms.find((t) => t.id === Number(selectedTermId)) ?? null : null),
     [terms, selectedTermId]
   );
+
   const selectedGrade = useMemo(
     () => (selectedGradeId ? grades.find((g) => g.id === Number(selectedGradeId)) ?? null : null),
     [grades, selectedGradeId]
-  );
-  const selectedExamSession = useMemo(
-    () => (selectedExamSessionId ? examSessions.find((e) => e.id === Number(selectedExamSessionId)) ?? null : null),
-    [examSessions, selectedExamSessionId]
   );
 
   const subjectsForGrade = useMemo(() => {
@@ -440,15 +506,18 @@ export default function StudentReportPage() {
 
   const examSessionsForTerm = useMemo(() => {
     if (!selectedTermId) return [];
-    return examSessions.filter((es) => es.term_id === Number(selectedTermId));
+    return examSessions
+      .filter((es) => es.term_id === Number(selectedTermId))
+      .sort((a, b) => {
+        const ord = (x: ExamSessionRow['exam_type']) => (x === 'BOT' ? 1 : x === 'MOT' ? 2 : 3);
+        return ord(a.exam_type) - ord(b.exam_type);
+      });
   }, [examSessions, selectedTermId]);
 
-  const canLoad = useMemo(
-    () => Boolean(school?.id && selectedGradeId && selectedTermId && selectedExamSessionId),
-    [school?.id, selectedGradeId, selectedTermId, selectedExamSessionId]
-  );
+  const canLoad = useMemo(() => Boolean(school?.id && selectedGradeId && selectedTermId), [school?.id, selectedGradeId, selectedTermId]);
+  const sessions = examSessionsForTerm;
+  const noSessions = canLoad && sessions.length === 0;
 
-  /** Fetch students + questions + results */
   useEffect(() => {
     if (!school?.id) return;
 
@@ -460,9 +529,9 @@ export default function StudentReportPage() {
         setQuestions([]);
         setResults([]);
         setSelectedStudentId('');
-        setReportRowId(null);
-        setTeacherComment('');
-        setHeadComment('');
+        setSubjectComments({});
+        setClassTeacherComment('');
+        setHeadTeacherComment('');
         return;
       }
 
@@ -470,28 +539,31 @@ export default function StudentReportPage() {
       try {
         const gradeId = Number(selectedGradeId);
         const termId = Number(selectedTermId);
-        const examSessionId = Number(selectedExamSessionId);
+        const sessionIds = examSessionsForTerm.map((s) => s.id);
 
         const studentsRes = await supabase
           .from('students')
-          .select('registration_id, first_name, last_name')
+          .select('registration_id, first_name, last_name, date_of_birth, gender')
           .eq('school_id', school.id)
           .eq('current_grade_id', gradeId)
           .order('first_name');
 
         if (studentsRes.error) throw studentsRes.error;
 
-        const questionsRes = await supabase
-          .from('assessment_question')
-          .select('id, max_score, grade_id, subject_id')
-          .eq('school_id', school.id)
-          .eq('grade_id', gradeId)
-          .eq('term_exam_id', termId)
-          .eq('exam_type_id', examSessionId);
+        const questionsRes =
+          sessionIds.length === 0
+            ? { data: [], error: null }
+            : await supabase
+                .from('assessment_question')
+                .select('id, max_score, grade_id, subject_id, exam_type_id')
+                .eq('school_id', school.id)
+                .eq('grade_id', gradeId)
+                .eq('term_exam_id', termId)
+                .in('exam_type_id', sessionIds);
 
-        if (questionsRes.error) throw questionsRes.error;
+        if ((questionsRes as any).error) throw (questionsRes as any).error;
 
-        const qRows = (questionsRes.data ?? []) as QuestionRow[];
+        const qRows = ((questionsRes as any).data ?? []) as QuestionRow[];
         const qIds = qRows.map((q) => q.id);
 
         const resultsRes =
@@ -499,10 +571,10 @@ export default function StudentReportPage() {
             ? { data: [], error: null }
             : await supabase
                 .from('assessment_examresult')
-                .select('id, student_id, question_id, grade_id, subject_id, exam_session_id, score')
+                .select('id, student_id, question_id, grade_id, exam_session_id, score')
                 .eq('school_id', school.id)
                 .eq('grade_id', gradeId)
-                .eq('exam_session_id', examSessionId)
+                .in('exam_session_id', sessionIds)
                 .in('question_id', qIds);
 
         if ((resultsRes as any).error) throw (resultsRes as any).error;
@@ -522,731 +594,777 @@ export default function StudentReportPage() {
         setLoading(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [school?.id, canLoad, selectedGradeId, selectedTermId, selectedExamSessionId]);
+  }, [school?.id, canLoad, selectedGradeId, selectedTermId, examSessionsForTerm.length]);
 
   const selectedStudent = useMemo(
     () => (selectedStudentId ? students.find((s) => s.registration_id === selectedStudentId) ?? null : null),
     [students, selectedStudentId]
   );
 
-  /** Aggregations */
-  const possiblePerSubject = useMemo(() => {
-    const m = new Map<number, number>();
+  useEffect(() => {
+    if (!school?.id || !selectedGradeId) return;
+
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('subject_teacher_assignments')
+          .select('subject_id, teacher_user_id, teachers:teacher_user_id ( initials, first_name, last_name )')
+          .eq('school_id', school.id)
+          .eq('grade_id', Number(selectedGradeId));
+
+        if (error) return;
+
+        const rows = (data ?? []) as SubjectTeacherAssignmentRow[];
+        const map: Record<number, string> = {};
+        for (const r of rows) {
+          const teacher = r.teachers?.[0];
+          map[r.subject_id] = teacherDisplayName(teacher);
+        }
+        setSubjectTeacherById(map);
+      } catch {
+        // ignore
+      }
+    })();
+  }, [school?.id, selectedGradeId]);
+
+  const possibleBySessionSubject = useMemo(() => {
+    const map = new Map<number, Map<number, number>>();
     for (const q of questions) {
-      const sid = Number(q.subject_id ?? 0);
-      if (!sid) continue;
-      m.set(sid, (m.get(sid) ?? 0) + Number(q.max_score ?? 0));
+      const subjectId = Number(q.subject_id ?? 0);
+      if (!subjectId) continue;
+      const sess = Number(q.exam_type_id);
+      if (!map.has(sess)) map.set(sess, new Map());
+      const mm = map.get(sess)!;
+      mm.set(subjectId, (mm.get(subjectId) ?? 0) + Number(q.max_score ?? 0));
+    }
+    return map;
+  }, [questions]);
+
+  const questionToSessionSubject = useMemo(() => {
+    const m = new Map<number, { sessionId: number; subjectId: number }>();
+    for (const q of questions) {
+      const subjectId = Number(q.subject_id ?? 0);
+      if (!subjectId) continue;
+      m.set(q.id, { sessionId: Number(q.exam_type_id), subjectId });
     }
     return m;
   }, [questions]);
 
-  const questionToSubject = useMemo(() => {
-    const m = new Map<number, number>();
-    for (const q of questions) {
-      const sid = Number(q.subject_id ?? 0);
-      if (!sid) continue;
-      m.set(q.id, sid);
-    }
-    return m;
-  }, [questions]);
-
-  const totalsByStudent = useMemo(() => {
-    const sum = new Map<string, Map<number, number>>();
+  const totalsByStudentSessionSubject = useMemo(() => {
+    const map = new Map<string, Map<number, Map<number, number>>>();
     for (const r of results) {
-      if (!r.question_id) continue;
-      const sid = questionToSubject.get(Number(r.question_id));
-      if (!sid) continue;
-      if (!sum.has(r.student_id)) sum.set(r.student_id, new Map());
-      const mm = sum.get(r.student_id)!;
-      mm.set(sid, (mm.get(sid) ?? 0) + Number(r.score ?? 0));
+      if (!r.question_id || !r.exam_session_id) continue;
+      const meta = questionToSessionSubject.get(Number(r.question_id));
+      if (!meta) continue;
+
+      const studentId = r.student_id;
+      const sessionId = Number(r.exam_session_id);
+      const subjectId = meta.subjectId;
+
+      if (!map.has(studentId)) map.set(studentId, new Map());
+      const bySess = map.get(studentId)!;
+
+      if (!bySess.has(sessionId)) bySess.set(sessionId, new Map());
+      const bySub = bySess.get(sessionId)!;
+
+      bySub.set(subjectId, (bySub.get(subjectId) ?? 0) + Number(r.score ?? 0));
     }
-    return sum;
-  }, [results, questionToSubject]);
+    return map;
+  }, [results, questionToSessionSubject]);
 
   const subjectRowsForStudent = useMemo(() => {
     if (!selectedStudent) return [];
-    const sidMap = totalsByStudent.get(selectedStudent.registration_id) ?? new Map();
+    const sMap = totalsByStudentSessionSubject.get(selectedStudent.registration_id) ?? new Map();
 
-    // Keep it compact for single A4 page: subject name + totals + UNEB grade only
     return subjectsForGrade.map((sub) => {
-      const total = Number(sidMap.get(sub.id) ?? 0);
-      const possible = Number(possiblePerSubject.get(sub.id) ?? 0);
-      const pct = possible > 0 ? (total / possible) * 100 : 0;
+      const perSession = sessions.map((sess) => {
+        const totalsForSess = sMap.get(sess.id) ?? new Map();
+        const total = Number(totalsForSess.get(sub.id) ?? 0);
+        const possible = Number((possibleBySessionSubject.get(sess.id)?.get(sub.id) ?? 0) as number);
+        const pct = possible > 0 ? (total / possible) * 100 : 0;
+        return { sessionId: sess.id, exam_type: sess.exam_type, total, possible, pct };
+      });
 
-      const g = unebSubjectGrade(pct);
+      const valid = perSession.filter((x) => x.possible > 0);
+      const totalAll = valid.reduce((a, x) => a + x.total, 0);
+      const possibleAll = valid.reduce((a, x) => a + x.possible, 0);
+      const termPct = possibleAll > 0 ? (totalAll / possibleAll) * 100 : 0;
+
+      const g = unebSubjectGrade(termPct);
       const txt = unebGradeText(g);
 
       return {
         subject_id: sub.id,
         subject_name: sub.name,
-        total,
-        possible,
-        pct,
-        uneb_grade: g,
-        uneb_text: txt,
-        remark: subjectRemarkFromGrade(g),
+        perSession,
+        termPct,
+        grade_text: txt,
         pill: gradePillClass(txt),
+        colorClass: gradeColor(termPct),
       };
     });
-  }, [selectedStudent, totalsByStudent, subjectsForGrade, possiblePerSubject]);
+  }, [selectedStudent, subjectsForGrade, sessions, totalsByStudentSessionSubject, possibleBySessionSubject]);
 
   const overall = useMemo(() => {
-    if (!selectedStudent) return { total: 0, possible: 0, pct: 0 };
-    const total = subjectRowsForStudent.reduce((a, r) => a + r.total, 0);
-    const possible = subjectRowsForStudent.reduce((a, r) => a + r.possible, 0);
-    const pct = possible > 0 ? (total / possible) * 100 : 0;
-    return { total, possible, pct };
+    if (!selectedStudent) return { pct: 0 };
+    const valid = subjectRowsForStudent.map((r) => r.termPct).filter((x) => Number.isFinite(x) && x > 0);
+    const pct = valid.length ? valid.reduce((a, x) => a + x, 0) / valid.length : 0;
+    return { pct };
   }, [selectedStudent, subjectRowsForStudent]);
 
   const aggregateAndDivision = useMemo(() => {
     if (!selectedStudent) return { aggregate: 0, division: '—', pill: divisionPillClass('U') };
-    const gradesArr = subjectRowsForStudent.map((r) => r.uneb_grade).filter((g) => Number.isFinite(g));
-    const best4 = gradesArr.sort((a, b) => a - b).slice(0, 4);
+
+    const gradesArr = subjectRowsForStudent.map((r) => unebSubjectGrade(r.termPct)).sort((a, b) => a - b);
+    const best4 = gradesArr.slice(0, 4);
     const aggregate = best4.reduce((a, g) => a + g, 0);
-    const division = unebDivisionFromAggregate(aggregate);
+
+    let division = unebDivisionFromAggregate(aggregate);
+
+    const english = subjectRowsForStudent.find((r) => r.subject_name.toLowerCase().includes('english'));
+    const math = subjectRowsForStudent.find(
+      (r) => r.subject_name.toLowerCase().includes('math') || r.subject_name.toLowerCase().includes('mathematics')
+    );
+
+    const englishF9 = english?.grade_text === 'F9';
+    const mathF9 = math?.grade_text === 'F9';
+
+    if (englishF9 && mathF9) division = worsenDivisionOnce(division);
+
     return { aggregate, division, pill: divisionPillClass(division) };
   }, [selectedStudent, subjectRowsForStudent]);
 
-  const overallPositions = useMemo(() => {
-    const rows = students
-      .map((s) => {
-        const m = totalsByStudent.get(s.registration_id) ?? new Map();
-        let total = 0;
-        for (const sub of subjectsForGrade) total += Number(m.get(sub.id) ?? 0);
-        return { id: s.registration_id, total };
-      })
-      .sort((a, b) => b.total - a.total);
-
-    const pos = new Map<string, number>();
-    let currentPos = 1;
-    for (let i = 0; i < rows.length; i++) {
-      if (i > 0 && rows[i].total < rows[i - 1].total) currentPos = i + 1;
-      pos.set(rows[i].id, currentPos);
-    }
-    return pos;
-  }, [students, totalsByStudent, subjectsForGrade]);
-
-  const position = selectedStudent ? overallPositions.get(selectedStudent.registration_id) ?? '—' : '—';
-  const noQuestions = canLoad && questions.length === 0;
+  const performanceAnalysis = useMemo(() => {
+    if (!selectedStudent) return null;
+    return analyzePerformance(subjectRowsForStudent);
+  }, [selectedStudent, subjectRowsForStudent]);
 
   const canEditComments = useMemo(() => {
     const role = profile?.role;
     return role === 'ADMIN' || role === 'TEACHER' || role === 'ACADEMIC';
   }, [profile?.role]);
 
-  /** Load saved comments */
   useEffect(() => {
-    if (!school?.id || !selectedStudent || !canLoad) return;
+    if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId) return;
 
-    (async () => {
-      setReportRowId(null);
-      setTeacherComment('');
-      setHeadComment('');
+    const key = buildLocalKey(school.id, selectedGradeId, selectedTermId, selectedStudent.registration_id);
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as LocalCommentsPayload;
 
-      const { data, error } = await supabase
-        .from('student_report_cards')
-        .select('id, class_teacher_comment, headteacher_comment, subject_comments')
-        .eq('school_id', school.id)
-        .eq('grade_id', Number(selectedGradeId))
-        .eq('student_id', selectedStudent.registration_id)
-        .eq('term_id', Number(selectedTermId))
-        .eq('exam_session_id', Number(selectedExamSessionId))
-        .maybeSingle();
+      if (parsed?.subjectComments) setSubjectComments(parsed.subjectComments);
+      if (typeof parsed?.classTeacherComment === 'string') setClassTeacherComment(parsed.classTeacherComment);
+      if (typeof parsed?.headTeacherComment === 'string') setHeadTeacherComment(parsed.headTeacherComment);
+    } catch {
+      // ignore
+    }
+  }, [school?.id, selectedStudentId, selectedGradeId, selectedTermId]);
 
-      if (error) {
-        setErrorMsg(error.message);
-        return;
-      }
+  useEffect(() => {
+    if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId) return;
 
-      if (data) {
-        const row = data as ReportCardRow;
-        setReportRowId(row.id);
-        setTeacherComment(row.class_teacher_comment ?? '');
-        setHeadComment(row.headteacher_comment ?? '');
-      } else {
-        // compact default comment
-        setTeacherComment(overallRemark(overall.pct));
-        setHeadComment('');
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [school?.id, selectedStudentId, selectedGradeId, selectedTermId, selectedExamSessionId, canLoad]);
-
-  /** Save comments */
-  const saveComments = async () => {
-    if (!school?.id || !selectedStudent || !canLoad) return;
-    setSavingComments(true);
-    setErrorMsg(null);
+    const key = buildLocalKey(school.id, selectedGradeId, selectedTermId, selectedStudent.registration_id);
+    const payload: LocalCommentsPayload = { subjectComments, classTeacherComment, headTeacherComment };
 
     try {
-      const subjectCommentsJson = subjectRowsForStudent.reduce((acc: any, r) => {
-        acc[r.subject_id] = {
-          grade: r.uneb_text,
-          pct: Number(r.pct.toFixed(1)),
-        };
-        return acc;
-      }, {});
-
-      const payload = {
-        school_id: school.id,
-        grade_id: Number(selectedGradeId),
-        student_id: selectedStudent.registration_id,
-        term_id: Number(selectedTermId),
-        exam_session_id: Number(selectedExamSessionId),
-        class_teacher_comment: teacherComment || null,
-        headteacher_comment: headComment || null,
-        subject_comments: subjectCommentsJson,
-        created_by: (await supabase.auth.getUser()).data.user?.id ?? null,
-      };
-
-      const { data: u, error } = await supabase
-        .from('student_report_cards')
-        .upsert(payload, { onConflict: 'school_id,grade_id,student_id,term_id,exam_session_id' })
-        .select('id')
-        .single();
-
-      if (error) throw error;
-      setReportRowId((u as any).id);
-      tinyToast('Saved');
-    } catch (e: any) {
-      setErrorMsg(e.message || 'Failed to save comments.');
-    } finally {
-      setSavingComments(false);
+      localStorage.setItem(key, JSON.stringify(payload));
+    } catch {
+      // ignore
     }
+  }, [school?.id, selectedStudentId, selectedGradeId, selectedTermId, subjectComments, classTeacherComment, headTeacherComment]);
+
+  useEffect(() => {
+    if (!selectedStudent || subjectRowsForStudent.length === 0) return;
+
+    setSubjectComments((prev) => {
+      const next = { ...prev };
+      for (const r of subjectRowsForStudent) {
+        const existing = (next[r.subject_id] ?? '').trim();
+        if (!existing) {
+          const stableKey = `${selectedStudent.registration_id}|${selectedTermId}|${r.subject_id}`;
+          next[r.subject_id] = autoSubjectComment(r.subject_name, r.termPct, stableKey);
+        }
+      }
+      return next;
+    });
+  }, [selectedStudentId, selectedTermId, subjectRowsForStudent]);
+
+  useEffect(() => {
+    if (!selectedStudent) return;
+    const div = aggregateAndDivision.division || '—';
+    const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
+
+    setClassTeacherComment((prev) => (prev.trim() ? prev : autoClassTeacherComment(pct, div)));
+    setHeadTeacherComment((prev) => (prev.trim() ? prev : autoHeadTeacherComment(pct, div)));
+  }, [selectedStudentId, overall.pct, aggregateAndDivision.division]);
+
+  const autoFillAllComments = () => {
+    if (!selectedStudent) return;
+
+    setSubjectComments(() => {
+      const next: Record<number, string> = {};
+      for (const r of subjectRowsForStudent) {
+        const stableKey = `${selectedStudent.registration_id}|${selectedTermId}|${r.subject_id}`;
+        next[r.subject_id] = autoSubjectComment(r.subject_name, r.termPct, stableKey);
+      }
+      return next;
+    });
+
+    const div = aggregateAndDivision.division || '—';
+    const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
+    setClassTeacherComment(autoClassTeacherComment(pct, div));
+    setHeadTeacherComment(autoHeadTeacherComment(pct, div));
+
+    tinyToast('Auto-filled comments');
   };
 
-  /** Print / Export (native print, A4) */
+  const clearFrontEndComments = () => {
+    setSubjectComments({});
+    setClassTeacherComment('');
+    setHeadTeacherComment('');
+    tinyToast('Cleared comments');
+  };
+
   const printOrExport = () => {
-    if (!selectedStudent || noQuestions) return;
+    if (!selectedStudent) return;
     window.print();
   };
 
-  /** -----------------------------------------
-   * UI States
-   * ---------------------------------------- */
+  const handleRefresh = async () => {
+    if (!school?.id || !selectedGradeId || !selectedTermId) return;
+    
+    setRefreshing(true);
+    try {
+      const gradeId = Number(selectedGradeId);
+      const termId = Number(selectedTermId);
+      const sessionIds = examSessionsForTerm.map((s) => s.id);
+
+      const [studentsRes, questionsRes] = await Promise.all([
+        supabase
+          .from('students')
+          .select('registration_id, first_name, last_name, date_of_birth, gender')
+          .eq('school_id', school.id)
+          .eq('current_grade_id', gradeId)
+          .order('first_name'),
+        sessionIds.length === 0
+          ? { data: [], error: null }
+          : supabase
+              .from('assessment_question')
+              .select('id, max_score, grade_id, subject_id, exam_type_id')
+              .eq('school_id', school.id)
+              .eq('grade_id', gradeId)
+              .eq('term_exam_id', termId)
+              .in('exam_type_id', sessionIds),
+      ]);
+
+      if (studentsRes.error) throw studentsRes.error;
+      if ((questionsRes as any).error) throw (questionsRes as any).error;
+
+      const qRows = ((questionsRes as any).data ?? []) as QuestionRow[];
+      const qIds = qRows.map((q) => q.id);
+
+      const resultsRes =
+        qIds.length === 0
+          ? { data: [], error: null }
+          : await supabase
+              .from('assessment_examresult')
+              .select('id, student_id, question_id, grade_id, exam_session_id, score')
+              .eq('school_id', school.id)
+              .eq('grade_id', gradeId)
+              .in('exam_session_id', sessionIds)
+              .in('question_id', qIds);
+
+      if ((resultsRes as any).error) throw (resultsRes as any).error;
+
+      const stuRows = (studentsRes.data ?? []) as StudentRow[];
+      setStudents(stuRows);
+      setQuestions(qRows);
+      setResults(((resultsRes as any).data ?? []) as ExamResultRow[]);
+
+      tinyToast('Data refreshed successfully');
+    } catch (e: any) {
+      setErrorMsg('Failed to refresh data: ' + e.message);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   if (authChecking || loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <div className="no-print">
-          <Navbar userEmail={userEmail} onMenuClick={() => {}} />
+      <div className="min-h-screen bg-gray-50">
+        <div className="flex flex-col items-center justify-center h-screen">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="mt-4 text-gray-600">Loading report card...</p>
         </div>
-        <div className="md:hidden h-14 no-print" />
-
-        <div className="mx-auto w-full max-w-[1600px]">
-          <div className="grid grid-cols-1 md:grid-cols-[auto_1fr]">
-            <div className="hidden md:block no-print">
-              <AppShell />
-            </div>
-            <main className="min-w-0 px-4 sm:px-6 lg:px-8 py-6">
-              <div className="mx-auto w-full max-w-[1200px] space-y-6">
-                <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <div className="h-5 w-56 bg-slate-100 rounded" />
-                  <div className="mt-2 h-4 w-96 bg-slate-100 rounded" />
-                  <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-                    {Array.from({ length: 4 }).map((_, i) => (
-                      <div key={i} className="h-24 rounded-2xl border border-slate-200 bg-slate-50" />
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </main>
-          </div>
-        </div>
-
-        <PrintCSS />
       </div>
     );
   }
 
   if (!profile?.school_id || !school) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <div className="no-print">
-          <Navbar userEmail={userEmail} onMenuClick={() => {}} />
-        </div>
-        <div className="md:hidden h-14 no-print" />
-
-        <div className="mx-auto w-full max-w-[1600px]">
-          <div className="grid grid-cols-1 md:grid-cols-[auto_1fr]">
-            <div className="hidden md:block no-print">
-              <AppShell />
-            </div>
-
-            <main className="min-w-0 px-4 sm:px-6 lg:px-8 py-10">
-              <div className="mx-auto max-w-xl">
-                <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm text-center">
-                  <div className="mx-auto mb-5 h-14 w-14 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
-                    <School className="h-6 w-6" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-slate-900">School configuration required</h3>
-                  <p className="mt-2 text-sm text-slate-600">
-                    Link your account to a school to generate report cards.
-                  </p>
-
-                  {errorMsg && (
-                    <div className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-left text-sm text-rose-800 flex gap-2">
-                      <AlertCircle className="h-5 w-5 mt-0.5" />
-                      <span>{errorMsg}</span>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => router.push('/settings')}
-                    className="mt-6 inline-flex items-center justify-center rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 transition"
-                  >
-                    Go to settings
-                  </button>
-                </div>
+      <div className="min-h-screen bg-gray-50">
+        <Navbar />
+        <div className="flex">
+          <AppShell />
+          <main className="flex-1 p-6">
+            <div className="max-w-lg mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center mt-10">
+              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <School className="w-8 h-8 text-blue-600" />
               </div>
-            </main>
-          </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">School Configuration Required</h3>
+              <p className="text-gray-600 mb-6">
+                Your account must be linked to a school before you can generate report cards.
+              </p>
+              <button
+                onClick={() => router.push('/settings')}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Go to Settings
+              </button>
+            </div>
+          </main>
         </div>
-
-        <PrintCSS />
       </div>
     );
   }
 
-  const a4Title = selectedStudent
-    ? `Report_${fmtName(selectedStudent).replaceAll(' ', '_')}_${termLabel(selectedTerm).replaceAll(' ', '_')}`
-    : 'Student Report';
-
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Navbar */}
-      <div className="no-print">
-        <Navbar userEmail={userEmail} onMenuClick={() => {}} />
-      </div>
-      <div className="md:hidden h-14 no-print" />
-
-      <div className="mx-auto w-full max-w-[1600px]">
-        <div className="grid grid-cols-1 md:grid-cols-[auto_1fr]">
-          {/* Sidebar */}
-          <div className="hidden md:block no-print">
-            <AppShell />
-          </div>
-
-          <main className="min-w-0 px-4 sm:px-6 lg:px-8 py-6">
-            <div className="mx-auto w-full max-w-[1200px] space-y-6">
-              {/* Top bar */}
-              <div className="no-print flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div className="min-w-0">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                    Single-page A4 report
-                  </div>
-                  <h1 className="mt-3 text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">
-                    Student report card
-                  </h1>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Export/print as a single A4 page. Choose “Save as PDF” in the print dialog.
-                  </p>
+    <div className="min-h-screen bg-gray-50">
+      <Navbar />
+      <div className="flex">
+        <AppShell />
+        
+        <main className="flex-1 p-4 md:p-6">
+          <div className="max-w-7xl mx-auto">
+            {/* Header */}
+            <div className="mb-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900">Student Report Card</h1>
+                  <p className="text-gray-600 mt-1">Generate academic performance reports</p>
                 </div>
-
-                <div className="flex flex-wrap gap-2">
+                
+                <div className="flex items-center gap-2">
                   <button
-                    onClick={printOrExport}
-                    disabled={!selectedStudent || noQuestions}
-                    className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold ring-1 ring-inset transition
-                      ${
-                        !selectedStudent || noQuestions
-                          ? 'bg-white text-slate-400 ring-slate-200 cursor-not-allowed'
-                          : 'bg-white text-slate-800 ring-slate-200 hover:bg-slate-50'
-                      }`}
-                    title="Opens Print dialog. Choose Save as PDF to export."
+                    onClick={handleRefresh}
+                    disabled={refreshing || !selectedStudent}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm text-gray-700 disabled:opacity-50"
                   >
-                    <Download className="h-4 w-4" />
-                    Export PDF
+                    <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                    Refresh
                   </button>
-
+                  
+                  {canEditComments && (
+                    <button
+                      onClick={() => setIsEditing(!isEditing)}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm text-gray-700"
+                    >
+                      {isEditing ? <Save className="w-4 h-4" /> : <Edit className="w-4 h-4" />}
+                      {isEditing ? 'Save' : 'Edit'}
+                    </button>
+                  )}
+                  
                   <button
                     onClick={printOrExport}
-                    disabled={!selectedStudent || noQuestions}
-                    className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition
-                      ${
-                        !selectedStudent || noQuestions
-                          ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                          : 'bg-slate-900 text-white hover:bg-slate-800'
+                    disabled={!selectedStudent || noSessions}
+                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                      ${!selectedStudent || noSessions
+                        ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                        : 'bg-blue-600 text-white hover:bg-blue-700'
                       }`}
                   >
-                    <Printer className="h-4 w-4" />
+                    <Printer className="w-4 h-4" />
                     Print
                   </button>
                 </div>
               </div>
-
-              {/* Error */}
-              {errorMsg && (
-                <div className="no-print rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 flex gap-3">
-                  <AlertCircle className="h-5 w-5 mt-0.5" />
-                  <div className="flex-1">{errorMsg}</div>
+              
+              {/* Filters - Always Visible */}
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <Filter className="w-5 h-5 text-gray-500" />
+                  <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
                 </div>
-              )}
-
-              {/* Filters */}
-              <div className="no-print rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="flex items-start justify-between gap-4">
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-900">Filters</h3>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Select class, term, exam session, then pick a student.
-                    </p>
-                  </div>
-
-                  {selectedStudent && (
-                    <div className="hidden sm:flex items-center gap-2 text-xs text-slate-600">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                      Position <span className="font-semibold text-slate-900">{position}</span> /{' '}
-                      <span className="font-semibold text-slate-900">{students.length}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-3">
-                  <div className="relative">
-                    <BookOpen className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Grade/Class</label>
                     <select
                       value={selectedGradeId}
                       onChange={(e) => {
                         setSelectedGradeId(e.target.value);
                         setSelectedTermId('');
-                        setSelectedExamSessionId('');
                         setSelectedStudentId('');
                       }}
-                      className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-10 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-slate-900/10"
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     >
-                      <option value="">Select class/grade</option>
+                      <option value="">Select grade</option>
                       {grades.map((g) => (
                         <option key={g.id} value={g.id}>
                           {g.grade_name}
                         </option>
                       ))}
                     </select>
-                    <ChevronDown className="h-4 w-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
                   </div>
-
-                  <div className="relative">
-                    <Calendar className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Term</label>
                     <select
                       value={selectedTermId}
                       onChange={(e) => {
                         setSelectedTermId(e.target.value);
-                        setSelectedExamSessionId('');
                         setSelectedStudentId('');
                       }}
                       disabled={!selectedGradeId}
-                      className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-10 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-slate-900/10 disabled:bg-slate-50"
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50"
                     >
-                      <option value="">{selectedGradeId ? 'Select term' : 'Select class first'}</option>
+                      <option value="">{selectedGradeId ? 'Select term' : 'Select grade first'}</option>
                       {terms.map((t) => (
                         <option key={t.id} value={t.id}>
                           {t.term_name.replace('_', ' ')} {t.year}
                         </option>
                       ))}
                     </select>
-                    <ChevronDown className="h-4 w-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
                   </div>
-
-                  <div className="relative">
-                    <BarChart3 className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Student</label>
                     <select
-                      value={selectedExamSessionId}
-                      onChange={(e) => setSelectedExamSessionId(e.target.value)}
-                      disabled={!selectedTermId}
-                      className="w-full appearance-none rounded-xl border border-slate-200 bg-white py-3 pl-10 pr-10 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-slate-900/10 disabled:bg-slate-50"
+                      value={selectedStudentId}
+                      onChange={(e) => setSelectedStudentId(e.target.value)}
+                      disabled={!canLoad || students.length === 0}
+                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50"
                     >
-                      <option value="">{selectedTermId ? 'Select exam session' : 'Select term first'}</option>
-                      {examSessionsForTerm.map((es) => (
-                        <option key={es.id} value={es.id}>
-                          {examTypeLabel(es.exam_type)}
-                          {es.term ? ` — ${es.term.term_name.replace('_', ' ')} ${es.term.year}` : ''}
+                      <option value="">
+                        {canLoad ? (students.length ? 'Select student' : 'No students found') : 'Select grade + term first'}
+                      </option>
+                      {students.map((s) => (
+                        <option key={s.registration_id} value={s.registration_id}>
+                          {fmtName(s)} ({s.registration_id})
                         </option>
                       ))}
                     </select>
-                    <ChevronDown className="h-4 w-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
                   </div>
                 </div>
-
-                <div className="mt-3">
-                  <StudentAutocomplete
-                    value={selectedStudentId}
-                    onChange={setSelectedStudentId}
-                    disabled={!canLoad || students.length === 0}
-                    items={students}
-                  />
-                </div>
-
-                {canLoad && questions.length === 0 && (
-                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 flex gap-3">
-                    <AlertCircle className="h-5 w-5 mt-0.5" />
-                    <div>
-                      <div className="font-semibold">No assessment questions found</div>
-                      <div className="text-amber-700">
-                        Add assessment questions for this term/session to generate reports.
-                      </div>
+                
+                {selectedStudent && (
+                  <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
+                    <div className="text-sm text-gray-600">
+                      <span>Selected: <span className="font-semibold text-gray-900">{fmtName(selectedStudent)}</span></span>
+                      <span className="mx-2">•</span>
+                      <span>Class: <span className="font-semibold text-gray-900">{selectedGrade?.grade_name || '—'}</span></span>
+                      <span className="mx-2">•</span>
+                      <span>Term: <span className="font-semibold text-gray-900">{termLabel(selectedTerm)}</span></span>
+                    </div>
+                    <div className="flex gap-2">
                       <button
-                        onClick={() => router.push('/assessments')}
-                        className="mt-3 inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 transition"
+                        onClick={autoFillAllComments}
+                        disabled={!selectedStudent || noSessions}
+                        className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 disabled:text-gray-400"
                       >
-                        Go to assessments
+                        <Wand2 className="w-4 h-4" />
+                        Auto Comments
+                      </button>
+                      <button
+                        onClick={clearFrontEndComments}
+                        disabled={!selectedStudent || noSessions}
+                        className="inline-flex items-center gap-1 text-sm text-red-600 hover:text-red-800 disabled:text-gray-400"
+                      >
+                        Clear All
                       </button>
                     </div>
                   </div>
                 )}
               </div>
-
-              {/* A4 Paper preview (single page) */}
-              {!selectedStudent ? (
-                <div className="no-print rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
-                  <div className="mx-auto mb-4 h-14 w-14 rounded-2xl bg-slate-100 flex items-center justify-center">
-                    <User className="h-6 w-6 text-slate-500" />
-                  </div>
-                  <div className="text-base font-semibold text-slate-900">Select a student</div>
-                  <div className="mt-1 text-sm text-slate-600">Use the filters above to load a report.</div>
+              
+              {errorMsg && (
+                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                  {errorMsg}
                 </div>
-              ) : noQuestions ? null : (
-                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-                  <div className="no-print bg-slate-50 px-4 sm:px-6 py-4 flex items-center justify-between">
-                    <div className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                      <FileText className="h-4 w-4" />
-                      Preview (A4 • single page)
+              )}
+            </div>
+
+            {/* Main Content */}
+            {!selectedStudent ? (
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
+                <div className="mx-auto mb-6 h-20 w-20 rounded-full bg-gray-100 flex items-center justify-center">
+                  <User className="h-10 w-10 text-gray-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">Select a Student</h3>
+                <p className="text-gray-600 max-w-md mx-auto">
+                  Choose a grade, term, and student from the filters above to generate their academic report card.
+                </p>
+              </div>
+            ) : noSessions ? (
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
+                <div className="mx-auto mb-6 h-20 w-20 rounded-full bg-amber-100 flex items-center justify-center">
+                  <FileText className="h-10 w-10 text-amber-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">No Exam Sessions Found</h3>
+                <p className="text-gray-600 max-w-md mx-auto mb-6">
+                  Create exam sessions for this term to generate comprehensive report cards.
+                </p>
+                <button
+                  onClick={() => router.push('/academics/exam-sessions')}
+                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+                >
+                  Create Exam Sessions
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Performance Summary */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-500">Overall %</p>
+                        <p className="text-2xl font-bold text-gray-900 mt-1">{overall.pct.toFixed(1)}%</p>
+                      </div>
+                      <div className="p-2 bg-blue-50 rounded-lg">
+                        <BarChart3 className="h-6 w-6 text-blue-600" />
+                      </div>
                     </div>
-                    <div className="text-xs text-slate-500">{a4Title}</div>
                   </div>
+                  
+                  <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-500">Division</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold text-white ${aggregateAndDivision.pill}`}>
+                            {aggregateAndDivision.division}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2">Aggregate: {aggregateAndDivision.aggregate}</p>
+                      </div>
+                      <div className="p-2 bg-emerald-50 rounded-lg">
+                        <Award className="h-6 w-6 text-emerald-600" />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-500">Best Subject</p>
+                        <p className="text-lg font-semibold text-gray-900 mt-1 truncate">
+                          {performanceAnalysis?.bestSubject?.subject_name || '—'}
+                        </p>
+                        <p className="text-sm text-gray-600 mt-1">
+                          {performanceAnalysis?.bestSubject?.termPct.toFixed(1)}%
+                        </p>
+                      </div>
+                      <div className="p-2 bg-green-50 rounded-lg">
+                        <TrendingUp className="h-6 w-6 text-green-600" />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-500">Performance</p>
+                        <p className="text-lg font-semibold text-gray-900 mt-1">
+                          {performanceAnalysis?.strengthCount || 0} strong
+                        </p>
+                        <p className="text-sm text-gray-600">
+                          {performanceAnalysis?.improvementCount || 0} need improvement
+                        </p>
+                      </div>
+                      <div className="p-2 bg-amber-50 rounded-lg">
+                        <Target className="h-6 w-6 text-amber-600" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
-                  <div className="flex justify-center bg-slate-50 p-4 sm:p-6">
-                    {/* A4 paper */}
-                    <div
-                      ref={a4Ref}
-                      className="bg-white shadow-sm print:shadow-none ring-1 ring-slate-200"
-                      style={{ width: '210mm', height: '297mm' }}
-                    >
-                      <div className="h-full p-6">
-                        {/* Top header */}
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="flex items-start gap-3 min-w-0">
-                            <div className="h-14 w-14 rounded-2xl border border-slate-200 bg-white overflow-hidden flex items-center justify-center shrink-0">
-                              {school.school_badge ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img src={school.school_badge} alt="School badge" className="h-full w-full object-contain" />
-                              ) : (
-                                <School className="h-6 w-6 text-slate-500" />
-                              )}
+                {/* Report Card */}
+                <div className="bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
+                  <div className="print-page">
+                    <div className="print-inner">
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-6 pb-4 border-b">
+                        <div className="flex items-center gap-3">
+                          {school.school_badge ? (
+                            <img 
+                              src={school.school_badge} 
+                              alt="School badge" 
+                              className="h-12 w-12 object-contain"
+                            />
+                          ) : (
+                            <div className="h-12 w-12 rounded-lg bg-blue-100 flex items-center justify-center">
+                              <School className="h-6 w-6 text-blue-600" />
                             </div>
-
-                            <div className="min-w-0">
-                              <div className="text-lg font-semibold text-slate-900 truncate">{school.school_name}</div>
-                              <div className="mt-1 text-[11px] text-slate-500 leading-4">
-                                {school.location ? (
-                                  <div className="flex items-center gap-1">
-                                    <Hash className="h-3 w-3" />
-                                    <span className="truncate">{school.location}</span>
-                                  </div>
-                                ) : null}
-                                {school.contact_number ? <div>📞 {school.contact_number}</div> : null}
-                                {school.email ? <div>✉️ {school.email}</div> : null}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="text-right">
-                            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                              Report Card
-                            </div>
-                            <div className="mt-1 text-[12px] font-semibold text-slate-900">
-                              {termLabel(selectedTerm)} • {selectedExamSession ? examTypeLabel(selectedExamSession.exam_type) : '—'}
-                            </div>
-                            <div className="mt-1 text-[11px] text-slate-500">
-                              {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' })}
-                            </div>
+                          )}
+                          <div>
+                            <h2 className="text-lg font-bold text-gray-900">{school.school_name}</h2>
+                            <p className="text-xs text-gray-600">
+                              {school.location && <span className="mr-3">{school.location}</span>}
+                              {school.contact_number && <span>📞 {school.contact_number}</span>}
+                            </p>
                           </div>
                         </div>
-
-                        {/* Student row */}
-                        <div className="mt-4 grid grid-cols-12 gap-3">
-                          <div className="col-span-7 rounded-2xl border border-slate-200 p-4">
-                            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Student</div>
-                            <div className="mt-1 text-base font-semibold text-slate-900">{fmtName(selectedStudent)}</div>
-                            <div className="mt-1 text-[11px] text-slate-500 flex items-center gap-2">
-                              <User className="h-4 w-4" /> {selectedStudent.registration_id}
-                            </div>
+                        
+                        <div className="text-right">
+                          <div className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">
+                            TERM REPORT
                           </div>
+                          <p className="text-sm font-bold text-gray-900 mt-1">{termLabel(selectedTerm)}</p>
+                          <p className="text-xs text-gray-600">
+                            {new Date().toLocaleDateString('en-GB', { 
+                              day: '2-digit', 
+                              month: 'short', 
+                              year: 'numeric' 
+                            })}
+                          </p>
+                        </div>
+                      </div>
 
-                          <div className="col-span-5 rounded-2xl border border-slate-200 p-4">
-                            <div className="grid grid-cols-2 gap-3">
-                              <div>
-                                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Class</div>
-                                <div className="mt-1 text-sm font-semibold text-slate-900">{selectedGrade?.grade_name ?? '—'}</div>
-                                <div className="mt-1 text-[11px] text-slate-500">
-                                  Position <span className="font-semibold text-slate-700">{position}</span>/{students.length}
-                                </div>
-                              </div>
-                              <div>
-                                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Division</div>
-                                <div className="mt-1">
-                                  <span
-                                    className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold text-white ${aggregateAndDivision.pill}`}
-                                  >
-                                    <Award className="h-3.5 w-3.5 mr-1" />
-                                    {aggregateAndDivision.division}
-                                  </span>
-                                </div>
-                                <div className="mt-1 text-[11px] text-slate-500">
-                                  Agg: <span className="font-semibold text-slate-700">{aggregateAndDivision.aggregate}</span>
-                                </div>
-                              </div>
-                            </div>
+                      {/* Student Info */}
+                      <div className="mb-6 grid grid-cols-2 gap-4">
+                        <div className="border border-gray-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Student Information</p>
+                          <p className="text-sm font-bold text-gray-900">{fmtName(selectedStudent)}</p>
+                          <p className="text-xs text-gray-600 mt-1">
+                            ID: {selectedStudent.registration_id}
+                            {selectedStudent.gender && <span className="ml-2">• {selectedStudent.gender}</span>}
+                          </p>
+                        </div>
+                        
+                        <div className="border border-gray-200 rounded-lg p-4">
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Academic Information</p>
+                          <p className="text-sm font-bold text-gray-900">{selectedGrade?.grade_name || '—'}</p>
+                          <div className="flex items-center justify-between mt-2">
+                            <span className="text-xs text-gray-700">Overall:</span>
+                            <span className="text-sm font-bold text-gray-900">{overall.pct.toFixed(1)}%</span>
                           </div>
                         </div>
+                      </div>
 
-                        {/* Subjects table (compact) */}
-                        <div className="mt-4 rounded-2xl border border-slate-200 overflow-hidden">
-                          <table className="w-full text-[12px]">
-                            <thead className="bg-slate-50">
-                              <tr>
-                                <th className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-                                  Subject
-                                </th>
-                                <th className="px-4 py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-                                  Score
-                                </th>
-                                <th className="px-4 py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-                                  Out of
-                                </th>
-                                <th className="px-4 py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-                                  %
-                                </th>
-                                <th className="px-4 py-2 text-center text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-                                  UNEB
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody className="bg-white">
-                              {subjectRowsForStudent.map((r) => (
-                                <tr key={r.subject_id} className="border-t border-slate-100">
-                                  <td className="px-4 py-2 font-semibold text-slate-900">{r.subject_name}</td>
-                                  <td className="px-4 py-2 text-center font-semibold text-slate-900">{r.total}</td>
-                                  <td className="px-4 py-2 text-center text-slate-600">{r.possible}</td>
-                                  <td className="px-4 py-2 text-center font-semibold text-slate-900">{r.pct.toFixed(1)}</td>
-                                  <td className="px-4 py-2 text-center">
-                                    <span
-                                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${r.pill}`}
-                                    >
-                                      {r.uneb_text}
+                      {/* Subjects Table with Comments on the Right */}
+                      <div className="mb-6">
+                        <p className="text-sm font-bold text-gray-900 mb-3">Subject Performance</p>
+                        
+                        <div className="space-y-3">
+                          {subjectRowsForStudent.map((r) => (
+                            <div key={r.subject_id} className="border border-gray-200 rounded-lg overflow-hidden">
+                              <div className="grid grid-cols-12 gap-0">
+                                {/* Subject Name and Scores */}
+                                <div className="col-span-5 p-3 border-r border-gray-200">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <p className="font-medium text-gray-900">{r.subject_name}</p>
+                                    <span className={`inline-flex items-center justify-center rounded px-2 py-1 text-xs font-bold ${r.pill}`}>
+                                      {r.grade_text}
                                     </span>
-                                  </td>
-                                </tr>
-                              ))}
-
-                              <tr className="border-t border-slate-200 bg-slate-50">
-                                <td className="px-4 py-2 font-semibold text-slate-900">Overall</td>
-                                <td className="px-4 py-2 text-center font-semibold text-slate-900">{overall.total}</td>
-                                <td className="px-4 py-2 text-center text-slate-700">{overall.possible}</td>
-                                <td className="px-4 py-2 text-center font-semibold text-slate-900">{overall.pct.toFixed(1)}</td>
-                                <td className="px-4 py-2 text-center text-slate-600">—</td>
-                              </tr>
-                            </tbody>
-                          </table>
+                                  </div>
+                                  <div className="flex items-center gap-4">
+                                    {r.perSession.map((ps) => (
+                                      <div key={ps.sessionId} className="text-center">
+                                        <p className="text-xs text-gray-500">{examTypeLabel(ps.exam_type)}</p>
+                                        <p className={`text-sm font-medium ${ps.possible > 0 ? 'text-gray-900' : 'text-gray-400'}`}>
+                                          {ps.possible > 0 ? `${ps.pct.toFixed(0)}%` : '—'}
+                                        </p>
+                                      </div>
+                                    ))}
+                                    <div className="text-center">
+                                      <p className="text-xs text-gray-500">Term</p>
+                                      <p className={`text-sm font-bold ${r.colorClass}`}>
+                                        {r.termPct.toFixed(0)}%
+                                      </p>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                {/* Comment Section */}
+                                <div className="col-span-7 p-3 bg-gray-50">
+                                  <div className="flex items-start gap-2">
+                                    <div className="flex-1">
+                                      <textarea
+                                        value={subjectComments[r.subject_id] ?? ''}
+                                        onChange={(e) =>
+                                          setSubjectComments((prev) => ({
+                                            ...prev,
+                                            [r.subject_id]: e.target.value,
+                                          }))
+                                        }
+                                        disabled={!isEditing}
+                                        className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none min-h-[60px]"
+                                        placeholder="Teacher comments..."
+                                        rows={3}
+                                      />
+                                    </div>
+                                    <div className="text-right">
+                                      <p className="text-xs text-gray-500">Teacher</p>
+                                      <p className="text-xs font-medium text-gray-700 mt-1">{subjectTeacherById[r.subject_id] || '—'}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
+                      </div>
 
-                        {/* Comments + Summary (compact, single page) */}
-                        <div className="mt-4 grid grid-cols-12 gap-3">
-                          <div className="col-span-7 rounded-2xl border border-slate-200 p-4">
-                            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                              Class teacher comment
-                            </div>
-                            {canEditComments ? (
-                              <textarea
-                                value={teacherComment}
-                                onChange={(e) => setTeacherComment(e.target.value)}
-                                className="mt-2 w-full h-[90px] resize-none rounded-xl border border-slate-200 bg-white p-3 text-[12px] text-slate-900 outline-none focus:ring-2 focus:ring-slate-900/10"
-                                placeholder="Write a comment…"
-                              />
-                            ) : (
-                              <p className="mt-2 text-[12px] text-slate-700 whitespace-pre-wrap">{teacherComment || '—'}</p>
-                            )}
-                          </div>
-
-                          <div className="col-span-5 rounded-2xl border border-slate-200 p-4">
-                            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                              Summary
-                            </div>
-
-                            <div className="mt-2 space-y-2 text-[12px] text-slate-700">
-                              <div className="flex items-center justify-between">
-                                <span className="text-slate-500">Overall %</span>
-                                <span className="font-semibold text-slate-900">{overall.pct.toFixed(1)}%</span>
-                              </div>
-                              <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-                                <div className="h-full bg-slate-900" style={{ width: `${clamp(overall.pct, 0, 100)}%` }} />
-                              </div>
-
-                              <div className="mt-2 text-[11px] text-slate-500">General remark</div>
-                              <div className="text-[12px] font-semibold text-slate-900 leading-4">
-                                {overallRemark(overall.pct)}
-                              </div>
-                            </div>
-                          </div>
+                      {/* Head Teacher's Comment - Always Visible */}
+                      <div className="mb-6 border border-gray-200 rounded-lg p-4 bg-gray-50">
+                        <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">Head Teacher's Comment</p>
+                        <textarea
+                          value={headTeacherComment}
+                          onChange={(e) => setHeadTeacherComment(e.target.value)}
+                          disabled={!isEditing}
+                          className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
+                          placeholder="Head teacher's comments..."
+                          rows={3}
+                        />
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                          <p className="text-xs text-gray-500">Signature: _________________________</p>
                         </div>
+                      </div>
 
-                        <div className="mt-3 grid grid-cols-12 gap-3">
-                          <div className="col-span-7 rounded-2xl border border-slate-200 p-4">
-                            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                              Head teacher comment
-                            </div>
-                            {canEditComments ? (
-                              <textarea
-                                value={headComment}
-                                onChange={(e) => setHeadComment(e.target.value)}
-                                className="mt-2 w-full h-[70px] resize-none rounded-xl border border-slate-200 bg-white p-3 text-[12px] text-slate-900 outline-none focus:ring-2 focus:ring-slate-900/10"
-                                placeholder="Write a comment…"
-                              />
-                            ) : (
-                              <p className="mt-2 text-[12px] text-slate-700 whitespace-pre-wrap">{headComment || '—'}</p>
-                            )}
-                          </div>
-
-                          <div className="col-span-5 rounded-2xl border border-slate-200 p-4 flex flex-col justify-between">
-                            <div>
-                              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Report ID</div>
-                              <div className="mt-1 font-mono text-[12px] font-semibold text-slate-900">
-                                {reportRowId ? `RC-${reportRowId}` : `RC-${selectedStudent.registration_id}`}
-                              </div>
-                            </div>
-
-                            {canEditComments && (
-                              <button
-                                onClick={saveComments}
-                                disabled={savingComments}
-                                className={`mt-3 inline-flex items-center justify-center rounded-xl px-4 py-2 text-[12px] font-semibold transition
-                                  ${savingComments ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
-                              >
-                                {savingComments ? 'Saving…' : 'Save comments'}
-                              </button>
-                            )}
-
-                            <div className="mt-3 text-[10px] text-slate-500">
-                              Generated by {school.school_name}. Printed copies should be stamped.
-                            </div>
-                          </div>
+                      {/* Class Teacher's Comment */}
+                      <div className="mb-6 border border-gray-200 rounded-lg p-4">
+                        <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">Class Teacher's Comment</p>
+                        <textarea
+                          value={classTeacherComment}
+                          onChange={(e) => setClassTeacherComment(e.target.value)}
+                          disabled={!isEditing}
+                          className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
+                          placeholder="Class teacher's comments..."
+                          rows={3}
+                        />
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                          <p className="text-xs text-gray-500">Signature: _________________________</p>
                         </div>
+                      </div>
 
-                        {/* Footer line */}
-                        <div className="mt-3 flex items-center justify-between text-[10px] text-slate-500">
-                          <span>{school.website ? school.website : '—'}</span>
-                          <span>Powered by EducWave</span>
+                      {/* General Remarks */}
+                      <div className="mb-6 border border-gray-200 rounded-lg p-4 bg-blue-50">
+                        <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">General Remarks</p>
+                        <p className="text-sm text-gray-800">
+                          {overallRemark(overall.pct)}
+                        </p>
+                      </div>
+
+                      {/* Footer */}
+                      <div className="pt-4 border-t border-gray-200">
+                        <div className="flex items-center justify-between text-xs text-gray-500">
+                          <div>
+                            <span>{school.website || school.email || 'Official School Report'}</span>
+                          </div>
+                          <div>
+                            <span>Generated by EducWave</span>
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              )}
-
-              <div className="no-print h-10" />
-            </div>
-          </main>
-        </div>
+              </div>
+            )}
+          </div>
+        </main>
       </div>
 
       <PrintCSS />
@@ -1254,10 +1372,33 @@ export default function StudentReportPage() {
   );
 }
 
-/** Print CSS (A4 single page) */
 function PrintCSS() {
   return (
     <style jsx global>{`
+      /* A4 page size - Single page */
+      .print-page {
+        width: 210mm;
+        min-height: 297mm;
+        max-height: 297mm;
+        background: #fff;
+        margin: 0 auto;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .print-inner {
+        padding: 15mm 15mm 10mm 15mm;
+        height: 100%;
+        box-sizing: border-box;
+      }
+
+      /* Ensure content fits within A4 */
+      .print-inner > * {
+        max-width: 180mm;
+        margin-left: auto;
+        margin-right: auto;
+      }
+
       @page {
         size: A4 portrait;
         margin: 0mm;
@@ -1271,16 +1412,89 @@ function PrintCSS() {
 
         html,
         body {
-          background: white !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          background: #fff !important;
+          width: 210mm !important;
+          min-height: 297mm !important;
+          max-height: 297mm !important;
+          overflow: hidden !important;
         }
 
+        body * {
+          visibility: hidden;
+        }
+
+        .print-page, .print-page * {
+          visibility: visible;
+        }
+
+        .print-page {
+          position: absolute;
+          left: 0;
+          top: 0;
+          width: 210mm !important;
+          height: 297mm !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          border: none !important;
+          border-radius: 0 !important;
+          box-shadow: none !important;
+          page-break-after: avoid !important;
+          page-break-inside: avoid !important;
+          overflow: hidden !important;
+        }
+
+        .print-inner {
+          padding: 15mm 15mm 10mm 15mm !important;
+          height: 297mm !important;
+          overflow: hidden !important;
+        }
+
+        /* Prevent page breaks inside critical elements */
+        table {
+          page-break-inside: avoid !important;
+        }
+
+        tr {
+          page-break-inside: avoid !important;
+        }
+
+        /* Hide non-print elements */
         .no-print {
           display: none !important;
         }
 
-        /* Ensure only the A4 paper prints */
-        .ring-slate-200 {
-          box-shadow: none !important;
+        /* Ensure textareas print as normal text */
+        textarea {
+          border: none !important;
+          background: transparent !important;
+          resize: none !important;
+          overflow: hidden !important;
+          color: #000 !important;
+        }
+
+        /* Print preview adjustments */
+        @media print and (color) {
+          * {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+        }
+      }
+
+      /* Screen preview */
+      @media screen {
+        .print-page {
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+          border-radius: 8px;
+          background: white;
+          margin: 0 auto;
+          overflow: auto;
+        }
+
+        .print-inner {
+          min-height: 297mm;
         }
       }
     `}</style>

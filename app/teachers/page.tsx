@@ -9,7 +9,6 @@ import {
   Search,
   Users,
   UserPlus,
-  X,
   XCircle,
   CheckCircle,
   Grid,
@@ -21,29 +20,27 @@ import {
   Clock,
   Shield,
   Mail,
-  KeyRound,
-  User,
   GraduationCap,
 } from 'lucide-react';
 
 type AppRole = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
 
 type ProfileRow = {
-  user_id: string; // uuid
+  user_id: string;
   email: string | null;
   full_name: string | null;
   role: AppRole;
-  school_id: string | null; // uuid
+  school_id: string | null;
 };
 
 type SchoolRow = {
-  id: string; // uuid
+  id: string;
   school_name: string;
 };
 
 type TeacherRow = {
   registration_id: string;
-  user_id: string; // uuid -> auth.users.id (and profiles.user_id)
+  user_id: string;
   first_name: string;
   last_name: string;
   gender: string | null;
@@ -52,7 +49,6 @@ type TeacherRow = {
   initials: string | null;
   created_at?: string;
 
-  // merged profile fields
   email?: string | null;
   full_name?: string | null;
   role?: AppRole | null;
@@ -66,19 +62,6 @@ const ROLE_CHOICES: { value: AppRole; label: string }[] = [
   { value: 'STUDENT', label: 'Student' },
   { value: 'PARENT', label: 'Parent' },
 ];
-
-const GENDER_CHOICES = [
-  { value: 'male', label: 'Male' },
-  { value: 'female', label: 'Female' },
-];
-
-function getSchoolAbbr(name: string) {
-  return name
-    .split(' ')
-    .filter(Boolean)
-    .map(w => (w[0] ? w[0].toUpperCase() : ''))
-    .join('');
-}
 
 function rolePill(role?: string | null) {
   switch (role) {
@@ -101,6 +84,7 @@ function rolePill(role?: string | null) {
 
 /**
  * ✅ Safe fetch: teachers then profiles (NO embedded join required)
+ * NOTE: profiles select may be restricted by RLS — if so, we still return teachers without email/role
  */
 async function fetchTeachersForSchool(schoolId: string): Promise<TeacherRow[]> {
   const { data: teachers, error: tErr } = await supabase
@@ -122,8 +106,8 @@ async function fetchTeachersForSchool(schoolId: string): Promise<TeacherRow[]> {
       .select('user_id,email,full_name,role,school_id')
       .in('user_id', userIds);
 
-    if (pErr) throw new Error(pErr.message);
-    (profiles || []).forEach((p: any) => profilesById.set(p.user_id, p as ProfileRow));
+    // If profiles are blocked by RLS, don’t kill the page — just return teachers without merged fields
+    if (!pErr) (profiles || []).forEach((p: any) => profilesById.set(p.user_id, p as ProfileRow));
   }
 
   return (teachers as any[]).map(t => {
@@ -142,9 +126,6 @@ export default function TeachersPage() {
 
   // auth
   const [authChecking, setAuthChecking] = useState(true);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string | null>(null);
-  const [authUserId, setAuthUserId] = useState<string | null>(null);
 
   // profile + school
   const [profile, setProfile] = useState<ProfileRow | null>(null);
@@ -161,26 +142,8 @@ export default function TeachersPage() {
   const [roleFilter, setRoleFilter] = useState<'all' | AppRole>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  // modal
-  const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<1 | 2>(1);
-  const [submitting, setSubmitting] = useState(false);
-
-  // step 1 (create auth user)
-  const [email, setEmail] = useState('');
-  const [pass, setPass] = useState('');
-  const [pass2, setPass2] = useState('');
-  const [createdUserId, setCreatedUserId] = useState<string | null>(null);
-  const [teacherRole, setTeacherRole] = useState<AppRole>('TEACHER');
-
-  // step 2 (teacher row)
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [gender, setGender] = useState('male');
-  const [yearOfEntry, setYearOfEntry] = useState(String(new Date().getFullYear()));
-
   // ---------------------------
-  // AUTH CHECK + LOAD PROFILE
+  // AUTH CHECK
   // ---------------------------
   useEffect(() => {
     (async () => {
@@ -192,30 +155,29 @@ export default function TeachersPage() {
         return;
       }
 
-      const u = session.user;
-      setAuthUserId(u.id);
-      setUserEmail(u.email ?? null);
-      setUserName((u.user_metadata?.full_name as string) || 'User');
       setAuthChecking(false);
     })();
   }, [router]);
 
   // ---------------------------
-  // LOAD profile -> school -> teachers
+  // LOAD profile -> school -> teachers (RLS-SAFE)
   // ---------------------------
   useEffect(() => {
     if (authChecking) return;
 
     (async () => {
+      setLoading(true);
+      setErrorMsg(null);
+      setSuccessMsg(null);
+
       try {
-        setLoading(true);
-        setErrorMsg(null);
+        const { data: auth, error: authErr } = await supabase.auth.getUser();
+        if (authErr) throw new Error(authErr.message);
+        if (!auth.user) throw new Error('Could not find authenticated user.');
 
-        const { data: auth } = await supabase.auth.getUser();
         const u = auth.user;
-        if (!u) throw new Error('Could not find authenticated user.');
 
-        // profile row
+        // profile
         const { data: p, error: pErr } = await supabase
           .from('profiles')
           .select('user_id,email,full_name,role,school_id')
@@ -225,29 +187,43 @@ export default function TeachersPage() {
         if (pErr) throw new Error(pErr.message);
         if (!p) throw new Error('Profile not found. Ensure your auth trigger (handle_new_user) is enabled.');
 
-        setProfile(p as ProfileRow);
+        const prof = p as ProfileRow;
+        setProfile(prof);
 
-        if (!(p as ProfileRow).school_id) {
+        // must be linked
+        if (!prof.school_id) {
           setSchool(null);
           setTeachers([]);
           setErrorMsg('Your account is not linked to any school. Please configure your school in Settings.');
           return;
         }
 
-        // school row
+        // school (✅ maybeSingle prevents “Cannot coerce…”)
         const { data: sch, error: schErr } = await supabase
           .from('general_information')
           .select('id,school_name')
-          .eq('id', (p as ProfileRow).school_id)
-          .single();
+          .eq('id', prof.school_id)
+          .maybeSingle();
 
-        if (schErr || !sch) throw new Error(schErr?.message || 'Failed to load school info.');
+        if (schErr) throw new Error(schErr.message);
+
+        // If RLS blocks reading general_information, sch will be null
+        if (!sch) {
+          setSchool(null);
+          setTeachers([]);
+          setErrorMsg(
+            'Your profile is linked to a school, but you are not allowed to view that school record. Fix RLS on general_information (SELECT policy).'
+          );
+          return;
+        }
+
         setSchool(sch as SchoolRow);
 
-        // teachers
-        const rows = await fetchTeachersForSchool(sch.id);
+        const rows = await fetchTeachersForSchool((sch as SchoolRow).id);
         setTeachers(rows);
       } catch (e: any) {
+        setSchool(null);
+        setTeachers([]);
         setErrorMsg(e?.message || 'Failed to load module.');
       } finally {
         setLoading(false);
@@ -278,31 +254,7 @@ export default function TeachersPage() {
   const handleView = (registrationId: string) => router.push(`/teachers/${encodeURIComponent(registrationId)}`);
   const handleEdit = (registrationId: string) => router.push(`/teachers/${encodeURIComponent(registrationId)}/edit`);
 
-  const resetModal = () => {
-    setStep(1);
-    setEmail('');
-    setPass('');
-    setPass2('');
-    setCreatedUserId(null);
-    setTeacherRole('TEACHER');
-
-    setFirstName('');
-    setLastName('');
-    setGender('male');
-    setYearOfEntry(String(new Date().getFullYear()));
-  };
-
-  const closeModal = () => {
-    resetModal();
-    setOpen(false);
-  };
-
-  const openModal = () => {
-    setErrorMsg(null);
-    setSuccessMsg(null);
-    resetModal();
-    setOpen(true);
-  };
+  const goToNewTeacher = () => router.push('/teachers/new');
 
   const downloadCSV = () => {
     const rows = filteredTeachers.map(t => ({
@@ -316,7 +268,15 @@ export default function TeachersPage() {
     }));
 
     const headers = Object.keys(
-      rows[0] || { registration_id: '', first_name: '', last_name: '', gender: '', year_of_entry: '', email: '', role: '' }
+      rows[0] || {
+        registration_id: '',
+        first_name: '',
+        last_name: '',
+        gender: '',
+        year_of_entry: '',
+        email: '',
+        role: '',
+      }
     );
 
     const escape = (v: any) => {
@@ -401,147 +361,6 @@ export default function TeachersPage() {
   };
 
   // ---------------------------
-  // STEP 1: Create auth user (server route with service role)
-  // ---------------------------
-  const step1CreateAuth = async () => {
-    setSubmitting(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    try {
-      if (!school?.id || !school.school_name) throw new Error('School not loaded.');
-      if (!email.trim()) throw new Error('Email is required.');
-      if (!pass || !pass2) throw new Error('Please enter and confirm password.');
-      if (pass !== pass2) throw new Error('Passwords do not match.');
-      if (pass.length < 6) throw new Error('Password must be at least 6 characters.');
-
-      // ✅ your route must create auth user, and should set metadata role/full_name if you want
-      const res = await fetch('/api/admin/create-teacher-user', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: email.trim().toLowerCase(),
-          password: pass,
-          role: teacherRole, // should be app_role
-          school_id: school.id, // ✅ uuid
-        }),
-      });
-
-      const text = await res.text();
-      let data: any;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error(
-          'API returned HTML (route not found / server error). Ensure app/api/admin/create-teacher-user/route.ts exists and restart dev server.'
-        );
-      }
-
-      if (!res.ok) throw new Error(data?.error || 'Failed to create auth user.');
-
-      // we expect your API to return: { user_id: "uuid" }
-      if (!data?.user_id) throw new Error('API did not return user_id.');
-
-      setCreatedUserId(data.user_id);
-      setStep(2);
-      setSuccessMsg('Step 1 complete: Auth user created. Now create Teacher profile.');
-    } catch (e: any) {
-      setErrorMsg(e?.message || 'Failed to create auth user.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // ---------------------------
-  // STEP 2: Create teacher row + ensure profile is linked to school
-  // ---------------------------
-  const step2CreateTeacher = async () => {
-    setSubmitting(true);
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    try {
-      if (!createdUserId) throw new Error('Missing created user id from Step 1.');
-      if (!profile?.school_id || !school?.id) throw new Error('Admin profile is not linked to a school.');
-      if (!firstName.trim() || !lastName.trim()) throw new Error('First and last name are required.');
-      if (String(yearOfEntry).length !== 4) throw new Error('Year of entry must be a 4-digit year.');
-
-      // ✅ ensure new user's profile exists (trigger) and link school + role + name
-      const { data: p2, error: p2Err } = await supabase
-        .from('profiles')
-        .select('user_id,email,full_name,role,school_id')
-        .eq('user_id', createdUserId)
-        .maybeSingle();
-
-      if (p2Err) throw new Error(p2Err.message);
-
-      // If trigger didn’t create it (rare), create it (may require RLS policy)
-      if (!p2) {
-        const { error: insPErr } = await supabase.from('profiles').insert({
-          user_id: createdUserId,
-          email: email.trim().toLowerCase(),
-          full_name: `${firstName.trim()} ${lastName.trim()}`,
-          role: teacherRole,
-          school_id: school.id,
-        });
-        if (insPErr) throw new Error(insPErr.message);
-      } else {
-        // update role/school/name to match
-        const { error: upPErr } = await supabase
-          .from('profiles')
-          .update({
-            school_id: school.id,
-            role: teacherRole,
-            full_name: `${firstName.trim()} ${lastName.trim()}`,
-          })
-          .eq('user_id', createdUserId);
-
-        if (upPErr) throw new Error(upPErr.message);
-      }
-
-      // generate reg id
-      const { count, error: cErr } = await supabase
-        .from('teachers')
-        .select('registration_id', { count: 'exact', head: true })
-        .eq('school_id', school.id)
-        .eq('year_of_entry', String(yearOfEntry));
-
-      if (cErr) throw new Error(cErr.message);
-
-      const seq = String((count ?? 0) + 1).padStart(3, '0');
-      const abbr = getSchoolAbbr(school.school_name);
-      const regId = `${abbr}/T/${yearOfEntry}/${seq}`;
-      const initials = `${firstName.trim()[0] || ''}${lastName.trim()[0] || ''}`.toUpperCase();
-
-      const { error: insErr } = await supabase.from('teachers').insert({
-        registration_id: regId,
-        user_id: createdUserId, // ✅ uuid
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        gender,
-        year_of_entry: String(yearOfEntry),
-        school_id: school.id,
-        initials: initials || null,
-        registered_by: authUserId, // ✅ uuid (your schema uses registered_by uuid)
-      });
-
-      if (insErr) throw new Error(insErr.message);
-
-      setSuccessMsg(`Teacher created successfully! Reg ID: ${regId}`);
-
-      // refresh list
-      const rows = await fetchTeachersForSchool(school.id);
-      setTeachers(rows);
-
-      setTimeout(() => closeModal(), 900);
-    } catch (e: any) {
-      setErrorMsg(e?.message || 'Failed to create teacher.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // ---------------------------
   // RENDER STATES
   // ---------------------------
   if (authChecking || loading) {
@@ -555,11 +374,11 @@ export default function TeachersPage() {
     );
   }
 
-  // Not linked
+  // Not linked OR cannot read school
   if (!profile || !profile.school_id || !school) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
-        <Navbar/>
+        <Navbar />
         <div className="flex flex-1">
           <AppShell />
           <main className="flex-1 flex items-center justify-center p-6">
@@ -571,9 +390,10 @@ export default function TeachersPage() {
                 <div className="flex-1">
                   <h3 className="text-lg font-bold text-gray-900">Account Configuration Required</h3>
                   <p className="text-sm text-gray-600 mt-1">
-                    Your account is not linked to any school.
+                    Your account is not linked to any school (or you can’t access the school record).
                     <span className="block mt-1 text-xs text-gray-500">
-                      Fix: set <b>profiles.school_id</b> for this user in Settings (or admin panel).
+                      Fix: set <b>profiles.school_id</b> in Settings (or admin panel) and ensure you have SELECT access on{' '}
+                      <b>general_information</b>.
                     </span>
                   </p>
                 </div>
@@ -604,7 +424,7 @@ export default function TeachersPage() {
   // ---------------------------
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col">
-      <Navbar/>
+      <Navbar />
 
       <div className="flex flex-1 overflow-hidden">
         <AppShell />
@@ -627,7 +447,7 @@ export default function TeachersPage() {
                 </div>
 
                 <button
-                  onClick={openModal}
+                  onClick={goToNewTeacher}
                   className="inline-flex items-center px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 text-white text-sm font-medium shadow-sm hover:from-blue-700 hover:to-blue-800 transition-all"
                 >
                   <UserPlus size={18} className="mr-2" />
@@ -740,7 +560,7 @@ export default function TeachersPage() {
                     {search || roleFilter !== 'all' ? 'Try adjusting your search/filters.' : 'Start by adding your first teacher.'}
                   </p>
                   <button
-                    onClick={openModal}
+                    onClick={goToNewTeacher}
                     className="inline-flex items-center px-4 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 text-white text-sm font-medium shadow-sm hover:from-blue-700 hover:to-blue-800 transition-all"
                   >
                     <UserPlus size={18} className="mr-2" />
@@ -867,6 +687,7 @@ export default function TeachersPage() {
                                 onClick={() => handleView(t.registration_id)}
                                 className="p-2 rounded-xl hover:bg-blue-50 text-blue-600"
                                 title="View"
+                                type="button"
                               >
                                 <Eye size={16} />
                               </button>
@@ -874,6 +695,7 @@ export default function TeachersPage() {
                                 onClick={() => handleEdit(t.registration_id)}
                                 className="p-2 rounded-xl hover:bg-gray-100 text-gray-600"
                                 title="Edit"
+                                type="button"
                               >
                                 <Edit size={16} />
                               </button>
@@ -889,209 +711,6 @@ export default function TeachersPage() {
           </div>
         </main>
       </div>
-
-      {/* MODAL */}
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-2xl mx-4 rounded-2xl shadow-2xl border border-gray-200 overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-gray-100">
-              <div>
-                <h2 className="text-lg font-bold text-gray-900">Add Teacher</h2>
-                <p className="text-sm text-gray-600 mt-1">
-                  Step {step} of 2 • <span className="font-medium text-blue-700">{school.school_name}</span>
-                </p>
-              </div>
-              <button onClick={closeModal} className="p-2 rounded-xl hover:bg-gray-200 text-gray-600" type="button">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-6">
-              {/* STEP 1 */}
-              {step === 1 && (
-                <div className="space-y-5">
-                  <div className="p-4 rounded-xl border border-blue-200 bg-blue-50 text-sm text-blue-800">
-                    <b>Step 1:</b> Create Supabase Auth user (via your API route).
-                    <div className="text-xs text-blue-700 mt-1">
-                      This will trigger creation of the <code className="px-1 bg-white rounded">profiles</code> row.
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700">Teacher Email</label>
-                    <div className="relative">
-                      <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input
-                        className="w-full rounded-xl border border-gray-300 pl-10 pr-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        value={email}
-                        onChange={e => setEmail(e.target.value)}
-                        placeholder="teacher@example.com"
-                        type="email"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700">Password</label>
-                      <div className="relative">
-                        <KeyRound size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input
-                          className="w-full rounded-xl border border-gray-300 pl-10 pr-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          value={pass}
-                          onChange={e => setPass(e.target.value)}
-                          type="password"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700">Confirm Password</label>
-                      <div className="relative">
-                        <KeyRound size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input
-                          className="w-full rounded-xl border border-gray-300 pl-10 pr-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          value={pass2}
-                          onChange={e => setPass2(e.target.value)}
-                          type="password"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700">Account Role</label>
-                    <select
-                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      value={teacherRole}
-                      onChange={e => setTeacherRole(e.target.value as AppRole)}
-                    >
-                      {ROLE_CHOICES.map(r => (
-                        <option key={r.value} value={r.value}>
-                          {r.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="flex justify-end gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={closeModal}
-                      className="px-5 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-sm font-medium bg-white hover:bg-gray-50"
-                    >
-                      Cancel
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={submitting}
-                      onClick={step1CreateAuth}
-                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 text-white text-sm font-medium shadow-sm hover:from-blue-700 hover:to-blue-800 disabled:opacity-60"
-                    >
-                      {submitting ? 'Creating...' : 'Continue'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* STEP 2 */}
-              {step === 2 && (
-                <div className="space-y-5">
-                  <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50 text-sm text-emerald-800">
-                    <b>Step 2:</b> Create Teacher profile (links to <code className="px-1 bg-white rounded">profiles.user_id</code>).
-                    <div className="text-xs text-emerald-700 mt-1">User created: <b>{email.trim().toLowerCase()}</b></div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700">First Name</label>
-                      <div className="relative">
-                        <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input
-                          className="w-full rounded-xl border border-gray-300 pl-10 pr-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          value={firstName}
-                          onChange={e => setFirstName(e.target.value)}
-                          placeholder="John"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700">Last Name</label>
-                      <div className="relative">
-                        <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                        <input
-                          className="w-full rounded-xl border border-gray-300 pl-10 pr-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          value={lastName}
-                          onChange={e => setLastName(e.target.value)}
-                          placeholder="Doe"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700">Gender</label>
-                      <select
-                        className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        value={gender}
-                        onChange={e => setGender(e.target.value)}
-                      >
-                        {GENDER_CHOICES.map(g => (
-                          <option key={g.value} value={g.value}>
-                            {g.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-gray-700">Year of Entry</label>
-                      <input
-                        className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        value={yearOfEntry}
-                        onChange={e => setYearOfEntry(e.target.value)}
-                        type="number"
-                        min={2000}
-                        max={2035}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-between gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setStep(1)}
-                      className="px-5 py-2.5 rounded-xl border border-gray-300 text-gray-700 text-sm font-medium bg-white hover:bg-gray-50"
-                    >
-                      Back
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={submitting}
-                      onClick={step2CreateTeacher}
-                      className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 text-white text-sm font-medium shadow-sm hover:from-emerald-700 hover:to-emerald-800 disabled:opacity-60"
-                    >
-                      {submitting ? 'Saving...' : 'Create Teacher'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Inline errors in modal */}
-              {errorMsg && (
-                <div className="mt-5 p-4 rounded-xl border border-red-200 bg-red-50 flex items-start">
-                  <XCircle className="h-5 w-5 text-red-600 mr-3 flex-shrink-0" />
-                  <div className="text-sm text-red-700">{errorMsg}</div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

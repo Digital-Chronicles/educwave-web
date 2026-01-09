@@ -1,25 +1,26 @@
 'use client';
 
-import { useEffect, useMemo, useState, FormEvent } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
 import AppShell from '@/components/AppShell';
+import { AlertTriangle, CheckCircle2, Loader2, School, User2, Shield } from 'lucide-react';
 
 type Role = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
 
 type ProfileRow = {
-  user_id: string; // uuid from auth.users.id
+  user_id: string;
   email: string | null;
   full_name: string | null;
   role: Role;
-  school_id: string | null; // ✅ uuid (matches general_information.id)
+  school_id: string | null;
   created_at?: string;
   updated_at?: string;
 };
 
 type SchoolRow = {
-  id: string; // ✅ uuid
+  id: string;
   school_name: string;
   school_badge: string | null;
   box_no: string | null;
@@ -28,12 +29,14 @@ type SchoolRow = {
   email: string;
   website: string | null;
   established_year: number | null;
-  registered_by_user_id: string | null; // uuid
+  registered_by_user_id: string | null;
   created_at: string;
   updated_at: string;
 };
 
-function safeNameFromMeta(meta: any) {
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function safeMetaName(meta: any) {
   const full =
     meta?.full_name ||
     meta?.name ||
@@ -46,16 +49,24 @@ function safeNameFromMeta(meta: any) {
 export default function SettingsPage() {
   const router = useRouter();
 
+  // auth + loading
   const [authChecking, setAuthChecking] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
+  // identity
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
 
+  // data
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [school, setSchool] = useState<SchoolRow | null>(null);
 
-  // form state
+  // messages
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // form
   const [schoolName, setSchoolName] = useState('');
   const [boxNo, setBoxNo] = useState('');
   const [location, setLocation] = useState('');
@@ -64,23 +75,19 @@ export default function SettingsPage() {
   const [website, setWebsite] = useState('');
   const [establishedYear, setEstablishedYear] = useState('');
 
-  const [saving, setSaving] = useState(false);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const isAdmin = profile?.role === 'ADMIN';
 
   const canSubmit = useMemo(() => {
-    return (
-      !!schoolName &&
-      !!location &&
-      !!contactNumber &&
-      !!schoolEmail &&
-      !saving
-    );
-  }, [schoolName, location, contactNumber, schoolEmail, saving]);
+    // only admin can submit, also require fields
+    if (!isAdmin) return false;
+    return !!schoolName.trim() && !!location.trim() && !!contactNumber.trim() && !!schoolEmail.trim() && !saving;
+  }, [isAdmin, schoolName, location, contactNumber, schoolEmail, saving]);
 
-  // 1) Auth check
+  // ---------------------------
+  // 1) AUTH CHECK
+  // ---------------------------
   useEffect(() => {
-    const run = async () => {
+    (async () => {
       const { data } = await supabase.auth.getSession();
       const session = data?.session;
 
@@ -89,186 +96,181 @@ export default function SettingsPage() {
         return;
       }
 
-      setUserEmail(session.user.email ?? null);
       setUserId(session.user.id);
+      setUserEmail(session.user.email ?? null);
       setAuthChecking(false);
-    };
-
-    run();
+    })();
   }, [router]);
 
-  // 2) Load or auto-create Profile, then load School
+  // ---------------------------
+  // 2) LOAD PROFILE + SCHOOL
+  // ---------------------------
   useEffect(() => {
     if (authChecking) return;
 
-    const loadAll = async () => {
+    (async () => {
       setLoading(true);
       setErrorMsg(null);
       setSuccessMsg(null);
 
       try {
-        const {
-          data: { user },
-          error: userErr,
-        } = await supabase.auth.getUser();
-
+        const { data: userResp, error: userErr } = await supabase.auth.getUser();
         if (userErr) throw new Error(userErr.message);
-        if (!user) throw new Error('Could not find authenticated user.');
+        if (!userResp.user) throw new Error('Could not find authenticated user.');
 
-        const uid = user.id;
-        const email = user.email ?? null;
+        const u = userResp.user;
+        const uid = u.id;
 
-        setUserEmail(email);
         setUserId(uid);
+        setUserEmail(u.email ?? null);
 
-        // --- A) PROFILE: fetch; if missing, auto-create ---
-        const { data: existingProfile, error: pErr } = await supabase
+        // profile
+        const { data: p, error: pErr } = await supabase
           .from('profiles')
-          .select('user_id, email, full_name, role, school_id, created_at, updated_at')
+          .select('user_id,email,full_name,role,school_id,created_at,updated_at')
           .eq('user_id', uid)
           .maybeSingle();
 
         if (pErr) throw new Error(`Error loading profile: ${pErr.message}`);
+        if (!p) {
+          const metaName = safeMetaName(u.user_metadata);
+          throw new Error(
+            `Profile not found for this user. Ensure your handle_new_user trigger inserts into public.profiles. ${
+              metaName ? `(User meta name: ${metaName})` : ''
+            }`
+          );
+        }
 
-        let profileRow: ProfileRow;
+        const prof = p as ProfileRow;
+        setProfile(prof);
 
-        if (!existingProfile) {
-          const fullName = safeNameFromMeta(user.user_metadata);
+        // reset school UI
+        setSchool(null);
 
-          const { data: insertedProfile, error: insPErr } = await supabase
-            .from('profiles')
-            .insert({
-              user_id: uid,
-              email,
-              full_name: fullName,
-              role: 'TEACHER',
-              school_id: null,
-            })
-            .select('user_id, email, full_name, role, school_id, created_at, updated_at')
-            .single();
-
-          if (insPErr || !insertedProfile) {
-            throw new Error(
-              insPErr?.message ||
-                'Failed to auto-create profile in profiles table. Check RLS/policies.'
-            );
+        // If not linked yet: keep empty form
+        if (!prof.school_id) {
+          // for non-admin, show a clear message
+          if (prof.role !== 'ADMIN') {
+            setErrorMsg('Only ADMIN can create a school. Please contact your school ADMIN to configure the school details.');
           }
-
-          profileRow = insertedProfile as ProfileRow;
-        } else {
-          profileRow = existingProfile as ProfileRow;
+          return;
         }
 
-        setProfile(profileRow);
-
-        // --- B) SCHOOL: load if profile has school_id ---
-        if (profileRow.school_id) {
-          const { data: schoolRow, error: sErr } = await supabase
-            .from('general_information')
-            .select(
-              'id, school_name, school_badge, box_no, location, contact_number, email, website, established_year, registered_by_user_id, created_at, updated_at'
-            )
-            .eq('id', profileRow.school_id)
-            .single();
-
-          if (sErr) throw new Error(`Error loading school: ${sErr.message}`);
-
-          const s = schoolRow as SchoolRow;
-          setSchool(s);
-
-          // populate form
-          setSchoolName(s.school_name);
-          setBoxNo(s.box_no ?? '');
-          setLocation(s.location);
-          setContactNumber(s.contact_number);
-          setSchoolEmail(s.email);
-          setWebsite(s.website ?? '');
-          setEstablishedYear(s.established_year ? String(s.established_year) : '');
-        } else {
-          setSchool(null);
+        // Validate UUID
+        if (!UUID_RE.test(prof.school_id)) {
+          throw new Error('Your profile has an invalid school_id. Please contact admin.');
         }
+
+        // Load school
+        const { data: s, error: sErr } = await supabase
+          .from('general_information')
+          .select(
+            'id,school_name,school_badge,box_no,location,contact_number,email,website,established_year,registered_by_user_id,created_at,updated_at'
+          )
+          .eq('id', prof.school_id)
+          .maybeSingle();
+
+        if (sErr) throw new Error(`Error loading school: ${sErr.message}`);
+        if (!s) {
+          throw new Error(
+            'Your profile is linked to a school, but you are not allowed to view it (or the school does not exist). Fix RLS on general_information.'
+          );
+        }
+
+        const schoolRow = s as SchoolRow;
+        setSchool(schoolRow);
+
+        // populate form
+        setSchoolName(schoolRow.school_name ?? '');
+        setBoxNo(schoolRow.box_no ?? '');
+        setLocation(schoolRow.location ?? '');
+        setContactNumber(schoolRow.contact_number ?? '');
+        setSchoolEmail(schoolRow.email ?? '');
+        setWebsite(schoolRow.website ?? '');
+        setEstablishedYear(schoolRow.established_year ? String(schoolRow.established_year) : '');
       } catch (e: any) {
         setErrorMsg(e?.message || 'Unexpected error while loading settings.');
       } finally {
         setLoading(false);
       }
-    };
-
-    loadAll();
+    })();
   }, [authChecking]);
 
+  // ---------------------------
+  // SAVE SCHOOL (CREATE OR UPDATE)
+  // ---------------------------
   const handleSaveSchool = async (e: FormEvent) => {
     e.preventDefault();
 
     setSaving(true);
-    setSuccessMsg(null);
     setErrorMsg(null);
+    setSuccessMsg(null);
 
     try {
-      if (!profile || !userId) throw new Error('Profile not loaded yet.');
+      if (!userId) throw new Error('Missing user id.');
+      if (!profile) throw new Error('Profile not loaded yet.');
 
-      // validation
-      if (!schoolName || !location || !contactNumber || !schoolEmail) {
-        throw new Error('Please fill in all required fields.');
+      // ✅ Hard block (server-side enforcement is also needed, but this blocks UI calls)
+      if (profile.role !== 'ADMIN') {
+        throw new Error('Access denied. Only ADMIN can create or edit the school.');
       }
 
-      const yearNum =
-        establishedYear.trim().length > 0 ? Number(establishedYear) : null;
+      const name = schoolName.trim();
+      const loc = location.trim();
+      const phone = contactNumber.trim();
+      const em = schoolEmail.trim();
 
-      if (establishedYear.trim().length > 0 && (yearNum === null || Number.isNaN(yearNum))) {
+      if (!name || !loc || !phone || !em) throw new Error('Please fill in all required fields.');
+
+      const yearNum = establishedYear.trim() ? Number(establishedYear) : null;
+      if (establishedYear.trim() && (yearNum === null || Number.isNaN(yearNum))) {
         throw new Error('Established year must be a valid number.');
       }
-
       if (yearNum !== null) {
         const y = new Date().getFullYear();
         if (yearNum < 1800 || yearNum > y) throw new Error(`Established year must be between 1800 and ${y}.`);
       }
 
-      // UPDATE school
+      // UPDATE
       if (school?.id) {
         const { error: updErr } = await supabase
           .from('general_information')
           .update({
-            school_name: schoolName,
-            box_no: boxNo || null,
-            location,
-            contact_number: contactNumber,
-            email: schoolEmail,
-            website: website || null,
+            school_name: name,
+            box_no: boxNo.trim() ? boxNo.trim() : null,
+            location: loc,
+            contact_number: phone,
+            email: em,
+            website: website.trim() ? website.trim() : null,
             established_year: yearNum,
-            // updated_at trigger exists, but setting explicitly is ok too:
-            updated_at: new Date().toISOString(),
           })
           .eq('id', school.id);
 
         if (updErr) throw new Error(updErr.message);
 
-        setSchool(prev =>
-          prev
-            ? {
-                ...prev,
-                school_name: schoolName,
-                box_no: boxNo || null,
-                location,
-                contact_number: contactNumber,
-                email: schoolEmail,
-                website: website || null,
-                established_year: yearNum,
-                updated_at: new Date().toISOString(),
-              }
-            : prev
-        );
+        const nextSchool: SchoolRow = {
+          ...school,
+          school_name: name,
+          box_no: boxNo.trim() ? boxNo.trim() : null,
+          location: loc,
+          contact_number: phone,
+          email: em,
+          website: website.trim() ? website.trim() : null,
+          established_year: yearNum,
+          updated_at: new Date().toISOString(),
+        };
 
+        setSchool(nextSchool);
         setSuccessMsg('School settings updated successfully.');
         return;
       }
 
-      // INSERT new school (only if profile has none)
+      // CREATE (only if profile not linked)
       if (profile.school_id) {
         throw new Error('Your profile is already linked to a school. You cannot create another.');
       }
 
-      // optional extra guard: user registers only one school
+      // optional guard: one school per user
       const { data: already, error: alreadyErr } = await supabase
         .from('general_information')
         .select('id')
@@ -280,40 +282,39 @@ export default function SettingsPage() {
         throw new Error('You have already registered a school. You can only register one school.');
       }
 
-      const { data: newSchool, error: insErr } = await supabase
+      const { data: created, error: insErr } = await supabase
         .from('general_information')
         .insert({
-          school_name: schoolName,
-          box_no: boxNo || null,
-          location,
-          contact_number: contactNumber,
-          email: schoolEmail,
-          website: website || null,
+          school_name: name,
+          box_no: boxNo.trim() ? boxNo.trim() : null,
+          location: loc,
+          contact_number: phone,
+          email: em,
+          website: website.trim() ? website.trim() : null,
           established_year: yearNum,
           registered_by_user_id: userId,
         })
         .select(
-          'id, school_name, school_badge, box_no, location, contact_number, email, website, established_year, registered_by_user_id, created_at, updated_at'
+          'id,school_name,school_badge,box_no,location,contact_number,email,website,established_year,registered_by_user_id,created_at,updated_at'
         )
         .single();
 
-      if (insErr || !newSchool) throw new Error(insErr?.message || 'Failed to create school.');
+      if (insErr || !created) throw new Error(insErr?.message || 'Failed to create school.');
+      const createdSchool = created as SchoolRow;
 
-      const createdSchool = newSchool as SchoolRow;
-      setSchool(createdSchool);
-
-      // Link school to profile
+      // Link to profile (own row only)
       const { data: updatedProfile, error: linkErr } = await supabase
         .from('profiles')
         .update({ school_id: createdSchool.id })
         .eq('user_id', userId)
-        .select('user_id, email, full_name, role, school_id, created_at, updated_at')
+        .select('user_id,email,full_name,role,school_id,created_at,updated_at')
         .single();
 
       if (linkErr || !updatedProfile) {
         throw new Error(linkErr?.message || 'School created, but linking to profile failed.');
       }
 
+      setSchool(createdSchool);
       setProfile(updatedProfile as ProfileRow);
       setSuccessMsg('School created and linked to your profile.');
     } catch (e: any) {
@@ -323,6 +324,9 @@ export default function SettingsPage() {
     }
   };
 
+  // ---------------------------
+  // RENDER
+  // ---------------------------
   if (authChecking) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100">
@@ -331,9 +335,27 @@ export default function SettingsPage() {
     );
   }
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col">
+        <Navbar />
+        <div className="flex flex-1">
+          <AppShell />
+          <main className="flex-1 flex items-center justify-center p-6">
+            <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-6 flex items-center gap-3">
+              <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />
+              <p className="text-sm text-slate-700">Loading settings…</p>
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  const readonly = !isAdmin;
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col">
-      {/* Remove the userEmail prop from Navbar */}
       <Navbar />
 
       <div className="flex flex-1">
@@ -344,7 +366,7 @@ export default function SettingsPage() {
             <div className="flex flex-col gap-1">
               <h1 className="text-xl md:text-2xl font-semibold text-slate-900">Settings</h1>
               <p className="text-xs text-slate-500">
-                Your profile is auto-created on first login. Then you can create one school and link it to your profile.
+                Every account must be linked to a school (General Information). Only ADMIN can create/update school details.
               </p>
               {userEmail && (
                 <p className="text-xs text-slate-400 mt-1">
@@ -354,26 +376,34 @@ export default function SettingsPage() {
             </div>
 
             {errorMsg && (
-              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-                {errorMsg}
+              <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 flex items-start gap-2">
+                <AlertTriangle className="h-5 w-5 mt-0.5 flex-shrink-0" />
+                <div>{errorMsg}</div>
               </div>
             )}
 
             {successMsg && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                {successMsg}
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 flex items-start gap-2">
+                <CheckCircle2 className="h-5 w-5 mt-0.5 flex-shrink-0" />
+                <div>{successMsg}</div>
               </div>
             )}
 
             <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               {/* Profile */}
               <div className="rounded-2xl bg-white shadow-sm border border-slate-100 p-4">
-                <h2 className="text-sm font-semibold text-slate-900 mb-2">Profile</h2>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center">
+                    <User2 className="h-4 w-4 text-slate-700" />
+                  </div>
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-900">Profile</h2>
+                    <p className="text-[11px] text-slate-500">Your account details</p>
+                  </div>
+                </div>
 
-                {loading && !profile ? (
-                  <p className="text-xs text-slate-400">Loading profile…</p>
-                ) : profile ? (
-                  <div className="space-y-2 text-xs">
+                {profile ? (
+                  <div className="space-y-3 text-xs">
                     <div>
                       <p className="text-slate-500">Auth User ID</p>
                       <p className="font-medium text-slate-900 break-all">{profile.user_id}</p>
@@ -386,34 +416,63 @@ export default function SettingsPage() {
                       <p className="text-slate-500">Full Name</p>
                       <p className="font-medium text-slate-900">{profile.full_name || '—'}</p>
                     </div>
-                    <div>
-                      <p className="text-slate-500 mb-0.5">Role</p>
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 text-[11px] font-medium">
-                        {profile.role}
-                      </span>
+                    <div className="flex items-center gap-2">
+                      <div>
+                        <p className="text-slate-500 mb-1">Role</p>
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 text-[11px] font-medium">
+                          {profile.role}
+                        </span>
+                      </div>
+
+                      {profile.role !== 'ADMIN' && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-800 text-[11px] font-medium">
+                          School is read-only
+                        </span>
+                      )}
                     </div>
                     <div>
-                      <p className="text-slate-500 mb-0.5">Linked School</p>
-                      <p className="text-slate-900 text-xs">
+                      <p className="text-slate-500 mb-1">Linked School</p>
+                      <p className="text-slate-900">
                         {school ? school.school_name : profile.school_id ? `School ID: ${profile.school_id}` : 'Not linked yet'}
                       </p>
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-400">No profile loaded.</p>
+                  <p className="text-xs text-slate-500">No profile loaded.</p>
                 )}
               </div>
 
               {/* School Settings */}
               <div className="lg:col-span-2 rounded-2xl bg-white shadow-sm border border-slate-100 p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h2 className="text-sm font-semibold text-slate-900">School Settings</h2>
-                    <p className="text-[11px] text-slate-500">
-                      {school ? 'Update your school profile details.' : 'Create your school profile.'}
-                    </p>
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center">
+                      <School className="h-4 w-4 text-slate-700" />
+                    </div>
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-900">School Settings</h2>
+                      <p className="text-[11px] text-slate-500">
+                        {school ? 'Update your school profile details.' : 'Create your school profile.'}
+                      </p>
+                    </div>
                   </div>
+
+                  {!isAdmin && (
+                    <div className="inline-flex items-center gap-2 text-[11px] text-slate-600">
+                      <Shield className="h-4 w-4 text-slate-500" />
+                      Only ADMIN can edit
+                    </div>
+                  )}
                 </div>
+
+                {!isAdmin && !school && (
+                  <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
+                    <AlertTriangle className="h-5 w-5 mt-0.5 flex-shrink-0" />
+                    <div>
+                      This account is <b>{profile?.role}</b>. Only <b>ADMIN</b> can create the school record. Please ask the ADMIN to set up the school in Settings.
+                    </div>
+                  </div>
+                )}
 
                 <form onSubmit={handleSaveSchool} className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                   <div className="space-y-1">
@@ -426,7 +485,8 @@ export default function SettingsPage() {
                       value={schoolName}
                       onChange={e => setSchoolName(e.target.value)}
                       required
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                      disabled={readonly}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white disabled:bg-slate-50 disabled:text-slate-500"
                       placeholder="e.g. Great Pearl Academy"
                     />
                   </div>
@@ -440,7 +500,8 @@ export default function SettingsPage() {
                       type="text"
                       value={boxNo}
                       onChange={e => setBoxNo(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                      disabled={readonly}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white disabled:bg-slate-50 disabled:text-slate-500"
                       placeholder="P.O. Box 123, Kasese"
                     />
                   </div>
@@ -455,7 +516,8 @@ export default function SettingsPage() {
                       value={location}
                       onChange={e => setLocation(e.target.value)}
                       required
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                      disabled={readonly}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white disabled:bg-slate-50 disabled:text-slate-500"
                       placeholder="Kasese, Uganda"
                     />
                   </div>
@@ -470,7 +532,8 @@ export default function SettingsPage() {
                       value={contactNumber}
                       onChange={e => setContactNumber(e.target.value)}
                       required
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                      disabled={readonly}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white disabled:bg-slate-50 disabled:text-slate-500"
                       placeholder="+2567XXXXXXXX"
                     />
                   </div>
@@ -485,7 +548,8 @@ export default function SettingsPage() {
                       value={schoolEmail}
                       onChange={e => setSchoolEmail(e.target.value)}
                       required
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                      disabled={readonly}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white disabled:bg-slate-50 disabled:text-slate-500"
                       placeholder="info@school.com"
                     />
                   </div>
@@ -499,7 +563,8 @@ export default function SettingsPage() {
                       type="url"
                       value={website}
                       onChange={e => setWebsite(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                      disabled={readonly}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white disabled:bg-slate-50 disabled:text-slate-500"
                       placeholder="https://www.school.com"
                     />
                   </div>
@@ -513,24 +578,30 @@ export default function SettingsPage() {
                       type="number"
                       value={establishedYear}
                       onChange={e => setEstablishedYear(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                      disabled={readonly}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white disabled:bg-slate-50 disabled:text-slate-500"
                       placeholder="2005"
+                      min={1800}
+                      max={new Date().getFullYear()}
                     />
                   </div>
 
-                  <div className="md:col-span-2 flex justify-end pt-2">
-                    <button
-                      type="submit"
-                      disabled={!canSubmit}
-                      className="inline-flex items-center px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-medium shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 focus:ring-offset-white disabled:opacity-60 disabled:cursor-not-allowed"
-                    >
-                      {saving ? 'Saving…' : school ? 'Save Changes' : 'Create School'}
-                    </button>
-                  </div>
+                  {isAdmin && (
+                    <div className="md:col-span-2 flex justify-end pt-2">
+                      <button
+                        type="submit"
+                        disabled={!canSubmit}
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-medium shadow-sm hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 focus:ring-offset-white disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        {saving ? 'Saving…' : school ? 'Save Changes' : 'Create School'}
+                      </button>
+                    </div>
+                  )}
                 </form>
 
                 <div className="mt-3 text-[11px] text-slate-400">
-                  If insert/update fails with "permission denied", your RLS policies for <b>profiles</b> and <b>general_information</b> must allow the logged-in user.
+                  If school loading fails, it’s usually an RLS issue on <b>general_information</b>. Ensure the logged-in user can read their linked school.
                 </div>
               </div>
             </section>

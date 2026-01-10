@@ -89,7 +89,7 @@ interface ExamRow {
   subject_id: number;
   created: string;
   school_id: UUID | null;
-  created_by_id?: UUID | null; // ✅ now auth uid (profiles.user_id) if your DB column is uuid
+  created_by_id?: UUID | null; // auth uid
   subject?: { name: string; code: string | null } | null;
   grade?: { grade_name: string } | null;
 }
@@ -104,7 +104,7 @@ interface TermRow {
   year: number;
   start_date: string;
   end_date: string;
-  created_by_id: UUID; // ✅ profiles.user_id (auth uid)
+  created_by_id: UUID;
   school_id: UUID | null;
   created: string;
   updated: string;
@@ -116,7 +116,7 @@ interface ExamSessionRow {
   exam_type: ExamType;
   start_date: string;
   end_date: string;
-  created_by_id: UUID | null; // ✅ profiles.user_id (auth uid)
+  created_by_id: UUID | null;
   school_id: UUID | null;
   created: string;
   updated: string;
@@ -155,6 +155,93 @@ function getCurrentAcademicYear(): string {
   return month >= 7 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
 }
 
+// ===================== Error helpers (DETAILED) =====================
+type ErrorCard = { title: string; text: string; raw: string | null };
+
+function isObj(v: any) {
+  return v !== null && typeof v === 'object';
+}
+
+function safeJson(v: any) {
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return null;
+  }
+}
+
+function formatSupabaseError(err: any, context?: string) {
+  const parts: string[] = [];
+  const header = context ? `${context}:` : 'Error:';
+  parts.push(header);
+
+  if (!err) {
+    parts.push('Unknown error (empty error object).');
+    return parts.join(' ');
+  }
+
+  // JS Error
+  if (err instanceof Error) {
+    parts.push(err.message || 'Unknown JS error.');
+
+    const c = (err as any).cause;
+    if (isObj(c)) {
+      if (c.message) parts.push(`Cause: ${c.message}`);
+      if (c.code) parts.push(`Code: ${c.code}`);
+      if (c.details) parts.push(`Details: ${c.details}`);
+      if (c.hint) parts.push(`Hint: ${c.hint}`);
+      if (typeof c.status === 'number') parts.push(`Status: ${c.status}`);
+      if (c.table) parts.push(`Table: ${c.table}`);
+      if (c.constraint) parts.push(`Constraint: ${c.constraint}`);
+    }
+    return parts.join(' ');
+  }
+
+  // Supabase/PostgREST style
+  if (isObj(err)) {
+    const e: any = err;
+
+    if (e.message) parts.push(e.message);
+    if (e.code) parts.push(`Code: ${e.code}`);
+    if (e.details) parts.push(`Details: ${e.details}`);
+    if (e.hint) parts.push(`Hint: ${e.hint}`);
+    if (typeof e.status === 'number') parts.push(`Status: ${e.status}`);
+    if (e.table) parts.push(`Table: ${e.table}`);
+    if (e.constraint) parts.push(`Constraint: ${e.constraint}`);
+
+    // Some errors are nested
+    if (e.error && isObj(e.error)) {
+      const ee: any = e.error;
+      if (ee.message) parts.push(`Inner: ${ee.message}`);
+      if (ee.code) parts.push(`InnerCode: ${ee.code}`);
+      if (ee.details) parts.push(`InnerDetails: ${ee.details}`);
+      if (ee.hint) parts.push(`InnerHint: ${ee.hint}`);
+    }
+
+    return parts.join(' ');
+  }
+
+  parts.push(String(err));
+  return parts.join(' ');
+}
+
+function toErrorCard(err: any, context?: string): ErrorCard {
+  const text = formatSupabaseError(err, context);
+
+  // prefer raw object
+  let rawObj: any = null;
+  if (isObj(err)) rawObj = err;
+  if (err instanceof Error && isObj((err as any).cause)) rawObj = (err as any).cause;
+  const raw = rawObj ? safeJson(rawObj) : null;
+
+  return {
+    title: context || 'Request failed',
+    text,
+    raw,
+  };
+}
+
+// ===================== Page =====================
 export default function AcademicsPage() {
   const router = useRouter();
 
@@ -167,7 +254,7 @@ export default function AcademicsPage() {
   // UI
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorCard, setErrorCard] = useState<ErrorCard | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'grades' | 'subjects' | 'exams' | 'curriculum' | 'terms'>(
     'overview'
@@ -231,9 +318,10 @@ export default function AcademicsPage() {
     setTimeout(() => setSuccessMsg(null), 3000);
   };
 
-  const showError = (message: string) => {
-    setErrorMsg(message);
-    setTimeout(() => setErrorMsg(null), 6000);
+  const showError = (err: any, context?: string) => {
+    const card = toErrorCard(err, context);
+    setErrorCard(card);
+    setTimeout(() => setErrorCard(null), 9000);
   };
 
   const resetForms = () => {
@@ -245,7 +333,7 @@ export default function AcademicsPage() {
     setSessionForm({ term_id: '', exam_type: 'BOT', start_date: '', end_date: '' });
   };
 
-  // ✅ Stable IDs for useEffect deps (prevents “changed size between renders” bugs)
+  // ✅ Stable IDs for useEffect deps
   const schoolId: UUID | null = profile?.school_id ?? null;
   const userId: UUID | null = authUser?.id ?? null;
 
@@ -254,7 +342,7 @@ export default function AcademicsPage() {
     const boot = async () => {
       try {
         setAuthChecking(true);
-        setErrorMsg(null);
+        setErrorCard(null);
 
         const { data: sessRes, error: sessErr } = await supabase.auth.getSession();
         if (sessErr) throw sessErr;
@@ -278,7 +366,7 @@ export default function AcademicsPage() {
         if (!prof) {
           setProfile(null);
           setSchool(null);
-          setErrorMsg('User account not found in profiles.');
+          showError({ message: 'User account not found in profiles.' }, 'Boot');
           return;
         }
 
@@ -299,14 +387,20 @@ export default function AcademicsPage() {
 
         if (!sch) {
           setSchool(null);
-          setErrorMsg('School record not found in general_information.');
+          showError(
+            {
+              message: 'School record not found in general_information (or blocked by RLS).',
+              details: `school_id=${prof.school_id}`,
+            },
+            'Boot'
+          );
           return;
         }
 
         setSchool(sch as SchoolRow);
       } catch (e: any) {
         console.error('Boot failed:', e);
-        setErrorMsg(e?.message || 'Failed to load user data.');
+        showError(e, 'Boot failed');
       } finally {
         setAuthChecking(false);
       }
@@ -321,10 +415,9 @@ export default function AcademicsPage() {
       if (!schoolId) return;
 
       setLoading(true);
-      setErrorMsg(null);
+      setErrorCard(null);
 
       try {
-        // Use Promise.allSettled so page still loads even if one query fails
         const results = await Promise.allSettled([
           supabase.from('class').select('*').eq('school_id', schoolId).order('grade_name'),
           supabase
@@ -357,16 +450,23 @@ export default function AcademicsPage() {
             .order('start_date', { ascending: false }),
         ]);
 
-        const pick = <T,>(idx: number) =>
-          results[idx].status === 'fulfilled' ? (results[idx] as PromiseFulfilledResult<any>).value : null;
+        const pick = (idx: number) => (results[idx].status === 'fulfilled' ? (results[idx] as any).value : null);
 
-        const g = pick<GradeRow[]>(0);
-        const s = pick<SubjectRow[]>(1);
-        const e = pick<ExamRow[]>(2);
-        const c = pick<CurriculumRow[]>(3);
-        const t = pick<TeacherRow[]>(4);
-        const tr = pick<TermRow[]>(5);
-        const ss = pick<ExamSessionRow[]>(6);
+        const g = pick(0);
+        const s = pick(1);
+        const e = pick(2);
+        const c = pick(3);
+        const t = pick(4);
+        const tr = pick(5);
+        const ss = pick(6);
+
+        if (g?.error) showError(g.error, 'Load Grades (class)');
+        if (s?.error) showError(s.error, 'Load Subjects (subject)');
+        if (e?.error) showError(e.error, 'Load Exams (exam)');
+        if (c?.error) showError(c.error, 'Load Curriculum (curriculum)');
+        if (t?.error) showError(t.error, 'Load Teachers (teachers)');
+        if (tr?.error) showError(tr.error, 'Load Terms (term_exam_session)');
+        if (ss?.error) showError(ss.error, 'Load Sessions (exam_session)');
 
         if (g?.data) setGrades(g.data as GradeRow[]);
         if (s?.data) setSubjects(s.data as any);
@@ -376,32 +476,49 @@ export default function AcademicsPage() {
         if (tr?.data) setTerms(tr.data as any);
         if (ss?.data) setSessions(ss.data as any);
 
-        // show warning if any failed
-        const failures = results
-          .map((r, i) => ({ r, i }))
-          .filter(x => x.r.status === 'rejected')
-          .map(x => x.i);
+        // If any promise rejected (network etc), show combined details
+        const labels = [
+          'Load Grades (class)',
+          'Load Subjects (subject + joins)',
+          'Load Exams (exam + joins)',
+          'Load Curriculum (curriculum)',
+          'Load Teachers (teachers)',
+          'Load Terms (term_exam_session)',
+          'Load Sessions (exam_session + term join)',
+        ];
 
-        if (failures.length) {
-          console.warn('Some academic requests failed:', failures);
+        const rejected = results
+          .map((r, i) => ({ r, i, label: labels[i] }))
+          .filter(x => x.r.status === 'rejected') as Array<{ r: PromiseRejectedResult; i: number; label: string }>;
+
+        if (rejected.length) {
+          const combined = rejected
+            .map(x => `${x.label} → ${formatSupabaseError(x.r.reason)}`)
+            .join('\n\n');
+
+          setErrorCard({
+            title: 'Some academic requests were rejected',
+            text: combined,
+            raw: safeJson(rejected.map(x => ({ label: x.label, reason: x.r.reason }))),
+          });
         }
       } catch (e: any) {
         console.error('load failed:', e);
-        setErrorMsg(e?.message || 'Failed to load academic data.');
+        showError(e, 'Load academic data');
       } finally {
         setLoading(false);
       }
     };
 
     load();
-  }, [schoolId]); // ✅ constant length dependency array
+  }, [schoolId]);
 
   // ===================== Create handlers =====================
   const handleCreateGrade = async (e: FormEvent) => {
     e.preventDefault();
     if (!schoolId) return;
 
-    if (!gradeForm.name.trim()) return showError('Grade name is required.');
+    if (!gradeForm.name.trim()) return showError({ message: 'Grade name is required.' }, 'Create Grade');
 
     setSaving('grade');
     try {
@@ -417,8 +534,8 @@ export default function AcademicsPage() {
       setShowGradeModal(false);
       resetForms();
       showSuccess('Grade created successfully!');
-    } catch (e: any) {
-      showError(e?.message || 'Failed to create grade.');
+    } catch (err: any) {
+      showError(err, 'Create Grade');
     } finally {
       setSaving(null);
     }
@@ -428,8 +545,8 @@ export default function AcademicsPage() {
     e.preventDefault();
     if (!schoolId) return;
 
-    if (!subjectForm.name.trim()) return showError('Subject name is required.');
-    if (!subjectForm.grade_id) return showError('Grade is required.');
+    if (!subjectForm.name.trim()) return showError({ message: 'Subject name is required.' }, 'Create Subject');
+    if (!subjectForm.grade_id) return showError({ message: 'Grade is required.' }, 'Create Subject');
 
     setSaving('subject');
     try {
@@ -453,8 +570,8 @@ export default function AcademicsPage() {
       setShowSubjectModal(false);
       resetForms();
       showSuccess('Subject created successfully!');
-    } catch (e: any) {
-      showError(e?.message || 'Failed to create subject.');
+    } catch (err: any) {
+      showError(err, 'Create Subject');
     } finally {
       setSaving(null);
     }
@@ -465,7 +582,7 @@ export default function AcademicsPage() {
     if (!schoolId) return;
 
     if (!examForm.subject_id || !examForm.grade_id || !examForm.date || !examForm.duration) {
-      return showError('Subject, grade, date and duration are required.');
+      return showError({ message: 'Subject, grade, date and duration are required.' }, 'Schedule Exam');
     }
 
     setSaving('exam');
@@ -478,7 +595,7 @@ export default function AcademicsPage() {
           date: examForm.date,
           duration_minutes: Number(examForm.duration),
           description: examForm.description.trim() || null,
-          created_by_id: userId || null, // ✅ now auth uid if your column supports it
+          created_by_id: userId || null,
           school_id: schoolId,
         })
         .select(`*, subject:subject (name, code), grade:class (grade_name)`)
@@ -490,8 +607,8 @@ export default function AcademicsPage() {
       setShowExamModal(false);
       resetForms();
       showSuccess('Exam scheduled successfully!');
-    } catch (e: any) {
-      showError(e?.message || 'Failed to schedule exam.');
+    } catch (err: any) {
+      showError(err, 'Schedule Exam');
     } finally {
       setSaving(null);
     }
@@ -501,7 +618,7 @@ export default function AcademicsPage() {
     e.preventDefault();
     if (!schoolId) return;
 
-    if (!curriculumForm.name.trim()) return showError('Curriculum name is required.');
+    if (!curriculumForm.name.trim()) return showError({ message: 'Curriculum name is required.' }, 'Create Curriculum');
 
     setSaving('curriculum');
     try {
@@ -522,21 +639,21 @@ export default function AcademicsPage() {
       setShowCurriculumModal(false);
       resetForms();
       showSuccess('Curriculum created successfully!');
-    } catch (e: any) {
-      showError(e?.message || 'Failed to create curriculum.');
+    } catch (err: any) {
+      showError(err, 'Create Curriculum');
     } finally {
       setSaving(null);
     }
   };
 
-  // ✅ Terms: created_by_id = auth uid (profiles.user_id)
   const handleCreateTerm = async (e: FormEvent) => {
     e.preventDefault();
     if (!schoolId) return;
 
-    if (!termForm.start_date || !termForm.end_date) return showError('Start date and end date are required.');
-    if (new Date(termForm.start_date) > new Date(termForm.end_date)) return showError('Start date cannot be after end date.');
-    if (!userId) return showError('Not authenticated.');
+    if (!termForm.start_date || !termForm.end_date) return showError({ message: 'Start date and end date are required.' }, 'Create Term');
+    if (new Date(termForm.start_date) > new Date(termForm.end_date))
+      return showError({ message: 'Start date cannot be after end date.' }, 'Create Term');
+    if (!userId) return showError({ message: 'Not authenticated.' }, 'Create Term');
 
     setSaving('term');
     try {
@@ -547,7 +664,7 @@ export default function AcademicsPage() {
           year: termForm.year,
           start_date: termForm.start_date,
           end_date: termForm.end_date,
-          created_by_id: userId, // ✅ auth uid
+          created_by_id: userId,
           school_id: schoolId,
         })
         .select()
@@ -559,23 +676,23 @@ export default function AcademicsPage() {
       setShowTermModal(false);
       resetForms();
       showSuccess('Term created successfully!');
-    } catch (e: any) {
-      showError(e?.message || 'Failed to create term.');
+    } catch (err: any) {
+      showError(err, 'Create Term');
     } finally {
       setSaving(null);
     }
   };
 
-  // ✅ Sessions: created_by_id = auth uid (profiles.user_id)
   const handleCreateSession = async (e: FormEvent) => {
     e.preventDefault();
     if (!schoolId) return;
 
     if (!sessionForm.term_id || !sessionForm.start_date || !sessionForm.end_date) {
-      return showError('Term, start date and end date are required.');
+      return showError({ message: 'Term, start date and end date are required.' }, 'Create Exam Session');
     }
-    if (new Date(sessionForm.start_date) > new Date(sessionForm.end_date)) return showError('Start date cannot be after end date.');
-    if (!userId) return showError('Not authenticated.');
+    if (new Date(sessionForm.start_date) > new Date(sessionForm.end_date))
+      return showError({ message: 'Start date cannot be after end date.' }, 'Create Exam Session');
+    if (!userId) return showError({ message: 'Not authenticated.' }, 'Create Exam Session');
 
     setSaving('session');
     try {
@@ -586,7 +703,7 @@ export default function AcademicsPage() {
           exam_type: sessionForm.exam_type,
           start_date: sessionForm.start_date,
           end_date: sessionForm.end_date,
-          created_by_id: userId, // ✅ auth uid
+          created_by_id: userId,
           school_id: schoolId,
         })
         .select(`*, term:term_exam_session (*)`)
@@ -598,8 +715,8 @@ export default function AcademicsPage() {
       setShowSessionModal(false);
       resetForms();
       showSuccess('Exam session created successfully!');
-    } catch (e: any) {
-      showError(e?.message || 'Failed to create exam session.');
+    } catch (err: any) {
+      showError(err, 'Create Exam Session');
     } finally {
       setSaving(null);
     }
@@ -659,9 +776,7 @@ export default function AcademicsPage() {
                 <AlertCircle className="w-8 h-8 text-yellow-600" />
               </div>
               <h3 className="text-xl font-semibold text-gray-900 mb-3">School Configuration Required</h3>
-              <p className="text-gray-600 mb-6">
-                {!profile ? 'User account not found in profiles.' : 'Your account is not linked to a school.'}
-              </p>
+              <p className="text-gray-600 mb-6">{!profile ? 'User account not found in profiles.' : 'Your account is not linked to a school.'}</p>
               <button
                 onClick={() => router.push('/settings')}
                 className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
@@ -708,9 +823,7 @@ export default function AcademicsPage() {
               key={key}
               onClick={() => setActiveTab(key as any)}
               className={`flex items-center gap-2 px-5 py-3 rounded-t-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === key
-                  ? 'bg-white border-t border-x border-gray-200 text-blue-600'
-                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                activeTab === key ? 'bg-white border-t border-x border-gray-200 text-blue-600' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
               }`}
             >
               <Icon className="w-4 h-4" />
@@ -724,15 +837,30 @@ export default function AcademicsPage() {
 
   const renderAlerts = () => (
     <>
-      {errorMsg && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
-          <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
-          <p className="text-sm text-red-600 flex-1">{errorMsg}</p>
-          <button onClick={() => setErrorMsg(null)} className="text-red-500 hover:text-red-700">
-            <X className="w-4 h-4" />
-          </button>
+      {errorCard && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <div className="text-sm font-semibold text-red-700">{errorCard.title}</div>
+              <p className="text-sm text-red-700 mt-1 whitespace-pre-wrap">{errorCard.text}</p>
+
+              {errorCard.raw && (
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs font-medium text-red-700/80">Technical details</summary>
+                  <pre className="mt-2 text-[11px] leading-relaxed bg-white/60 border border-red-200 rounded-lg p-3 overflow-auto">
+{errorCard.raw}
+                  </pre>
+                </details>
+              )}
+            </div>
+            <button onClick={() => setErrorCard(null)} className="text-red-500 hover:text-red-700">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
+
       {successMsg && (
         <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex items-start gap-3">
           <CheckCircle2 className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
@@ -757,10 +885,7 @@ export default function AcademicsPage() {
           className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         />
       </div>
-      <button
-        type="button"
-        className="flex items-center gap-2 px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
-      >
+      <button type="button" className="flex items-center gap-2 px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
         <Filter className="w-4 h-4" />
         Filter
       </button>
@@ -940,22 +1065,16 @@ export default function AcademicsPage() {
                         </div>
                         <div>
                           <div className="font-medium text-gray-900">{subject.name}</div>
-                          {subject.description && (
-                            <div className="text-xs text-gray-500 truncate max-w-xs">{subject.description}</div>
-                          )}
+                          {subject.description && <div className="text-xs text-gray-500 truncate max-w-xs">{subject.description}</div>}
                         </div>
                       </div>
                     </td>
                     <td className="py-4 px-6">
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('gray')}`}>
-                        {subject.code || '—'}
-                      </span>
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('gray')}`}>{subject.code || '—'}</span>
                     </td>
                     <td className="py-4 px-6">
                       {subject.grade ? (
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('blue')}`}>
-                          {subject.grade.grade_name}
-                        </span>
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('blue')}`}>{subject.grade.grade_name}</span>
                       ) : (
                         <span className="text-sm text-gray-500">—</span>
                       )}
@@ -1032,12 +1151,8 @@ export default function AcademicsPage() {
                     <div>
                       <h4 className="font-semibold text-gray-900 text-lg">{exam.subject?.name}</h4>
                       <div className="flex items-center gap-3 mt-1">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('blue')}`}>
-                          {exam.grade?.grade_name || '—'}
-                        </span>
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('purple')}`}>
-                          {exam.duration_minutes} min
-                        </span>
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('blue')}`}>{exam.grade?.grade_name || '—'}</span>
+                        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('purple')}`}>{exam.duration_minutes} min</span>
                         <span className="text-sm text-gray-500">{exam.subject?.code || 'No code'}</span>
                       </div>
                     </div>
@@ -1047,11 +1162,13 @@ export default function AcademicsPage() {
                     <div className="text-sm text-gray-500">Scheduled on {formatDate(exam.created)}</div>
                   </div>
                 </div>
+
                 {exam.description && (
                   <div className="mt-4 p-4 bg-gray-50 rounded-lg">
                     <p className="text-sm text-gray-600">{exam.description}</p>
                   </div>
                 )}
+
                 <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
                   <div className="text-sm text-gray-500">Created by: {exam.created_by_id || 'System'}</div>
                   <div className="flex items-center gap-2">
@@ -1107,9 +1224,7 @@ export default function AcademicsPage() {
                     <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
                       <Layers className="w-6 h-6 text-orange-600" />
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('orange')}`}>
-                      {subjectCount} subjects
-                    </span>
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('orange')}`}>{subjectCount} subjects</span>
                   </div>
 
                   <h4 className="font-semibold text-gray-900 text-lg mb-2">{c.name}</h4>
@@ -1203,9 +1318,7 @@ export default function AcademicsPage() {
                           <span className="text-sm text-gray-500">
                             {formatDate(term.start_date)} → {formatDate(term.end_date)}
                           </span>
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('blue')}`}>
-                            {termSessions.length} sessions
-                          </span>
+                          <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('blue')}`}>{termSessions.length} sessions</span>
                         </div>
                       </div>
                     </div>
@@ -1222,9 +1335,7 @@ export default function AcademicsPage() {
                   </div>
 
                   {termSessions.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
-                      No exam sessions added for this term
-                    </div>
+                    <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">No exam sessions added for this term</div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       {termSessions.map(session => (
@@ -1417,9 +1528,7 @@ const ActionButton = ({ onClick, label, icon: Icon, color, compact = false }: Ac
     <button
       type="button"
       onClick={onClick}
-      className={`${colors} text-white rounded-lg transition-colors flex items-center justify-center gap-2 ${
-        compact ? 'px-4 py-2.5 text-sm' : 'px-5 py-3 font-medium'
-      }`}
+      className={`${colors} text-white rounded-lg transition-colors flex items-center justify-center gap-2 ${compact ? 'px-4 py-2.5 text-sm' : 'px-5 py-3 font-medium'}`}
     >
       <Icon className="w-4 h-4" />
       {label}
@@ -1466,19 +1575,10 @@ const GradeModal = ({ isOpen, onClose, onSubmit, form, onChange, loading }: Grad
             />
           </div>
           <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-              disabled={loading}
-            >
+            <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled={loading}>
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-4 py-2.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50"
-            >
+            <button type="submit" disabled={loading} className="px-4 py-2.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50">
               {loading ? 'Creating...' : 'Create Grade'}
             </button>
           </div>
@@ -1489,14 +1589,7 @@ const GradeModal = ({ isOpen, onClose, onSubmit, form, onChange, loading }: Grad
 };
 
 interface SubjectModalProps extends ModalProps {
-  form: {
-    name: string;
-    code: string;
-    description: string;
-    grade_id: string;
-    curriculum_id: string;
-    teacher_id: string;
-  };
+  form: { name: string; code: string; description: string; grade_id: string; curriculum_id: string; teacher_id: string };
   onChange: (form: any) => void;
   grades: GradeRow[];
   curricula: CurriculumRow[];
@@ -1608,19 +1701,10 @@ const SubjectModal = ({ isOpen, onClose, onSubmit, form, onChange, loading, grad
           </div>
 
           <div className="flex justify-end gap-3 mt-8">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-              disabled={loading}
-            >
+            <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled={loading}>
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-4 py-2.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-            >
+            <button type="submit" disabled={loading} className="px-4 py-2.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
               {loading ? 'Creating...' : 'Create Subject'}
             </button>
           </div>
@@ -1631,13 +1715,7 @@ const SubjectModal = ({ isOpen, onClose, onSubmit, form, onChange, loading, grad
 };
 
 interface ExamModalProps extends ModalProps {
-  form: {
-    subject_id: string;
-    grade_id: string;
-    date: string;
-    duration: string;
-    description: string;
-  };
+  form: { subject_id: string; grade_id: string; date: string; duration: string; description: string };
   onChange: (form: any) => void;
   subjects: SubjectRow[];
   grades: GradeRow[];
@@ -1733,19 +1811,10 @@ const ExamModal = ({ isOpen, onClose, onSubmit, form, onChange, loading, subject
           </div>
 
           <div className="flex justify-end gap-3 mt-8">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-              disabled={loading}
-            >
+            <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled={loading}>
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-4 py-2.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
-            >
+            <button type="submit" disabled={loading} className="px-4 py-2.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50">
               {loading ? 'Scheduling...' : 'Schedule Exam'}
             </button>
           </div>
@@ -1815,19 +1884,10 @@ const CurriculumModal = ({ isOpen, onClose, onSubmit, form, onChange, loading }:
           </div>
 
           <div className="flex justify-end gap-3 mt-8">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-              disabled={loading}
-            >
+            <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled={loading}>
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-4 py-2.5 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50"
-            >
+            <button type="submit" disabled={loading} className="px-4 py-2.5 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">
               {loading ? 'Creating...' : 'Create Curriculum'}
             </button>
           </div>
@@ -1907,19 +1967,10 @@ const TermModal = ({ isOpen, onClose, onSubmit, form, onChange, loading }: TermM
           </div>
 
           <div className="flex justify-end gap-3 mt-8">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-              disabled={loading}
-            >
+            <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled={loading}>
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-4 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
+            <button type="submit" disabled={loading} className="px-4 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
               {loading ? 'Creating...' : 'Create Term'}
             </button>
           </div>
@@ -2011,19 +2062,10 @@ const SessionModal = ({ isOpen, onClose, onSubmit, form, onChange, loading, term
           </div>
 
           <div className="flex justify-end gap-3 mt-8">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-              disabled={loading}
-            >
+            <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled={loading}>
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="px-4 py-2.5 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50"
-            >
+            <button type="submit" disabled={loading} className="px-4 py-2.5 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">
               {loading ? 'Creating...' : 'Create Session'}
             </button>
           </div>

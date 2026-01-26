@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, FormEvent } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
@@ -13,43 +13,47 @@ import {
   FileText,
   Search,
   Plus,
-  Filter,
-  MoreVertical,
   Edit,
   Trash2,
-  Eye,
   GraduationCap,
   ShieldCheck,
   AlertCircle,
   CheckCircle2,
   X,
+  Loader2,
+  ChevronRight,
+  Home,
+  Book,
+  ClipboardList,
+  CalendarDays,
 } from 'lucide-react';
 
 type UUID = string;
 
-// ===== Types (match your DB) =====
-interface ProfileRow {
+// ===== Types =====
+interface Profile {
   user_id: UUID;
   email: string | null;
   full_name: string | null;
   role: 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
   school_id: UUID | null;
-  created_at: string;
-  updated_at: string;
 }
 
-interface SchoolRow {
+interface School {
   id: UUID;
   school_name: string;
 }
 
-interface GradeRow {
+interface Grade {
   id: number;
   grade_name: string;
   school_id: UUID | null;
+  created: string;
+  updated: string;
+  class_teacher_id: string | null;
 }
 
-interface CurriculumRow {
+interface Curriculum {
   id: number;
   name: string;
   objectives: string;
@@ -57,7 +61,7 @@ interface CurriculumRow {
   school_id: UUID | null;
 }
 
-interface TeacherRow {
+interface Teacher {
   registration_id: string;
   first_name: string;
   last_name: string;
@@ -66,21 +70,21 @@ interface TeacherRow {
   school_id: UUID;
 }
 
-interface SubjectRow {
+interface Subject {
   id: number;
   name: string;
   code: string | null;
+  description: string | null;
   grade_id: number | null;
   curriculum_id: number | null;
-  description?: string | null;
-  teacher_id?: string | null; // teachers.registration_id
+  teacher_id: string | null;
   school_id: UUID | null;
   grade?: { grade_name: string } | null;
   teacher?: { first_name: string; last_name: string } | null;
   curriculum?: { name: string } | null;
 }
 
-interface ExamRow {
+interface Exam {
   id: number;
   date: string;
   duration_minutes: number;
@@ -89,16 +93,15 @@ interface ExamRow {
   subject_id: number;
   created: string;
   school_id: UUID | null;
-  created_by_id?: UUID | null; // auth uid
+  created_by_id?: UUID | null;
   subject?: { name: string; code: string | null } | null;
   grade?: { grade_name: string } | null;
 }
 
-// Terms & Sessions
 type TermName = 'TERM_1' | 'TERM_2' | 'TERM_3';
 type ExamType = 'BOT' | 'MOT' | 'EOT';
 
-interface TermRow {
+interface Term {
   id: number;
   term_name: TermName;
   year: number;
@@ -110,7 +113,7 @@ interface TermRow {
   updated: string;
 }
 
-interface ExamSessionRow {
+interface ExamSession {
   id: number;
   term_id: number;
   exam_type: ExamType;
@@ -120,669 +123,959 @@ interface ExamSessionRow {
   school_id: UUID | null;
   created: string;
   updated: string;
-  term?: TermRow | null;
+  term?: Term | null;
 }
 
-// ===== UI helpers =====
-function chipClass(color: 'blue' | 'green' | 'purple' | 'orange' | 'red' | 'gray' | 'yellow') {
-  const map: Record<string, string> = {
-    blue: 'bg-blue-50 text-blue-700 border-blue-200',
-    green: 'bg-green-50 text-green-700 border-green-200',
-    purple: 'bg-purple-50 text-purple-700 border-purple-200',
-    orange: 'bg-orange-50 text-orange-700 border-orange-200',
-    red: 'bg-red-50 text-red-700 border-red-200',
-    gray: 'bg-gray-50 text-gray-700 border-gray-200',
-    yellow: 'bg-yellow-50 text-yellow-700 border-yellow-200',
-  };
-  return map[color];
+type ModalMode = 'create' | 'edit';
+type EntityType = 'grade' | 'subject' | 'exam' | 'curriculum' | 'term' | 'session';
+
+interface ModalState {
+  type: EntityType;
+  mode: ModalMode;
+  isOpen: boolean;
+  data: Record<string, any>;
 }
 
-function formatDate(d?: string | null) {
-  if (!d) return '—';
+// ===== Utility Functions =====
+function clsx(...classes: (string | boolean | undefined | null)[]) {
+  return classes.filter(Boolean).join(' ');
+}
+
+function formatDate(dateString?: string | null): string {
+  if (!dateString) return '—';
   try {
-    const dt = new Date(d);
-    if (Number.isNaN(dt.getTime())) return d;
-    return dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Invalid date';
+    return date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
   } catch {
-    return d;
+    return dateString;
   }
 }
 
 function getCurrentAcademicYear(): string {
   const now = new Date();
   const year = now.getFullYear();
-  const month = now.getMonth(); // 0-based
+  const month = now.getMonth();
   return month >= 7 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
 }
 
-// ===================== Error helpers (DETAILED) =====================
-type ErrorCard = { title: string; text: string; raw: string | null };
-
-function isObj(v: any) {
-  return v !== null && typeof v === 'object';
-}
-
-function safeJson(v: any) {
-  try {
-    return JSON.stringify(v, null, 2);
-  } catch {
-    return null;
-  }
-}
-
-function formatSupabaseError(err: any, context?: string) {
-  const parts: string[] = [];
-  const header = context ? `${context}:` : 'Error:';
-  parts.push(header);
-
-  if (!err) {
-    parts.push('Unknown error (empty error object).');
-    return parts.join(' ');
-  }
-
-  // JS Error
-  if (err instanceof Error) {
-    parts.push(err.message || 'Unknown JS error.');
-
-    const c = (err as any).cause;
-    if (isObj(c)) {
-      if (c.message) parts.push(`Cause: ${c.message}`);
-      if (c.code) parts.push(`Code: ${c.code}`);
-      if (c.details) parts.push(`Details: ${c.details}`);
-      if (c.hint) parts.push(`Hint: ${c.hint}`);
-      if (typeof c.status === 'number') parts.push(`Status: ${c.status}`);
-      if (c.table) parts.push(`Table: ${c.table}`);
-      if (c.constraint) parts.push(`Constraint: ${c.constraint}`);
-    }
-    return parts.join(' ');
-  }
-
-  // Supabase/PostgREST style
-  if (isObj(err)) {
-    const e: any = err;
-
-    if (e.message) parts.push(e.message);
-    if (e.code) parts.push(`Code: ${e.code}`);
-    if (e.details) parts.push(`Details: ${e.details}`);
-    if (e.hint) parts.push(`Hint: ${e.hint}`);
-    if (typeof e.status === 'number') parts.push(`Status: ${e.status}`);
-    if (e.table) parts.push(`Table: ${e.table}`);
-    if (e.constraint) parts.push(`Constraint: ${e.constraint}`);
-
-    // Some errors are nested
-    if (e.error && isObj(e.error)) {
-      const ee: any = e.error;
-      if (ee.message) parts.push(`Inner: ${ee.message}`);
-      if (ee.code) parts.push(`InnerCode: ${ee.code}`);
-      if (ee.details) parts.push(`InnerDetails: ${ee.details}`);
-      if (ee.hint) parts.push(`InnerHint: ${ee.hint}`);
-    }
-
-    return parts.join(' ');
-  }
-
-  parts.push(String(err));
-  return parts.join(' ');
-}
-
-function toErrorCard(err: any, context?: string): ErrorCard {
-  const text = formatSupabaseError(err, context);
-
-  // prefer raw object
-  let rawObj: any = null;
-  if (isObj(err)) rawObj = err;
-  if (err instanceof Error && isObj((err as any).cause)) rawObj = (err as any).cause;
-  const raw = rawObj ? safeJson(rawObj) : null;
-
-  return {
-    title: context || 'Request failed',
-    text,
-    raw,
+// ===== Modal Component =====
+function AcademicModal({ state, onClose, onSubmit, saving, updateModalData, options }: {
+  state: ModalState;
+  onClose: () => void;
+  onSubmit: (e: React.FormEvent) => Promise<void>;
+  saving: boolean;
+  updateModalData: (field: string, value: any) => void;
+  options: {
+    grades: Grade[];
+    teachers: Teacher[];
+    subjects: Subject[];
+    curricula: Curriculum[];
+    terms: Term[];
   };
+}) {
+  if (!state.isOpen) return null;
+
+  const { type, mode, data } = state;
+  const title = `${mode === 'create' ? 'Create' : 'Edit'} ${type.charAt(0).toUpperCase() + type.slice(1)}`;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await onSubmit(e);
+  };
+
+  // Debug: Check teachers data
+  console.log('Modal Teachers:', {
+    count: options.teachers?.length,
+    teachers: options.teachers?.map(t => ({
+      registration_id: t.registration_id,
+      name: `${t.first_name} ${t.last_name}`
+    }))
+  });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-2xl rounded-xl bg-white shadow-xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center">
+              {type === 'grade' && <Users className="h-5 w-5" />}
+              {type === 'subject' && <BookOpen className="h-5 w-5" />}
+              {type === 'exam' && <Calendar className="h-5 w-5" />}
+              {type === 'curriculum' && <Layers className="h-5 w-5" />}
+              {type === 'term' && <ShieldCheck className="h-5 w-5" />}
+              {type === 'session' && <FileText className="h-5 w-5" />}
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+              <p className="text-sm text-gray-600">
+                {mode === 'create' ? 'Add new entry' : 'Update existing entry'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-2 hover:bg-gray-100 transition-colors"
+            disabled={saving}
+            type="button"
+          >
+            <X className="h-5 w-5 text-gray-600" />
+          </button>
+        </div>
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="p-6">
+          <div className="space-y-4">
+            {/* Grade Form */}
+            {type === 'grade' && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Grade Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={data.name || ''}
+                    onChange={(e) => updateModalData('name', e.target.value)}
+                    required
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors"
+                    placeholder="P1, S2, Grade 10..."
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Class Teacher
+                  </label>
+                  <select
+                    value={data.class_teacher_id || ''}
+                    onChange={(e) => updateModalData('class_teacher_id', e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors"
+                    disabled={saving}
+                  >
+                    <option value="">Not assigned</option>
+                    {options.teachers && options.teachers.length > 0 ? (
+                      options.teachers.map((teacher) => (
+                        <option key={teacher.registration_id} value={teacher.registration_id}>
+                          {teacher.first_name} {teacher.last_name}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="" disabled>No teachers found</option>
+                    )}
+                  </select>
+                </div>
+              </>
+            )}
+
+            {/* Subject Form */}
+            {type === 'subject' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Subject Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={data.name || ''}
+                    onChange={(e) => updateModalData('name', e.target.value)}
+                    required
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-green-500 focus:ring-2 focus:ring-green-500/20 transition-colors"
+                    placeholder="Mathematics, English, Science..."
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Subject Code
+                  </label>
+                  <input
+                    type="text"
+                    value={data.code || ''}
+                    onChange={(e) => updateModalData('code', e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-green-500 focus:ring-2 focus:ring-green-500/20 transition-colors"
+                    placeholder="MATH-P5, ENG-S1..."
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Grade / Class
+                  </label>
+                  <select
+                    value={data.grade_id || ''}
+                    onChange={(e) => updateModalData('grade_id', e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-green-500 focus:ring-2 focus:ring-green-500/20 transition-colors"
+                    disabled={saving}
+                  >
+                    <option value="">Not assigned</option>
+                    {options.grades?.map((grade) => (
+                      <option key={grade.id} value={grade.id}>
+                        {grade.grade_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Curriculum *
+                  </label>
+                  <select
+                    value={data.curriculum_id || ''}
+                    onChange={(e) => updateModalData('curriculum_id', e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-green-500 focus:ring-2 focus:ring-green-500/20 transition-colors"
+                    disabled={saving}
+                    required
+                  >
+                    <option value="">Select curriculum</option>
+                    {options.curricula?.map((curriculum) => (
+                      <option key={curriculum.id} value={curriculum.id}>
+                        {curriculum.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Teacher
+                  </label>
+                  <select
+                    value={data.teacher_id || ''}
+                    onChange={(e) => updateModalData('teacher_id', e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-green-500 focus:ring-2 focus:ring-green-500/20 transition-colors"
+                    disabled={saving}
+                  >
+                    <option value="">Not assigned</option>
+                    {options.teachers && options.teachers.length > 0 ? (
+                      options.teachers.map((teacher) => (
+                        <option key={teacher.registration_id} value={teacher.registration_id}>
+                          {teacher.first_name} {teacher.last_name}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="" disabled>No teachers found</option>
+                    )}
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Description *
+                  </label>
+                  <textarea
+                    value={data.description || ''}
+                    onChange={(e) => updateModalData('description', e.target.value)}
+                    rows={3}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-green-500 focus:ring-2 focus:ring-green-500/20 transition-colors"
+                    placeholder="Subject description..."
+                    disabled={saving}
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Exam Form */}
+            {type === 'exam' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Subject *
+                  </label>
+                  <select
+                    value={data.subject_id || ''}
+                    onChange={(e) => updateModalData('subject_id', e.target.value)}
+                    required
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-colors"
+                    disabled={saving}
+                  >
+                    <option value="">Select subject</option>
+                    {options.subjects?.map((subject) => (
+                      <option key={subject.id} value={subject.id}>
+                        {subject.name} {subject.grade?.grade_name ? `(${subject.grade.grade_name})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Grade
+                  </label>
+                  <select
+                    value={data.grade_id || ''}
+                    onChange={(e) => updateModalData('grade_id', e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-colors"
+                    disabled={saving}
+                  >
+                    <option value="">Not assigned</option>
+                    {options.grades?.map((grade) => (
+                      <option key={grade.id} value={grade.id}>
+                        {grade.grade_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Exam Date *
+                  </label>
+                  <input
+                    type="date"
+                    value={data.date || ''}
+                    onChange={(e) => updateModalData('date', e.target.value)}
+                    required
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-colors"
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Duration (minutes) *
+                  </label>
+                  <input
+                    type="number"
+                    value={data.duration || ''}
+                    onChange={(e) => updateModalData('duration', e.target.value)}
+                    required
+                    min={10}
+                    step={5}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-colors"
+                    placeholder="60"
+                    disabled={saving}
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Description
+                  </label>
+                  <textarea
+                    value={data.description || ''}
+                    onChange={(e) => updateModalData('description', e.target.value)}
+                    rows={3}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-colors"
+                    placeholder="Exam instructions, topics covered..."
+                    disabled={saving}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Curriculum Form */}
+            {type === 'curriculum' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Curriculum Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={data.name || ''}
+                    onChange={(e) => updateModalData('name', e.target.value)}
+                    required
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition-colors"
+                    placeholder="Lower Primary, UNEB, Cambridge..."
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Objectives *
+                  </label>
+                  <textarea
+                    value={data.objectives || ''}
+                    onChange={(e) => updateModalData('objectives', e.target.value)}
+                    rows={4}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition-colors"
+                    placeholder="Curriculum objectives and goals..."
+                    disabled={saving}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Learning Outcomes *
+                  </label>
+                  <textarea
+                    value={data.learning_outcomes || ''}
+                    onChange={(e) => updateModalData('learning_outcomes', e.target.value)}
+                    rows={4}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition-colors"
+                    placeholder="Expected learning outcomes..."
+                    disabled={saving}
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Term Form */}
+            {type === 'term' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Term *
+                  </label>
+                  <select
+                    value={data.term_name || 'TERM_1'}
+                    onChange={(e) => updateModalData('term_name', e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors"
+                    disabled={saving}
+                  >
+                    <option value="TERM_1">TERM 1</option>
+                    <option value="TERM_2">TERM 2</option>
+                    <option value="TERM_3">TERM 3</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Year *
+                  </label>
+                  <input
+                    type="number"
+                    value={data.year || new Date().getFullYear()}
+                    onChange={(e) => updateModalData('year', Number(e.target.value))}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors"
+                    disabled={saving}
+                    min={2000}
+                    max={2100}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Start Date *
+                  </label>
+                  <input
+                    type="date"
+                    value={data.start_date || ''}
+                    onChange={(e) => updateModalData('start_date', e.target.value)}
+                    required
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors"
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    End Date *
+                  </label>
+                  <input
+                    type="date"
+                    value={data.end_date || ''}
+                    onChange={(e) => updateModalData('end_date', e.target.value)}
+                    required
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors"
+                    disabled={saving}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Session Form */}
+            {type === 'session' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Term *
+                  </label>
+                  <select
+                    value={data.term_id || ''}
+                    onChange={(e) => updateModalData('term_id', e.target.value)}
+                    required
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition-colors"
+                    disabled={saving}
+                  >
+                    <option value="">Select term</option>
+                    {options.terms?.map((term) => (
+                      <option key={term.id} value={term.id}>
+                        {term.term_name.replace('_', ' ')} - {term.year} ({formatDate(term.start_date)} → {formatDate(term.end_date)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Exam Type *
+                    </label>
+                    <select
+                      value={data.exam_type || 'BOT'}
+                      onChange={(e) => updateModalData('exam_type', e.target.value)}
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition-colors"
+                      disabled={saving}
+                    >
+                      <option value="BOT">BOT (Beginning of Term)</option>
+                      <option value="MOT">MOT (Middle of Term)</option>
+                      <option value="EOT">EOT (End of Term)</option>
+                    </select>
+                  </div>
+                  <div></div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Start Date *
+                    </label>
+                    <input
+                      type="date"
+                      value={data.start_date || ''}
+                      onChange={(e) => updateModalData('start_date', e.target.value)}
+                      required
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition-colors"
+                      disabled={saving}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      End Date *
+                    </label>
+                    <input
+                      type="date"
+                      value={data.end_date || ''}
+                      onChange={(e) => updateModalData('end_date', e.target.value)}
+                      required
+                      className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition-colors"
+                      disabled={saving}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Form Actions */}
+          <div className="mt-8 flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-gray-300 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {saving ? 'Saving...' : mode === 'create' ? 'Create' : 'Update'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }
 
-// ===================== Page =====================
+// ===== Main Component =====
 export default function AcademicsPage() {
   const router = useRouter();
 
-  // Auth + Profile
+  // Authentication & School State
   const [authChecking, setAuthChecking] = useState(true);
-  const [authUser, setAuthUser] = useState<any>(null);
-  const [profile, setProfile] = useState<ProfileRow | null>(null);
-  const [school, setSchool] = useState<SchoolRow | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [school, setSchool] = useState<School | null>(null);
 
-  // UI
+  // Loading & UI State
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<string | null>(null);
-  const [errorCard, setErrorCard] = useState<ErrorCard | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'grades' | 'subjects' | 'exams' | 'curriculum' | 'terms'>(
-    'overview'
-  );
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<'overview' | 'grades' | 'subjects' | 'exams' | 'curriculum' | 'terms'>('overview');
   const [search, setSearch] = useState('');
 
-  // Data
-  const [grades, setGrades] = useState<GradeRow[]>([]);
-  const [subjects, setSubjects] = useState<SubjectRow[]>([]);
-  const [exams, setExams] = useState<ExamRow[]>([]);
-  const [curricula, setCurricula] = useState<CurriculumRow[]>([]);
-  const [teachers, setTeachers] = useState<TeacherRow[]>([]);
-  const [terms, setTerms] = useState<TermRow[]>([]);
-  const [sessions, setSessions] = useState<ExamSessionRow[]>([]);
+  // Data State
+  const [grades, setGrades] = useState<Grade[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [exams, setExams] = useState<Exam[]>([]);
+  const [curricula, setCurricula] = useState<Curriculum[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [terms, setTerms] = useState<Term[]>([]);
+  const [sessions, setSessions] = useState<ExamSession[]>([]);
 
-  // Modals
-  const [showGradeModal, setShowGradeModal] = useState(false);
-  const [showSubjectModal, setShowSubjectModal] = useState(false);
-  const [showExamModal, setShowExamModal] = useState(false);
-  const [showCurriculumModal, setShowCurriculumModal] = useState(false);
-  const [showTermModal, setShowTermModal] = useState(false);
-  const [showSessionModal, setShowSessionModal] = useState(false);
-
-  // Forms
-  const [gradeForm, setGradeForm] = useState({ name: '' });
-  const [subjectForm, setSubjectForm] = useState({
-    name: '',
-    code: '',
-    description: '',
-    grade_id: '',
-    curriculum_id: '',
-    teacher_id: '',
-  });
-  const [examForm, setExamForm] = useState({
-    subject_id: '',
-    grade_id: '',
-    date: '',
-    duration: '',
-    description: '',
-  });
-  const [curriculumForm, setCurriculumForm] = useState({
-    name: '',
-    objectives: '',
-    learning_outcomes: '',
-  });
-  const [termForm, setTermForm] = useState({
-    term_name: 'TERM_1' as TermName,
-    year: new Date().getFullYear(),
-    start_date: '',
-    end_date: '',
-  });
-  const [sessionForm, setSessionForm] = useState({
-    term_id: '',
-    exam_type: 'BOT' as ExamType,
-    start_date: '',
-    end_date: '',
+  // Modal State - SINGLE SOURCE OF TRUTH
+  const [modalState, setModalState] = useState<ModalState>({
+    type: 'grade',
+    mode: 'create',
+    isOpen: false,
+    data: {},
   });
 
-  const showSuccess = (message: string) => {
-    setSuccessMsg(message);
-    setTimeout(() => setSuccessMsg(null), 3000);
-  };
+  // Message Handler
+  const showMessage = useCallback((type: 'success' | 'error', text: string) => {
+    setMessage({ type, text });
+    setTimeout(() => setMessage(null), 3000);
+  }, []);
 
-  const showError = (err: any, context?: string) => {
-    const card = toErrorCard(err, context);
-    setErrorCard(card);
-    setTimeout(() => setErrorCard(null), 9000);
-  };
+  // Filter Data
+  const filteredGrades = useMemo(() => {
+    const query = search.toLowerCase();
+    return grades.filter(grade => 
+      grade.grade_name.toLowerCase().includes(query) ||
+      grade.id.toString().includes(query)
+    );
+  }, [grades, search]);
 
-  const resetForms = () => {
-    setGradeForm({ name: '' });
-    setSubjectForm({ name: '', code: '', description: '', grade_id: '', curriculum_id: '', teacher_id: '' });
-    setExamForm({ subject_id: '', grade_id: '', date: '', duration: '', description: '' });
-    setCurriculumForm({ name: '', objectives: '', learning_outcomes: '' });
-    setTermForm({ term_name: 'TERM_1', year: new Date().getFullYear(), start_date: '', end_date: '' });
-    setSessionForm({ term_id: '', exam_type: 'BOT', start_date: '', end_date: '' });
-  };
+  const filteredSubjects = useMemo(() => {
+    const query = search.toLowerCase();
+    return subjects.filter(subject =>
+      subject.name.toLowerCase().includes(query) ||
+      (subject.code || '').toLowerCase().includes(query) ||
+      (subject.grade?.grade_name || '').toLowerCase().includes(query)
+    );
+  }, [subjects, search]);
 
-  // ✅ Stable IDs for useEffect deps
-  const schoolId: UUID | null = profile?.school_id ?? null;
-  const userId: UUID | null = authUser?.id ?? null;
+  const filteredExams = useMemo(() => {
+    const query = search.toLowerCase();
+    return exams.filter(exam =>
+      (exam.subject?.name || '').toLowerCase().includes(query) ||
+      (exam.grade?.grade_name || '').toLowerCase().includes(query) ||
+      (exam.description || '').toLowerCase().includes(query)
+    );
+  }, [exams, search]);
 
-  // ===================== AUTH + PROFILE =====================
+  const filteredTerms = useMemo(() => {
+    const query = search.toLowerCase();
+    return terms.filter(term =>
+      term.term_name.toLowerCase().includes(query) ||
+      term.year.toString().includes(query)
+    );
+  }, [terms, search]);
+
+  // Authentication
   useEffect(() => {
-    const boot = async () => {
+    const checkAuth = async () => {
       try {
         setAuthChecking(true);
-        setErrorCard(null);
-
-        const { data: sessRes, error: sessErr } = await supabase.auth.getSession();
-        if (sessErr) throw sessErr;
-
-        const session = sessRes.session;
-        if (!session) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        
+        if (!sessionData.session) {
           router.replace('/');
           return;
         }
 
-        setAuthUser(session.user);
-
-        const { data: prof, error: profErr } = await supabase
+        const { data: profileData } = await supabase
           .from('profiles')
           .select('*')
-          .eq('user_id', session.user.id)
-          .maybeSingle();
+          .eq('user_id', sessionData.session.user.id)
+          .single();
 
-        if (profErr) throw profErr;
-
-        if (!prof) {
-          setProfile(null);
-          setSchool(null);
-          showError({ message: 'User account not found in profiles.' }, 'Boot');
+        if (!profileData) {
+          showMessage('error', 'User profile not found');
           return;
         }
 
-        setProfile(prof as ProfileRow);
+        setProfile(profileData);
 
-        if (!prof.school_id) {
-          setSchool(null);
-          return;
+        if (profileData.school_id) {
+          const { data: schoolData } = await supabase
+            .from('general_information')
+            .select('id, school_name')
+            .eq('id', profileData.school_id)
+            .single();
+          
+          setSchool(schoolData);
         }
-
-        const { data: sch, error: schErr } = await supabase
-          .from('general_information')
-          .select('id, school_name')
-          .eq('id', prof.school_id)
-          .maybeSingle();
-
-        if (schErr) throw schErr;
-
-        if (!sch) {
-          setSchool(null);
-          showError(
-            {
-              message: 'School record not found in general_information (or blocked by RLS).',
-              details: `school_id=${prof.school_id}`,
-            },
-            'Boot'
-          );
-          return;
-        }
-
-        setSchool(sch as SchoolRow);
-      } catch (e: any) {
-        console.error('Boot failed:', e);
-        showError(e, 'Boot failed');
+      } catch (error: any) {
+        showMessage('error', `Failed to load profile: ${error.message}`);
       } finally {
         setAuthChecking(false);
       }
     };
 
-    boot();
+    checkAuth();
   }, [router]);
 
-  // ===================== LOAD ACADEMIC DATA =====================
+  // Data Loading - SIMPLIFIED VERSION
   useEffect(() => {
-    const load = async () => {
-      if (!schoolId) return;
+    const loadData = async () => {
+      if (!profile?.school_id) {
+        console.log('No school_id available');
+        return;
+      }
 
+      console.log('Loading data for school_id:', profile.school_id);
+      
       setLoading(true);
-      setErrorCard(null);
-
       try {
-        const results = await Promise.allSettled([
-          supabase.from('class').select('*').eq('school_id', schoolId).order('grade_name'),
+        // Load all data in parallel
+        const [
+          gradesRes,
+          subjectsRes,
+          examsRes,
+          curriculaRes,
+          teachersRes,
+          termsRes,
+          sessionsRes
+        ] = await Promise.all([
+          supabase
+            .from('class')
+            .select('*')
+            .eq('school_id', profile.school_id)
+            .order('grade_name'),
+          
           supabase
             .from('subject')
             .select(`*, grade:class (grade_name), teacher:teachers (first_name, last_name), curriculum:curriculum (name)`)
-            .eq('school_id', schoolId)
+            .eq('school_id', profile.school_id)
             .order('name'),
+          
           supabase
             .from('exam')
             .select(`*, subject:subject (name, code), grade:class (grade_name)`)
-            .eq('school_id', schoolId)
+            .eq('school_id', profile.school_id)
             .order('date', { ascending: false })
             .limit(50),
-          supabase.from('curriculum').select('*').eq('school_id', schoolId).order('name'),
+          
+          supabase
+            .from('curriculum')
+            .select('*')
+            .eq('school_id', profile.school_id)
+            .order('name'),
+          
+          // CRITICAL FIX: Fetch teachers correctly
           supabase
             .from('teachers')
             .select('registration_id, first_name, last_name, email, user_id, school_id')
-            .eq('school_id', schoolId)
+            .eq('school_id', profile.school_id)
             .order('first_name'),
+          
           supabase
             .from('term_exam_session')
             .select('*')
-            .eq('school_id', schoolId)
+            .eq('school_id', profile.school_id)
             .order('year', { ascending: false })
             .order('term_name'),
+          
           supabase
             .from('exam_session')
             .select(`*, term:term_exam_session (*)`)
-            .eq('school_id', schoolId)
+            .eq('school_id', profile.school_id)
             .order('start_date', { ascending: false }),
         ]);
 
-        const pick = (idx: number) => (results[idx].status === 'fulfilled' ? (results[idx] as any).value : null);
+        console.log('Teachers response:', {
+          data: teachersRes.data,
+          error: teachersRes.error,
+          count: teachersRes.data?.length
+        });
 
-        const g = pick(0);
-        const s = pick(1);
-        const e = pick(2);
-        const c = pick(3);
-        const t = pick(4);
-        const tr = pick(5);
-        const ss = pick(6);
-
-        if (g?.error) showError(g.error, 'Load Grades (class)');
-        if (s?.error) showError(s.error, 'Load Subjects (subject)');
-        if (e?.error) showError(e.error, 'Load Exams (exam)');
-        if (c?.error) showError(c.error, 'Load Curriculum (curriculum)');
-        if (t?.error) showError(t.error, 'Load Teachers (teachers)');
-        if (tr?.error) showError(tr.error, 'Load Terms (term_exam_session)');
-        if (ss?.error) showError(ss.error, 'Load Sessions (exam_session)');
-
-        if (g?.data) setGrades(g.data as GradeRow[]);
-        if (s?.data) setSubjects(s.data as any);
-        if (e?.data) setExams(e.data as any);
-        if (c?.data) setCurricula(c.data as CurriculumRow[]);
-        if (t?.data) setTeachers(t.data as TeacherRow[]);
-        if (tr?.data) setTerms(tr.data as any);
-        if (ss?.data) setSessions(ss.data as any);
-
-        // If any promise rejected (network etc), show combined details
-        const labels = [
-          'Load Grades (class)',
-          'Load Subjects (subject + joins)',
-          'Load Exams (exam + joins)',
-          'Load Curriculum (curriculum)',
-          'Load Teachers (teachers)',
-          'Load Terms (term_exam_session)',
-          'Load Sessions (exam_session + term join)',
-        ];
-
-        const rejected = results
-          .map((r, i) => ({ r, i, label: labels[i] }))
-          .filter(x => x.r.status === 'rejected') as Array<{ r: PromiseRejectedResult; i: number; label: string }>;
-
-        if (rejected.length) {
-          const combined = rejected
-            .map(x => `${x.label} → ${formatSupabaseError(x.r.reason)}`)
-            .join('\n\n');
-
-          setErrorCard({
-            title: 'Some academic requests were rejected',
-            text: combined,
-            raw: safeJson(rejected.map(x => ({ label: x.label, reason: x.r.reason }))),
-          });
+        if (teachersRes.data) {
+          setTeachers(teachersRes.data);
         }
-      } catch (e: any) {
-        console.error('load failed:', e);
-        showError(e, 'Load academic data');
+
+        if (gradesRes.data) setGrades(gradesRes.data);
+        if (subjectsRes.data) setSubjects(subjectsRes.data as Subject[]);
+        if (examsRes.data) setExams(examsRes.data as Exam[]);
+        if (curriculaRes.data) setCurricula(curriculaRes.data);
+        if (termsRes.data) setTerms(termsRes.data as Term[]);
+        if (sessionsRes.data) setSessions(sessionsRes.data as ExamSession[]);
+
+      } catch (error: any) {
+        console.error('Error loading data:', error);
+        showMessage('error', `Failed to load data: ${error.message}`);
       } finally {
         setLoading(false);
       }
     };
 
-    load();
-  }, [schoolId]);
+    loadData();
+  }, [profile?.school_id]);
 
-  // ===================== Create handlers =====================
-  const handleCreateGrade = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!schoolId) return;
-
-    if (!gradeForm.name.trim()) return showError({ message: 'Grade name is required.' }, 'Create Grade');
-
-    setSaving('grade');
-    try {
-      const { data, error } = await supabase
-        .from('class')
-        .insert({ grade_name: gradeForm.name.trim(), school_id: schoolId })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setGrades(prev => [...prev, data as GradeRow].sort((a, b) => a.grade_name.localeCompare(b.grade_name)));
-      setShowGradeModal(false);
-      resetForms();
-      showSuccess('Grade created successfully!');
-    } catch (err: any) {
-      showError(err, 'Create Grade');
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  const handleCreateSubject = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!schoolId) return;
-
-    if (!subjectForm.name.trim()) return showError({ message: 'Subject name is required.' }, 'Create Subject');
-    if (!subjectForm.grade_id) return showError({ message: 'Grade is required.' }, 'Create Subject');
-
-    setSaving('subject');
-    try {
-      const { data, error } = await supabase
-        .from('subject')
-        .insert({
-          name: subjectForm.name.trim(),
-          code: subjectForm.code.trim() || null,
-          description: subjectForm.description.trim() || null,
-          grade_id: Number(subjectForm.grade_id),
-          curriculum_id: subjectForm.curriculum_id ? Number(subjectForm.curriculum_id) : null,
-          teacher_id: subjectForm.teacher_id || null,
-          school_id: schoolId,
-        })
-        .select(`*, grade:class (grade_name), teacher:teachers (first_name, last_name), curriculum:curriculum (name)`)
-        .single();
-
-      if (error) throw error;
-
-      setSubjects(prev => [...prev, data as any].sort((a, b) => a.name.localeCompare(b.name)));
-      setShowSubjectModal(false);
-      resetForms();
-      showSuccess('Subject created successfully!');
-    } catch (err: any) {
-      showError(err, 'Create Subject');
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  const handleCreateExam = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!schoolId) return;
-
-    if (!examForm.subject_id || !examForm.grade_id || !examForm.date || !examForm.duration) {
-      return showError({ message: 'Subject, grade, date and duration are required.' }, 'Schedule Exam');
-    }
-
-    setSaving('exam');
-    try {
-      const { data, error } = await supabase
-        .from('exam')
-        .insert({
-          subject_id: Number(examForm.subject_id),
-          grade_id: Number(examForm.grade_id),
-          date: examForm.date,
-          duration_minutes: Number(examForm.duration),
-          description: examForm.description.trim() || null,
-          created_by_id: userId || null,
-          school_id: schoolId,
-        })
-        .select(`*, subject:subject (name, code), grade:class (grade_name)`)
-        .single();
-
-      if (error) throw error;
-
-      setExams(prev => [data as any, ...prev]);
-      setShowExamModal(false);
-      resetForms();
-      showSuccess('Exam scheduled successfully!');
-    } catch (err: any) {
-      showError(err, 'Schedule Exam');
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  const handleCreateCurriculum = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!schoolId) return;
-
-    if (!curriculumForm.name.trim()) return showError({ message: 'Curriculum name is required.' }, 'Create Curriculum');
-
-    setSaving('curriculum');
-    try {
-      const { data, error } = await supabase
-        .from('curriculum')
-        .insert({
-          name: curriculumForm.name.trim(),
-          objectives: curriculumForm.objectives.trim(),
-          learning_outcomes: curriculumForm.learning_outcomes.trim(),
-          school_id: schoolId,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setCurricula(prev => [...prev, data as CurriculumRow].sort((a, b) => a.name.localeCompare(b.name)));
-      setShowCurriculumModal(false);
-      resetForms();
-      showSuccess('Curriculum created successfully!');
-    } catch (err: any) {
-      showError(err, 'Create Curriculum');
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  const handleCreateTerm = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!schoolId) return;
-
-    if (!termForm.start_date || !termForm.end_date) return showError({ message: 'Start date and end date are required.' }, 'Create Term');
-    if (new Date(termForm.start_date) > new Date(termForm.end_date))
-      return showError({ message: 'Start date cannot be after end date.' }, 'Create Term');
-    if (!userId) return showError({ message: 'Not authenticated.' }, 'Create Term');
-
-    setSaving('term');
-    try {
-      const { data, error } = await supabase
-        .from('term_exam_session')
-        .insert({
-          term_name: termForm.term_name,
-          year: termForm.year,
-          start_date: termForm.start_date,
-          end_date: termForm.end_date,
-          created_by_id: userId,
-          school_id: schoolId,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setTerms(prev => [data as any, ...prev]);
-      setShowTermModal(false);
-      resetForms();
-      showSuccess('Term created successfully!');
-    } catch (err: any) {
-      showError(err, 'Create Term');
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  const handleCreateSession = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!schoolId) return;
-
-    if (!sessionForm.term_id || !sessionForm.start_date || !sessionForm.end_date) {
-      return showError({ message: 'Term, start date and end date are required.' }, 'Create Exam Session');
-    }
-    if (new Date(sessionForm.start_date) > new Date(sessionForm.end_date))
-      return showError({ message: 'Start date cannot be after end date.' }, 'Create Exam Session');
-    if (!userId) return showError({ message: 'Not authenticated.' }, 'Create Exam Session');
-
-    setSaving('session');
-    try {
-      const { data, error } = await supabase
-        .from('exam_session')
-        .insert({
-          term_id: Number(sessionForm.term_id),
-          exam_type: sessionForm.exam_type,
-          start_date: sessionForm.start_date,
-          end_date: sessionForm.end_date,
-          created_by_id: userId,
-          school_id: schoolId,
-        })
-        .select(`*, term:term_exam_session (*)`)
-        .single();
-
-      if (error) throw error;
-
-      setSessions(prev => [data as any, ...prev]);
-      setShowSessionModal(false);
-      resetForms();
-      showSuccess('Exam session created successfully!');
-    } catch (err: any) {
-      showError(err, 'Create Exam Session');
-    } finally {
-      setSaving(null);
-    }
-  };
-
-  // ===================== Filters =====================
-  const filteredGrades = useMemo(() => {
-    const q = search.toLowerCase();
-    return grades.filter(g => g.grade_name.toLowerCase().includes(q));
-  }, [grades, search]);
-
-  const filteredSubjects = useMemo(() => {
-    const q = search.toLowerCase();
-    return subjects.filter(s => {
-      return (
-        s.name.toLowerCase().includes(q) ||
-        (s.code || '').toLowerCase().includes(q) ||
-        (s.grade?.grade_name || '').toLowerCase().includes(q)
-      );
+  // Modal Handlers
+  const openCreateModal = useCallback((type: EntityType) => {
+    console.log('Opening modal with teachers count:', teachers.length);
+    
+    const defaultData = {
+      grade: { name: '', class_teacher_id: '' },
+      subject: { name: '', code: '', description: '', grade_id: '', curriculum_id: '', teacher_id: '' },
+      exam: { subject_id: '', grade_id: '', date: new Date().toISOString().split('T')[0], duration: 60, description: '' },
+      curriculum: { name: '', objectives: '', learning_outcomes: '' },
+      term: { term_name: 'TERM_1' as TermName, year: new Date().getFullYear(), start_date: new Date().toISOString().split('T')[0], end_date: new Date().toISOString().split('T')[0] },
+      session: { term_id: '', exam_type: 'BOT' as ExamType, start_date: new Date().toISOString().split('T')[0], end_date: new Date().toISOString().split('T')[0] },
+    };
+    
+    setModalState({
+      type,
+      mode: 'create',
+      isOpen: true,
+      data: defaultData[type],
     });
-  }, [subjects, search]);
+  }, [teachers]);
 
-  const filteredExams = useMemo(() => {
-    const q = search.toLowerCase();
-    return exams.filter(e => {
-      return (
-        (e.subject?.name || '').toLowerCase().includes(q) ||
-        (e.grade?.grade_name || '').toLowerCase().includes(q) ||
-        (e.description || '').toLowerCase().includes(q)
-      );
+  const openEditModal = useCallback((type: EntityType, entity: any) => {
+    setModalState({
+      type,
+      mode: 'edit',
+      isOpen: true,
+      data: { ...entity },
     });
-  }, [exams, search]);
+  }, []);
 
-  const filteredTerms = useMemo(() => {
-    const q = search.toLowerCase();
-    return terms.filter(t => t.term_name.toLowerCase().includes(q) || String(t.year).includes(q));
-  }, [terms, search]);
+  const closeModal = useCallback(() => {
+    setModalState(prev => ({ ...prev, isOpen: false }));
+  }, []);
 
-  // ===================== Guards =====================
+  const updateModalData = useCallback((field: string, value: any) => {
+    setModalState(prev => ({
+      ...prev,
+      data: {
+        ...prev.data,
+        [field]: value,
+      },
+    }));
+  }, []);
+
+  // CRUD Operations
+  const handleSave = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!school || !profile?.school_id) {
+      showMessage('error', 'School information is missing');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const { type, mode, data } = modalState;
+
+      switch (type) {
+        case 'grade': {
+          const payload = {
+            grade_name: data.name.trim(),
+            class_teacher_id: data.class_teacher_id || null,
+            school_id: profile.school_id,
+          };
+
+          if (mode === 'create') {
+            const { data: newGrade, error } = await supabase
+              .from('class')
+              .insert(payload)
+              .select()
+              .single();
+
+            if (error) throw error;
+            setGrades(prev => [...prev, newGrade].sort((a, b) => a.grade_name.localeCompare(b.grade_name)));
+            showMessage('success', 'Grade created successfully');
+          } else {
+            const { error } = await supabase
+              .from('class')
+              .update(payload)
+              .eq('id', data.id);
+
+            if (error) throw error;
+            setGrades(prev => prev.map(g => g.id === data.id ? { ...g, ...payload } : g));
+            showMessage('success', 'Grade updated successfully');
+          }
+          break;
+        }
+
+        case 'subject': {
+          const payload = {
+            name: data.name.trim(),
+            code: data.code ? data.code.trim() : null,
+            description: data.description.trim(),
+            grade_id: data.grade_id ? Number(data.grade_id) : null,
+            curriculum_id: Number(data.curriculum_id),
+            teacher_id: data.teacher_id || null,
+            school_id: profile.school_id,
+          };
+
+          if (mode === 'create') {
+            const { data: newSubject, error } = await supabase
+              .from('subject')
+              .insert(payload)
+              .select(`*, grade:class (grade_name), teacher:teachers (first_name, last_name), curriculum:curriculum (name)`)
+              .single();
+
+            if (error) throw error;
+            setSubjects(prev => [...prev, newSubject as Subject]);
+            showMessage('success', 'Subject created successfully');
+          } else {
+            const { error } = await supabase
+              .from('subject')
+              .update(payload)
+              .eq('id', data.id);
+
+            if (error) throw error;
+            
+            // Refetch to get updated relationships
+            const { data: updatedSubject } = await supabase
+              .from('subject')
+              .select(`*, grade:class (grade_name), teacher:teachers (first_name, last_name), curriculum:curriculum (name)`)
+              .eq('id', data.id)
+              .single();
+
+            if (updatedSubject) {
+              setSubjects(prev => prev.map(s => s.id === data.id ? updatedSubject as Subject : s));
+            }
+            showMessage('success', 'Subject updated successfully');
+          }
+          break;
+        }
+
+        default:
+          showMessage('error', 'Operation not implemented');
+      }
+
+      closeModal();
+    } catch (error: any) {
+      console.error('Save error:', error);
+      showMessage('error', error.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }, [modalState, profile, school, closeModal, showMessage]);
+
+  const handleDelete = useCallback(async (type: EntityType, id: number) => {
+    if (!confirm('Are you sure you want to delete this item? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      let tableName = '';
+      switch (type) {
+        case 'grade': tableName = 'class'; break;
+        case 'subject': tableName = 'subject'; break;
+        case 'exam': tableName = 'exam'; break;
+        case 'curriculum': tableName = 'curriculum'; break;
+        case 'term': tableName = 'term_exam_session'; break;
+        case 'session': tableName = 'exam_session'; break;
+      }
+
+      const { error } = await supabase
+        .from(tableName)
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+
+      // Update local state
+      switch (type) {
+        case 'grade': setGrades(prev => prev.filter(g => g.id !== id)); break;
+        case 'subject': setSubjects(prev => prev.filter(s => s.id !== id)); break;
+        case 'exam': setExams(prev => prev.filter(e => e.id !== id)); break;
+        case 'curriculum': setCurricula(prev => prev.filter(c => c.id !== id)); break;
+        case 'term': setTerms(prev => prev.filter(t => t.id !== id)); break;
+        case 'session': setSessions(prev => prev.filter(s => s.id !== id)); break;
+      }
+
+      showMessage('success', 'Item deleted successfully');
+    } catch (error: any) {
+      showMessage('error', error.message || 'Failed to delete');
+    }
+  }, [showMessage]);
+
+  // Loading States
   if (authChecking) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-      </div>
-    );
-  }
-
-  if (!profile || !school) {
-    return (
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gray-50 flex flex-col">
         <Navbar />
-        <div className="flex">
+        <div className="flex flex-1 overflow-hidden">
           <AppShell />
-          <main className="flex-1 p-6">
-            <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center">
-              <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <AlertCircle className="w-8 h-8 text-yellow-600" />
-              </div>
-              <h3 className="text-xl font-semibold text-gray-900 mb-3">School Configuration Required</h3>
-              <p className="text-gray-600 mb-6">{!profile ? 'User account not found in profiles.' : 'Your account is not linked to a school.'}</p>
-              <button
-                onClick={() => router.push('/settings')}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-              >
-                Configure School Settings
-              </button>
+          <main className="flex-1 overflow-y-auto flex items-center justify-center">
+            <div className="text-center">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto" />
+              <p className="mt-3 text-sm text-gray-600">Loading...</p>
             </div>
           </main>
         </div>
@@ -790,1287 +1083,347 @@ export default function AcademicsPage() {
     );
   }
 
-  // ===================== UI pieces =====================
-  const renderHeader = () => (
-    <div className="mb-8">
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Academics Management</h1>
-          <p className="text-gray-600 mt-2">Manage grades, subjects, curriculum, exams, and terms for {school.school_name}</p>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="text-right">
-            <p className="text-sm font-medium text-gray-700">Academic Year</p>
-            <p className="text-lg font-semibold text-blue-600">{getCurrentAcademicYear()}</p>
-          </div>
-          <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
-            <GraduationCap className="w-6 h-6 text-blue-600" />
-          </div>
-        </div>
-      </div>
-
-      <div className="border-b border-gray-200">
-        <nav className="flex space-x-2 overflow-x-auto pb-1">
-          {[
-            { key: 'overview', label: 'Overview', icon: BookOpen },
-            { key: 'grades', label: 'Grades', icon: Users },
-            { key: 'subjects', label: 'Subjects', icon: BookOpen },
-            { key: 'exams', label: 'Exams', icon: Calendar },
-            { key: 'curriculum', label: 'Curriculum', icon: Layers },
-            { key: 'terms', label: 'Terms & Sessions', icon: ShieldCheck },
-          ].map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => setActiveTab(key as any)}
-              className={`flex items-center gap-2 px-5 py-3 rounded-t-lg text-sm font-medium transition-all whitespace-nowrap ${
-                activeTab === key ? 'bg-white border-t border-x border-gray-200 text-blue-600' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              {label}
-            </button>
-          ))}
-        </nav>
-      </div>
-    </div>
-  );
-
-  const renderAlerts = () => (
-    <>
-      {errorCard && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
-            <div className="flex-1">
-              <div className="text-sm font-semibold text-red-700">{errorCard.title}</div>
-              <p className="text-sm text-red-700 mt-1 whitespace-pre-wrap">{errorCard.text}</p>
-
-              {errorCard.raw && (
-                <details className="mt-3">
-                  <summary className="cursor-pointer text-xs font-medium text-red-700/80">Technical details</summary>
-                  <pre className="mt-2 text-[11px] leading-relaxed bg-white/60 border border-red-200 rounded-lg p-3 overflow-auto">
-{errorCard.raw}
-                  </pre>
-                </details>
-              )}
-            </div>
-            <button onClick={() => setErrorCard(null)} className="text-red-500 hover:text-red-700">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {successMsg && (
-        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex items-start gap-3">
-          <CheckCircle2 className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
-          <p className="text-sm text-green-700 flex-1">{successMsg}</p>
-          <button onClick={() => setSuccessMsg(null)} className="text-green-600 hover:text-green-800">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-    </>
-  );
-
-  const renderSearchBar = (placeholder: string) => (
-    <div className="flex items-center gap-3">
-      <div className="relative flex-1 max-w-md">
-        <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-        <input
-          type="text"
-          placeholder={placeholder}
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        />
-      </div>
-      <button type="button" className="flex items-center gap-2 px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
-        <Filter className="w-4 h-4" />
-        Filter
-      </button>
-    </div>
-  );
-
-  const renderOverview = () => (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <StatCard title="Grades" value={grades.length} icon={Users} color="blue" description="Classes registered" />
-        <StatCard title="Subjects" value={subjects.length} icon={BookOpen} color="green" description="Active subjects" />
-        <StatCard title="Exams" value={exams.length} icon={Calendar} color="purple" description="Scheduled exams" />
-        <StatCard title="Curriculum" value={curricula.length} icon={Layers} color="orange" description="Frameworks" />
-        <StatCard title="Terms" value={terms.length} icon={ShieldCheck} color="yellow" description="Academic terms" />
-        <StatCard title="Sessions" value={sessions.length} icon={FileText} color="red" description="Exam sessions" />
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
-          <ActionButton onClick={() => setShowGradeModal(true)} label="Add Grade" icon={Plus} color="gray" />
-          <ActionButton onClick={() => setShowSubjectModal(true)} label="Add Subject" icon={Plus} color="green" />
-          <ActionButton onClick={() => setShowExamModal(true)} label="Schedule Exam" icon={Plus} color="purple" />
-          <ActionButton onClick={() => setShowTermModal(true)} label="Create Term" icon={Plus} color="blue" />
-          <ActionButton onClick={() => setShowSessionModal(true)} label="Add Session" icon={Plus} color="orange" />
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">Recent Exams</h3>
-        </div>
-        <div className="divide-y divide-gray-200">
-          {exams.slice(0, 5).map(exam => (
-            <div key={exam.id} className="p-6 hover:bg-gray-50">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                    <Calendar className="w-6 h-6 text-purple-600" />
+  if (!profile || !school) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <Navbar />
+        <div className="flex flex-1 overflow-hidden">
+          <AppShell />
+          <main className="flex-1 overflow-y-auto flex items-center justify-center px-4">
+            <div className="w-full max-w-md">
+              <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center">
+                    <AlertCircle className="h-5 w-5" />
                   </div>
                   <div>
-                    <h4 className="font-medium text-gray-900">{exam.subject?.name}</h4>
-                    <p className="text-sm text-gray-500">
-                      {exam.grade?.grade_name} • {exam.duration_minutes} minutes
-                    </p>
+                    <div className="font-semibold text-gray-900">School Configuration Required</div>
+                    <div className="text-sm text-gray-600 mt-1">Your account is not linked to a school.</div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="font-medium text-gray-900">{formatDate(exam.date)}</p>
-                  <p className="text-sm text-gray-500">{exam.description || 'No description'}</p>
-                </div>
+                <button
+                  onClick={() => router.push('/settings')}
+                  className="mt-4 w-full rounded-lg bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-gray-800 transition-colors"
+                >
+                  Configure School Settings
+                </button>
               </div>
             </div>
-          ))}
-          {exams.length === 0 && (
-            <div className="p-12 text-center text-gray-500">
-              <Calendar className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-              <p>No exams scheduled yet</p>
-            </div>
-          )}
+          </main>
         </div>
+      </div>
+    );
+  }
+
+  // Tab Content Components (simplified versions)
+  const OverviewTab = () => (
+    <div className="space-y-8">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        {[
+          { label: 'Grades', value: grades.length, icon: Users, color: 'bg-blue-100 text-blue-600' },
+          { label: 'Subjects', value: subjects.length, icon: BookOpen, color: 'bg-green-100 text-green-600' },
+          { label: 'Exams', value: exams.length, icon: Calendar, color: 'bg-purple-100 text-purple-600' },
+          { label: 'Curriculum', value: curricula.length, icon: Layers, color: 'bg-orange-100 text-orange-600' },
+          { label: 'Terms', value: terms.length, icon: ShieldCheck, color: 'bg-yellow-100 text-yellow-600' },
+          { label: 'Sessions', value: sessions.length, icon: FileText, color: 'bg-red-100 text-red-600' },
+        ].map((stat) => (
+          <div key={stat.label} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className={`p-2 rounded-lg ${stat.color}`}>
+                <stat.icon className="h-5 w-5" />
+              </div>
+              <div className="text-2xl font-bold text-gray-900">{stat.value}</div>
+            </div>
+            <div className="mt-2 text-sm font-medium text-gray-600">{stat.label}</div>
+          </div>
+        ))}
       </div>
     </div>
   );
 
-  const renderGrades = () => (
+  const GradesTab = () => (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold text-gray-900">Grades / Classes</h3>
-          <p className="text-sm text-gray-500">Manage all classes in {school.school_name}</p>
+          <p className="text-sm text-gray-600">Manage all grades and classes in your school</p>
         </div>
-        <ActionButton onClick={() => setShowGradeModal(true)} label="Add Grade" icon={Plus} color="gray" compact />
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between gap-4 flex-wrap">
-          {renderSearchBar('Search grades...')}
-          <span className="text-sm text-gray-500">{filteredGrades.length} grades</span>
-        </div>
-
-        {loading ? (
-          <div className="p-12 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto" />
-          </div>
-        ) : filteredGrades.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">
-            <Users className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p>No grades found</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-6">
-            {filteredGrades.map(grade => {
-              const gradeSubjects = subjects.filter(s => s.grade_id === grade.id);
-              const gradeExams = exams.filter(e => e.grade_id === grade.id);
-
-              return (
-                <div key={grade.id} className="border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center">
-                      <Users className="w-7 h-7 text-blue-600" />
-                    </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('blue')}`}>
-                      {gradeSubjects.length} subjects
-                    </span>
-                  </div>
-                  <h4 className="font-semibold text-gray-900 text-lg mb-2">{grade.grade_name}</h4>
-                  <div className="text-sm text-gray-500 mb-4">Grade ID: {grade.id}</div>
-                  <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-                    <div className="text-sm">
-                      <div className="font-medium text-gray-900">{gradeExams.length}</div>
-                      <div className="text-gray-500">Exams</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button type="button" className="p-2 hover:bg-gray-100 rounded-lg" title="View">
-                        <Eye className="w-4 h-4 text-gray-600" />
-                      </button>
-                      <button type="button" className="p-2 hover:bg-gray-100 rounded-lg" title="Edit">
-                        <Edit className="w-4 h-4 text-gray-600" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderSubjects = () => (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900">Subjects</h3>
-          <p className="text-sm text-gray-500">Manage all subjects and assignments</p>
-        </div>
-        <ActionButton onClick={() => setShowSubjectModal(true)} label="Add Subject" icon={Plus} color="green" compact />
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between gap-4 flex-wrap">
-          {renderSearchBar('Search subjects...')}
-          <span className="text-sm text-gray-500">{filteredSubjects.length} subjects</span>
-        </div>
-
-        {loading ? (
-          <div className="p-12 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto" />
-          </div>
-        ) : filteredSubjects.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">
-            <BookOpen className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p>No subjects found</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-left py-4 px-6 text-sm font-medium text-gray-700">Subject</th>
-                  <th className="text-left py-4 px-6 text-sm font-medium text-gray-700">Code</th>
-                  <th className="text-left py-4 px-6 text-sm font-medium text-gray-700">Grade</th>
-                  <th className="text-left py-4 px-6 text-sm font-medium text-gray-700">Teacher</th>
-                  <th className="text-left py-4 px-6 text-sm font-medium text-gray-700">Curriculum</th>
-                  <th className="text-left py-4 px-6 text-sm font-medium text-gray-700">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {filteredSubjects.map(subject => (
-                  <tr key={subject.id} className="hover:bg-gray-50">
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                          <BookOpen className="w-5 h-5 text-green-600" />
-                        </div>
-                        <div>
-                          <div className="font-medium text-gray-900">{subject.name}</div>
-                          {subject.description && <div className="text-xs text-gray-500 truncate max-w-xs">{subject.description}</div>}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-4 px-6">
-                      <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('gray')}`}>{subject.code || '—'}</span>
-                    </td>
-                    <td className="py-4 px-6">
-                      {subject.grade ? (
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('blue')}`}>{subject.grade.grade_name}</span>
-                      ) : (
-                        <span className="text-sm text-gray-500">—</span>
-                      )}
-                    </td>
-                    <td className="py-4 px-6">
-                      {subject.teacher ? (
-                        <div className="text-sm text-gray-900">
-                          {subject.teacher.first_name} {subject.teacher.last_name}
-                        </div>
-                      ) : (
-                        <span className="text-sm text-gray-500">Not assigned</span>
-                      )}
-                    </td>
-                    <td className="py-4 px-6">
-                      <div className="text-sm text-gray-900">{subject.curriculum?.name || '—'}</div>
-                    </td>
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-2">
-                        <button type="button" className="p-2 hover:bg-gray-100 rounded-lg" title="View">
-                          <Eye className="w-4 h-4 text-gray-600" />
-                        </button>
-                        <button type="button" className="p-2 hover:bg-gray-100 rounded-lg" title="Edit">
-                          <Edit className="w-4 h-4 text-gray-600" />
-                        </button>
-                        <button type="button" className="p-2 hover:bg-gray-100 rounded-lg text-red-600" title="Delete">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderExams = () => (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900">Exams</h3>
-          <p className="text-sm text-gray-500">Schedule and manage all exams</p>
-        </div>
-        <ActionButton onClick={() => setShowExamModal(true)} label="Schedule Exam" icon={Plus} color="purple" compact />
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between gap-4 flex-wrap">
-          {renderSearchBar('Search exams...')}
-          <span className="text-sm text-gray-500">{filteredExams.length} exams</span>
-        </div>
-
-        {loading ? (
-          <div className="p-12 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto" />
-          </div>
-        ) : filteredExams.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">
-            <Calendar className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p>No exams found</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-200">
-            {filteredExams.map(exam => (
-              <div key={exam.id} className="p-6 hover:bg-gray-50">
-                <div className="flex items-center justify-between flex-wrap gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-14 h-14 bg-purple-100 rounded-xl flex items-center justify-center">
-                      <Calendar className="w-7 h-7 text-purple-600" />
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-gray-900 text-lg">{exam.subject?.name}</h4>
-                      <div className="flex items-center gap-3 mt-1">
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('blue')}`}>{exam.grade?.grade_name || '—'}</span>
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('purple')}`}>{exam.duration_minutes} min</span>
-                        <span className="text-sm text-gray-500">{exam.subject?.code || 'No code'}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-semibold text-gray-900 text-lg">{formatDate(exam.date)}</div>
-                    <div className="text-sm text-gray-500">Scheduled on {formatDate(exam.created)}</div>
-                  </div>
-                </div>
-
-                {exam.description && (
-                  <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                    <p className="text-sm text-gray-600">{exam.description}</p>
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
-                  <div className="text-sm text-gray-500">Created by: {exam.created_by_id || 'System'}</div>
-                  <div className="flex items-center gap-2">
-                    <button type="button" className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">
-                      View Details
-                    </button>
-                    <button type="button" className="px-4 py-2 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                      Edit Exam
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderCurriculum = () => (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900">Curriculum</h3>
-          <p className="text-sm text-gray-500">Manage frameworks and learning outcomes</p>
-        </div>
-        <ActionButton onClick={() => setShowCurriculumModal(true)} label="Add Curriculum" icon={Plus} color="orange" compact />
+        <button
+          onClick={() => openCreateModal('grade')}
+          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
+        >
+          <Plus className="h-4 w-4" />
+          Add Grade
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {loading ? (
-          Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="bg-white rounded-xl border border-gray-200 p-6 animate-pulse">
-              <div className="h-4 bg-gray-200 rounded w-1/2 mb-4"></div>
-              <div className="space-y-3">
-                <div className="h-3 bg-gray-200 rounded"></div>
-                <div className="h-3 bg-gray-200 rounded w-2/3"></div>
-              </div>
-            </div>
-          ))
-        ) : curricula.length === 0 ? (
-          <div className="col-span-full bg-white rounded-xl border border-gray-200 p-12 text-center">
-            <Layers className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p className="text-gray-500">No curriculum frameworks added yet</p>
-          </div>
-        ) : (
-          curricula.map(c => {
-            const subjectCount = subjects.filter(s => s.curriculum_id === c.id).length;
-            return (
-              <div key={c.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
-                      <Layers className="w-6 h-6 text-orange-600" />
-                    </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('orange')}`}>{subjectCount} subjects</span>
-                  </div>
-
-                  <h4 className="font-semibold text-gray-900 text-lg mb-2">{c.name}</h4>
-
-                  <div className="mt-4">
-                    <h5 className="text-sm font-medium text-gray-700 mb-2">Objectives</h5>
-                    <p className="text-sm text-gray-600 line-clamp-3">{c.objectives}</p>
-                  </div>
-
-                  <div className="mt-4">
-                    <h5 className="text-sm font-medium text-gray-700 mb-2">Learning Outcomes</h5>
-                    <p className="text-sm text-gray-600 line-clamp-3">{c.learning_outcomes}</p>
-                  </div>
-
-                  <div className="mt-6 pt-4 border-t border-gray-100">
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm text-gray-500">Curriculum Framework</div>
-                      <div className="flex items-center gap-2">
-                        <button type="button" className="p-2 hover:bg-gray-100 rounded-lg">
-                          <Eye className="w-4 h-4 text-gray-600" />
-                        </button>
-                        <button type="button" className="p-2 hover:bg-gray-100 rounded-lg">
-                          <Edit className="w-4 h-4 text-gray-600" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+        {filteredGrades.map((grade) => {
+          const teacher = teachers.find(t => t.registration_id === grade.class_teacher_id);
+          return (
+            <div key={grade.id} className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div className="h-12 w-12 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center">
+                  <Users className="h-6 w-6" />
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => openEditModal('grade', grade)}
+                    className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors"
+                  >
+                    <Edit className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDelete('grade', grade.id)}
+                    className="p-2 rounded-lg hover:bg-red-100 text-red-600 transition-colors"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 </div>
               </div>
-            );
-          })
-        )}
+              <h4 className="font-semibold text-gray-900 text-lg mb-2">{grade.grade_name}</h4>
+              <div className="space-y-3">
+                <div className="text-sm">
+                  <span className="text-gray-600">Class Teacher:</span>
+                  <span className="font-medium text-gray-900 ml-2">
+                    {teacher ? `${teacher.first_name} ${teacher.last_name}` : 'Not assigned'}
+                  </span>
+                </div>
+                <div className="text-sm">
+                  <span className="text-gray-600">Created:</span>
+                  <span className="font-medium text-gray-900 ml-2">{formatDate(grade.created)}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 
-  const renderTerms = () => (
+  const SubjectsTab = () => (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Terms & Exam Sessions</h3>
-          <p className="text-sm text-gray-500">Define term dates and exam sessions (BOT/MOT/EOT)</p>
+          <h3 className="text-lg font-semibold text-gray-900">Subjects</h3>
+          <p className="text-sm text-gray-600">Manage all subjects and their assignments</p>
         </div>
-        <div className="flex items-center gap-3">
-          <ActionButton onClick={() => setShowTermModal(true)} label="Add Term" icon={Plus} color="blue" compact />
-          <ActionButton onClick={() => setShowSessionModal(true)} label="Add Session" icon={Plus} color="orange" compact />
-        </div>
+        <button
+          onClick={() => openCreateModal('subject')}
+          className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 transition-colors"
+        >
+          <Plus className="h-4 w-4" />
+          Add Subject
+        </button>
       </div>
 
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between gap-4 flex-wrap">
-          {renderSearchBar('Search by year or term...')}
-          <div className="text-sm text-gray-500">
-            {terms.length} terms • {sessions.length} sessions
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="p-12 text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto" />
-          </div>
-        ) : filteredTerms.length === 0 ? (
-          <div className="p-12 text-center text-gray-500">
-            <ShieldCheck className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p className="mb-4">No terms created yet</p>
-            <button
-              type="button"
-              onClick={() => setShowTermModal(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-            >
-              <Plus className="w-4 h-4" />
-              Create your first Term
-            </button>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-200">
-            {filteredTerms.map(term => {
-              const termSessions = sessions.filter(s => s.term_id === term.id);
-              return (
-                <div key={term.id} className="p-6 hover:bg-gray-50">
-                  <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
-                    <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 bg-blue-100 rounded-xl flex items-center justify-center">
-                        <Calendar className="w-7 h-7 text-blue-600" />
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Subject</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Code</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Grade</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Teacher</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filteredSubjects.map((subject) => (
+                <tr key={subject.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-lg bg-green-100 text-green-600 flex items-center justify-center">
+                        <BookOpen className="h-5 w-5" />
                       </div>
                       <div>
-                        <h4 className="font-semibold text-gray-900 text-lg">
-                          {term.term_name.replace('_', ' ')} • {term.year}
-                        </h4>
-                        <div className="flex items-center gap-4 mt-1">
-                          <span className="text-sm text-gray-500">
-                            {formatDate(term.start_date)} → {formatDate(term.end_date)}
-                          </span>
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium border ${chipClass('blue')}`}>{termSessions.length} sessions</span>
-                        </div>
+                        <div className="font-medium text-gray-900">{subject.name}</div>
+                        {subject.description && (
+                          <div className="text-sm text-gray-500 truncate max-w-xs">{subject.description}</div>
+                        )}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSessionForm(prev => ({ ...prev, term_id: String(term.id) }));
-                        setShowSessionModal(true);
-                      }}
-                      className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                    >
-                      Add Session
-                    </button>
-                  </div>
-
-                  {termSessions.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">No exam sessions added for this term</div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      {termSessions.map(session => (
-                        <div key={session.id} className="border border-gray-200 rounded-xl p-4">
-                          <div className="flex items-center justify-between mb-3">
-                            <span
-                              className={`px-3 py-1 rounded-full text-xs font-semibold border ${
-                                session.exam_type === 'BOT'
-                                  ? chipClass('blue')
-                                  : session.exam_type === 'MOT'
-                                  ? chipClass('purple')
-                                  : chipClass('orange')
-                              }`}
-                            >
-                              {session.exam_type}
-                            </span>
-                            <button type="button" className="p-1 hover:bg-gray-100 rounded-lg">
-                              <MoreVertical className="w-4 h-4 text-gray-500" />
-                            </button>
-                          </div>
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-gray-500">Start:</span>
-                              <span className="font-medium">{formatDate(session.start_date)}</span>
-                            </div>
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-gray-500">End:</span>
-                              <span className="font-medium">{formatDate(session.end_date)}</span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className="px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 border">
+                      {subject.code || '—'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    {subject.grade ? (
+                      <span className="px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 border">
+                        {subject.grade.grade_name}
+                      </span>
+                    ) : (
+                      <span className="text-sm text-gray-500">—</span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4">
+                    {subject.teacher ? (
+                      <div className="text-sm text-gray-900">
+                        {subject.teacher.first_name} {subject.teacher.last_name}
+                      </div>
+                    ) : (
+                      <span className="text-sm text-gray-500">Not assigned</span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => openEditModal('subject', subject)}
+                        className="p-2 rounded-lg hover:bg-gray-100 text-gray-600"
+                      >
+                        <Edit className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete('subject', subject.id)}
+                        className="p-2 rounded-lg hover:bg-red-100 text-red-600"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
 
-  // ===================== Main Render =====================
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex flex-col">
       <Navbar />
-      <div className="flex">
+      
+      <div className="flex flex-1 overflow-hidden">
         <AppShell />
-        <main className="flex-1 p-6 lg:p-8">
-          <div className="max-w-7xl mx-auto">
-            {renderHeader()}
-            {renderAlerts()}
+        
+        <main className="flex-1 overflow-y-auto">
+          {/* Header */}
+          <div className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-gray-200">
+            <div className="px-6 lg:px-8 py-6">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-sm">
+                    <GraduationCap className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Academics Management</h1>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Manage grades, subjects, curriculum, exams, and terms for {school.school_name}
+                    </p>
+                  </div>
+                </div>
 
-            {loading && activeTab !== 'overview' ? (
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-                <p className="text-gray-500">Loading academic data...</p>
+                <div className="hidden sm:flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-sm">
+                  <Calendar className="h-4 w-4 text-indigo-600" />
+                  <div className="text-xs text-gray-600">
+                    Academic Year: <span className="font-semibold text-gray-900">{getCurrentAcademicYear()}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div className="mt-6 flex items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm w-fit">
+                {[
+                  { key: 'overview', label: 'Overview', icon: Home },
+                  { key: 'grades', label: 'Grades', icon: Users },
+                  { key: 'subjects', label: 'Subjects', icon: Book },
+                  { key: 'exams', label: 'Exams', icon: Calendar },
+                  { key: 'curriculum', label: 'Curriculum', icon: Layers },
+                  { key: 'terms', label: 'Terms & Sessions', icon: ClipboardList },
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveTab(tab.key as any)}
+                    className={clsx(
+                      'inline-flex items-center gap-2 rounded-md px-4 py-2.5 text-sm font-semibold transition-colors',
+                      activeTab === tab.key
+                        ? 'bg-blue-50 text-blue-700'
+                        : 'text-gray-700 hover:bg-gray-50'
+                    )}
+                  >
+                    <tab.icon className="h-4 w-4" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Main Content */}
+          <div className="px-6 lg:px-8 py-8">
+            {/* Message Display */}
+            {message && (
+              <div className={clsx(
+                'mb-6 flex items-start gap-3 rounded-lg border p-4',
+                message.type === 'success'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                  : 'border-red-200 bg-red-50 text-red-900'
+              )}>
+                {message.type === 'success' ? (
+                  <CheckCircle2 className="mt-0.5 h-5 w-5" />
+                ) : (
+                  <AlertCircle className="mt-0.5 h-5 w-5" />
+                )}
+                <div className="flex-1 text-sm font-medium">{message.text}</div>
+                <button
+                  onClick={() => setMessage(null)}
+                  className="rounded p-1 hover:bg-white/40"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Search Bar */}
+            <div className="mb-6">
+              <div className="relative max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* Content Area */}
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
               </div>
             ) : (
               <>
-                {activeTab === 'overview' && renderOverview()}
-                {activeTab === 'grades' && renderGrades()}
-                {activeTab === 'subjects' && renderSubjects()}
-                {activeTab === 'exams' && renderExams()}
-                {activeTab === 'curriculum' && renderCurriculum()}
-                {activeTab === 'terms' && renderTerms()}
+                {activeTab === 'overview' && <OverviewTab />}
+                {activeTab === 'grades' && <GradesTab />}
+                {activeTab === 'subjects' && <SubjectsTab />}
+                {/* Add other tabs as needed */}
               </>
             )}
           </div>
         </main>
       </div>
 
-      {/* Modals */}
-      <GradeModal
-        isOpen={showGradeModal}
-        onClose={() => setShowGradeModal(false)}
-        onSubmit={handleCreateGrade}
-        form={gradeForm}
-        onChange={setGradeForm}
-        loading={saving === 'grade'}
-      />
-
-      <SubjectModal
-        isOpen={showSubjectModal}
-        onClose={() => setShowSubjectModal(false)}
-        onSubmit={handleCreateSubject}
-        form={subjectForm}
-        onChange={setSubjectForm}
-        loading={saving === 'subject'}
-        grades={grades}
-        curricula={curricula}
-        teachers={teachers}
-      />
-
-      <ExamModal
-        isOpen={showExamModal}
-        onClose={() => setShowExamModal(false)}
-        onSubmit={handleCreateExam}
-        form={examForm}
-        onChange={setExamForm}
-        loading={saving === 'exam'}
-        subjects={subjects}
-        grades={grades}
-      />
-
-      <CurriculumModal
-        isOpen={showCurriculumModal}
-        onClose={() => setShowCurriculumModal(false)}
-        onSubmit={handleCreateCurriculum}
-        form={curriculumForm}
-        onChange={setCurriculumForm}
-        loading={saving === 'curriculum'}
-      />
-
-      <TermModal
-        isOpen={showTermModal}
-        onClose={() => setShowTermModal(false)}
-        onSubmit={handleCreateTerm}
-        form={termForm}
-        onChange={setTermForm}
-        loading={saving === 'term'}
-      />
-
-      <SessionModal
-        isOpen={showSessionModal}
-        onClose={() => setShowSessionModal(false)}
-        onSubmit={handleCreateSession}
-        form={sessionForm}
-        onChange={setSessionForm}
-        loading={saving === 'session'}
-        terms={terms}
+      {/* SINGLE MODAL - No stacking */}
+      <AcademicModal
+        state={modalState}
+        onClose={closeModal}
+        onSubmit={handleSave}
+        saving={saving}
+        updateModalData={updateModalData}
+        options={{
+          grades,
+          teachers,
+          subjects,
+          curricula,
+          terms,
+        }}
       />
     </div>
   );
 }
-
-// ===================== Helper components =====================
-interface StatCardProps {
-  title: string;
-  value: number;
-  icon: any;
-  color: 'blue' | 'green' | 'purple' | 'orange' | 'red' | 'gray' | 'yellow';
-  description: string;
-}
-
-const StatCard = ({ title, value, icon: Icon, color, description }: StatCardProps) => {
-  const bgColor = {
-    blue: 'bg-blue-100 text-blue-600',
-    green: 'bg-green-100 text-green-600',
-    purple: 'bg-purple-100 text-purple-600',
-    orange: 'bg-orange-100 text-orange-600',
-    red: 'bg-red-100 text-red-600',
-    gray: 'bg-gray-100 text-gray-600',
-    yellow: 'bg-yellow-100 text-yellow-600',
-  }[color];
-
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-      <div className="flex items-center justify-between mb-4">
-        <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${bgColor}`}>
-          <Icon className="w-6 h-6" />
-        </div>
-        <span className={`text-sm font-medium px-3 py-1 rounded-full border ${chipClass(color)}`}>{value}</span>
-      </div>
-      <h3 className="text-xl font-bold text-gray-900 mb-1">{title}</h3>
-      <p className="text-sm text-gray-500">{description}</p>
-    </div>
-  );
-};
-
-interface ActionButtonProps {
-  onClick: () => void;
-  label: string;
-  icon: any;
-  color: 'gray' | 'green' | 'purple' | 'blue' | 'orange';
-  compact?: boolean;
-}
-
-const ActionButton = ({ onClick, label, icon: Icon, color, compact = false }: ActionButtonProps) => {
-  const colors = {
-    gray: 'bg-gray-900 hover:bg-gray-800',
-    green: 'bg-green-600 hover:bg-green-700',
-    purple: 'bg-purple-600 hover:bg-purple-700',
-    blue: 'bg-blue-600 hover:bg-blue-700',
-    orange: 'bg-orange-600 hover:bg-orange-700',
-  }[color];
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`${colors} text-white rounded-lg transition-colors flex items-center justify-center gap-2 ${compact ? 'px-4 py-2.5 text-sm' : 'px-5 py-3 font-medium'}`}
-    >
-      <Icon className="w-4 h-4" />
-      {label}
-    </button>
-  );
-};
-
-// ===================== Modals =====================
-interface ModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onSubmit: (e: FormEvent) => void;
-  loading: boolean;
-}
-
-interface GradeModalProps extends ModalProps {
-  form: { name: string };
-  onChange: (form: { name: string }) => void;
-}
-
-const GradeModal = ({ isOpen, onClose, onSubmit, form, onChange, loading }: GradeModalProps) => {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">Add New Grade</h3>
-          <button type="button" onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
-        </div>
-        <form onSubmit={onSubmit} className="p-6">
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Grade Name *</label>
-            <input
-              type="text"
-              value={form.name}
-              onChange={e => onChange({ name: e.target.value })}
-              required
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              placeholder="P1, S2, Grade 10..."
-              disabled={loading}
-            />
-          </div>
-          <div className="flex justify-end gap-3">
-            <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled={loading}>
-              Cancel
-            </button>
-            <button type="submit" disabled={loading} className="px-4 py-2.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50">
-              {loading ? 'Creating...' : 'Create Grade'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-interface SubjectModalProps extends ModalProps {
-  form: { name: string; code: string; description: string; grade_id: string; curriculum_id: string; teacher_id: string };
-  onChange: (form: any) => void;
-  grades: GradeRow[];
-  curricula: CurriculumRow[];
-  teachers: TeacherRow[];
-}
-
-const SubjectModal = ({ isOpen, onClose, onSubmit, form, onChange, loading, grades, curricula, teachers }: SubjectModalProps) => {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl w-full max-w-2xl my-8">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">Add New Subject</h3>
-          <button type="button" onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
-        </div>
-        <form onSubmit={onSubmit} className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Subject Name *</label>
-              <input
-                type="text"
-                value={form.name}
-                onChange={e => onChange({ ...form, name: e.target.value })}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                placeholder="Mathematics, English, Science..."
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Subject Code</label>
-              <input
-                type="text"
-                value={form.code}
-                onChange={e => onChange({ ...form, code: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                placeholder="MATH-P5, ENG-S1..."
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Grade / Class *</label>
-              <select
-                value={form.grade_id}
-                onChange={e => onChange({ ...form, grade_id: e.target.value })}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                disabled={loading}
-              >
-                <option value="">Select grade</option>
-                {grades.map(g => (
-                  <option key={g.id} value={g.id}>
-                    {g.grade_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Curriculum</label>
-              <select
-                value={form.curriculum_id}
-                onChange={e => onChange({ ...form, curriculum_id: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                disabled={loading}
-              >
-                <option value="">Not set</option>
-                {curricula.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Teacher (Optional)</label>
-              <select
-                value={form.teacher_id}
-                onChange={e => onChange({ ...form, teacher_id: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                disabled={loading}
-              >
-                <option value="">Not assigned</option>
-                {teachers.map(t => (
-                  <option key={t.registration_id} value={t.registration_id}>
-                    {t.first_name} {t.last_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
-              <textarea
-                value={form.description}
-                onChange={e => onChange({ ...form, description: e.target.value })}
-                rows={3}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                placeholder="Subject description..."
-                disabled={loading}
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3 mt-8">
-            <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled={loading}>
-              Cancel
-            </button>
-            <button type="submit" disabled={loading} className="px-4 py-2.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50">
-              {loading ? 'Creating...' : 'Create Subject'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-interface ExamModalProps extends ModalProps {
-  form: { subject_id: string; grade_id: string; date: string; duration: string; description: string };
-  onChange: (form: any) => void;
-  subjects: SubjectRow[];
-  grades: GradeRow[];
-}
-
-const ExamModal = ({ isOpen, onClose, onSubmit, form, onChange, loading, subjects, grades }: ExamModalProps) => {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">Schedule New Exam</h3>
-          <button type="button" onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
-        </div>
-        <form onSubmit={onSubmit} className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Subject *</label>
-              <select
-                value={form.subject_id}
-                onChange={e => onChange({ ...form, subject_id: e.target.value })}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                disabled={loading}
-              >
-                <option value="">Select subject</option>
-                {subjects.map(s => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} {s.grade?.grade_name ? `(${s.grade.grade_name})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Grade *</label>
-              <select
-                value={form.grade_id}
-                onChange={e => onChange({ ...form, grade_id: e.target.value })}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                disabled={loading}
-              >
-                <option value="">Select grade</option>
-                {grades.map(g => (
-                  <option key={g.id} value={g.id}>
-                    {g.grade_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Exam Date *</label>
-              <input
-                type="date"
-                value={form.date}
-                onChange={e => onChange({ ...form, date: e.target.value })}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Duration (minutes) *</label>
-              <input
-                type="number"
-                value={form.duration}
-                onChange={e => onChange({ ...form, duration: e.target.value })}
-                required
-                min={10}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                placeholder="60"
-                disabled={loading}
-              />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
-              <textarea
-                value={form.description}
-                onChange={e => onChange({ ...form, description: e.target.value })}
-                rows={3}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                placeholder="Exam instructions, topics covered..."
-                disabled={loading}
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3 mt-8">
-            <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled={loading}>
-              Cancel
-            </button>
-            <button type="submit" disabled={loading} className="px-4 py-2.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50">
-              {loading ? 'Scheduling...' : 'Schedule Exam'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-interface CurriculumModalProps extends ModalProps {
-  form: { name: string; objectives: string; learning_outcomes: string };
-  onChange: (form: any) => void;
-}
-
-const CurriculumModal = ({ isOpen, onClose, onSubmit, form, onChange, loading }: CurriculumModalProps) => {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-2xl">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">Add New Curriculum</h3>
-          <button type="button" onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
-        </div>
-        <form onSubmit={onSubmit} className="p-6">
-          <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Curriculum Name *</label>
-              <input
-                type="text"
-                value={form.name}
-                onChange={e => onChange({ ...form, name: e.target.value })}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                placeholder="Lower Primary, UNEB, Cambridge..."
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Objectives *</label>
-              <textarea
-                value={form.objectives}
-                onChange={e => onChange({ ...form, objectives: e.target.value })}
-                rows={4}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                placeholder="Curriculum objectives and goals..."
-                disabled={loading}
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Learning Outcomes *</label>
-              <textarea
-                value={form.learning_outcomes}
-                onChange={e => onChange({ ...form, learning_outcomes: e.target.value })}
-                rows={4}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                placeholder="Expected learning outcomes..."
-                disabled={loading}
-                required
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3 mt-8">
-            <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled={loading}>
-              Cancel
-            </button>
-            <button type="submit" disabled={loading} className="px-4 py-2.5 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">
-              {loading ? 'Creating...' : 'Create Curriculum'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-interface TermModalProps extends ModalProps {
-  form: { term_name: TermName; year: number; start_date: string; end_date: string };
-  onChange: (form: any) => void;
-}
-
-const TermModal = ({ isOpen, onClose, onSubmit, form, onChange, loading }: TermModalProps) => {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-xl">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">Create Term</h3>
-          <button type="button" onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
-        </div>
-        <form onSubmit={onSubmit} className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Term *</label>
-              <select
-                value={form.term_name}
-                onChange={e => onChange({ ...form, term_name: e.target.value as TermName })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                disabled={loading}
-              >
-                <option value="TERM_1">TERM 1</option>
-                <option value="TERM_2">TERM 2</option>
-                <option value="TERM_3">TERM 3</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Year *</label>
-              <input
-                type="number"
-                value={form.year}
-                onChange={e => onChange({ ...form, year: Number(e.target.value) })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Start Date *</label>
-              <input
-                type="date"
-                value={form.start_date}
-                onChange={e => onChange({ ...form, start_date: e.target.value })}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                disabled={loading}
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">End Date *</label>
-              <input
-                type="date"
-                value={form.end_date}
-                onChange={e => onChange({ ...form, end_date: e.target.value })}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                disabled={loading}
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3 mt-8">
-            <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled={loading}>
-              Cancel
-            </button>
-            <button type="submit" disabled={loading} className="px-4 py-2.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-              {loading ? 'Creating...' : 'Create Term'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-interface SessionModalProps extends ModalProps {
-  form: { term_id: string; exam_type: ExamType; start_date: string; end_date: string };
-  onChange: (form: any) => void;
-  terms: TermRow[];
-}
-
-const SessionModal = ({ isOpen, onClose, onSubmit, form, onChange, loading, terms }: SessionModalProps) => {
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-xl">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">Create Exam Session</h3>
-          <button type="button" onClick={onClose} className="p-1 hover:bg-gray-100 rounded-lg">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
-        </div>
-        <form onSubmit={onSubmit} className="p-6">
-          <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Term *</label>
-              <select
-                value={form.term_id}
-                onChange={e => onChange({ ...form, term_id: e.target.value })}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                disabled={loading}
-              >
-                <option value="">Select term</option>
-                {terms.map(t => (
-                  <option key={t.id} value={t.id}>
-                    {t.term_name.replace('_', ' ')} - {t.year} ({formatDate(t.start_date)} → {formatDate(t.end_date)})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Exam Type *</label>
-                <select
-                  value={form.exam_type}
-                  onChange={e => onChange({ ...form, exam_type: e.target.value as ExamType })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  disabled={loading}
-                >
-                  <option value="BOT">BOT (Beginning of Term)</option>
-                  <option value="MOT">MOT (Middle of Term)</option>
-                  <option value="EOT">EOT (End of Term)</option>
-                </select>
-              </div>
-
-              <div />
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Start Date *</label>
-                <input
-                  type="date"
-                  value={form.start_date}
-                  onChange={e => onChange({ ...form, start_date: e.target.value })}
-                  required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  disabled={loading}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">End Date *</label>
-                <input
-                  type="date"
-                  value={form.end_date}
-                  onChange={e => onChange({ ...form, end_date: e.target.value })}
-                  required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                  disabled={loading}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3 mt-8">
-            <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled={loading}>
-              Cancel
-            </button>
-            <button type="submit" disabled={loading} className="px-4 py-2.5 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">
-              {loading ? 'Creating...' : 'Create Session'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};

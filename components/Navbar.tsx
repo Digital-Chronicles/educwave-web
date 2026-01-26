@@ -441,9 +441,9 @@ export default function Navbar() {
 
   return (
     <>
-      {/* FIXED NAVBAR */}
+      {/* FIXED NAVBAR - FULL WIDTH */}
       <header className="fixed top-0 left-0 right-0 z-50 border-b border-slate-200/70 bg-white/90 backdrop-blur-xl supports-[backdrop-filter]:bg-white/85 dark:border-slate-800/70 dark:bg-slate-950/90 supports-[backdrop-filter]:dark:bg-slate-950/85 transition-all duration-300 shadow-sm hover:shadow-md">
-        <div className="mx-auto flex h-16 max-w-[1400px] items-center gap-3 px-4 lg:px-6">
+        <div className="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-8 w-full">
           {/* Left: Brand */}
           <button
             onClick={goHome}
@@ -468,9 +468,9 @@ export default function Navbar() {
             </div>
           </button>
 
-          {/* Center: Search */}
-          <div ref={searchWrapRef} className="relative flex-1">
-            <div className="relative w-full max-w-xl mx-auto">
+          {/* Center: Search - FULL WIDTH FLEXIBLE */}
+          <div ref={searchWrapRef} className="relative flex-1 mx-4 lg:mx-8">
+            <div className="relative w-full">
               <Search
                 size={18}
                 className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 transition-colors"
@@ -519,7 +519,7 @@ export default function Navbar() {
 
             {/* Suggestions dropdown */}
             {searchOpen && q.trim().length > 0 && (
-              <div className="absolute left-0 right-0 mt-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950 z-50 max-w-xl mx-auto animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="absolute left-0 right-0 mt-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="px-4 py-2.5 text-xs text-slate-500 border-b border-slate-100 dark:border-slate-900 bg-slate-50/50 dark:bg-slate-900/50">
                   {canSearch ? (
                     <>
@@ -756,12 +756,12 @@ export default function Navbar() {
       {/* Spacer so content doesn't go under the fixed navbar */}
       <div className="no-print" style={{ height: NAVBAR_HEIGHT_PX }} />
 
-      {/* Mobile bottom bar */}
+      {/* Mobile bottom bar - FULL WIDTH */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-xl supports-[backdrop-filter]:bg-white/90 dark:border-slate-800 dark:bg-slate-950/95 supports-[backdrop-filter]:dark:bg-slate-950/90 shadow-2xl animate-in fade-in slide-in-from-bottom-5 duration-300">
-        <div className="mx-auto flex max-w-[1400px] items-center justify-between px-6 py-3">
+        <div className="flex items-center justify-between px-6 py-3 w-full">
           <button 
             onClick={goHome} 
-            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-all duration-200 hover:scale-105 active:scale-95 group"
+            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-all duration-200 hover:scale-105 active:scale-95 group flex-1"
           >
             <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 dark:from-blue-500/20 dark:to-blue-500/10 flex items-center justify-center group-hover:from-blue-200 group-hover:to-blue-100 dark:group-hover:from-blue-500/30 transition-all">
               <Home size={20} className="text-blue-600 dark:text-blue-400" />
@@ -775,7 +775,7 @@ export default function Navbar() {
               setTimeout(() => searchInputRef.current?.focus(), 250);
               setSearchOpen(true);
             }}
-            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 transition-all duration-200 hover:scale-105 active:scale-95 group"
+            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 transition-all duration-200 hover:scale-105 active:scale-95 group flex-1"
           >
             <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-emerald-100 to-emerald-50 dark:from-emerald-500/20 dark:to-emerald-500/10 flex items-center justify-center group-hover:from-emerald-200 group-hover:to-emerald-100 dark:group-hover:from-emerald-500/30 transition-all">
               <Search size={20} className="text-emerald-600 dark:text-emerald-400" />
@@ -785,13 +785,13 @@ export default function Navbar() {
 
           <button
             onClick={() => setNotifications(0)}
-            className="relative flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-orange-600 dark:hover:text-orange-400 transition-all duration-200 hover:scale-105 active:scale-95 group"
+            className="relative flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-orange-600 dark:hover:text-orange-400 transition-all duration-200 hover:scale-105 active:scale-95 group flex-1"
           >
             <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-orange-100 to-orange-50 dark:from-orange-500/20 dark:to-orange-500/10 flex items-center justify-center group-hover:from-orange-200 group-hover:to-orange-100 dark:group-hover:from-orange-500/30 transition-all">
               <Bell size={20} className="text-orange-600 dark:text-orange-400" />
             </div>
             {notifications > 0 && (
-              <span className="absolute -top-1 -right-1 inline-flex h-5 min-w-[16px] items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-red-500 text-[10px] font-bold text-white shadow-lg animate-bounce">
+              <span className="absolute -top-1 -right-3 inline-flex h-5 min-w-[16px] items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-red-500 text-[10px] font-bold text-white shadow-lg animate-bounce">
                 {notifications}
               </span>
             )}
@@ -800,7 +800,7 @@ export default function Navbar() {
 
           <button
             onClick={() => setIsUserMenuOpen(true)}
-            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-all duration-200 hover:scale-105 active:scale-95 group"
+            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-all duration-200 hover:scale-105 active:scale-95 group flex-1"
           >
             <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-violet-100 to-violet-50 dark:from-violet-500/20 dark:to-violet-500/10 flex items-center justify-center group-hover:from-violet-200 group-hover:to-violet-100 dark:group-hover:from-violet-500/30 transition-all">
               <UserCircle size={20} className="text-violet-600 dark:text-violet-400" />

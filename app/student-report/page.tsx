@@ -6,30 +6,30 @@ import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
 import AppShell from '@/components/AppShell';
 import {
-  AlertCircle,
   Award,
   BookOpen,
-  Calendar,
-  ChevronDown,
   Download,
   FileText,
   Printer,
   School,
   User,
   Wand2,
-  Sparkles,
   TrendingUp,
   Target,
   Filter,
   BarChart3,
-  Clock,
-  GraduationCap,
   Edit,
   Save,
   RefreshCw,
-  Image as ImageIcon,
+  Hash,
+  Layers,
+  Trophy,
+  AlertCircle,
+  CheckCircle,
+  XCircle,
 } from 'lucide-react';
 
+// ============ TYPES ============
 type AppRole = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
 
 interface ProfileRow {
@@ -128,8 +128,21 @@ interface SubjectRowWithDetails {
   grade_text: string;
   pill: string;
   colorClass: string;
+  unebGrade: number;
 }
 
+interface PerformanceAnalysis {
+  bestSubject: string;
+  worstSubject: string;
+  bestSubjectGrade: string;
+  worstSubjectGrade: string;
+  strengthCount: number;
+  improvementCount: number;
+  subjectsAboveAverage: number;
+  subjectsBelowAverage: number;
+}
+
+// ============ HELPER FUNCTIONS ============
 const fmtName = (s: StudentRow) => `${s.first_name ?? ''} ${s.last_name ?? ''}`.trim();
 
 function formatDate(dateStr: string | null) {
@@ -148,11 +161,10 @@ function termLabel(t?: TermExamRow | null) {
 }
 
 function examTypeLabel(t: 'BOT' | 'MOT' | 'EOT') {
-  if (t === 'BOT') return 'BOT';
-  if (t === 'MOT') return 'MOT';
-  return 'EOT';
+  return t;
 }
 
+// UNEB Grading System
 function unebSubjectGrade(pct: number): number {
   if (pct >= 80) return 1;
   if (pct >= 70) return 2;
@@ -172,7 +184,9 @@ function unebGradeText(g: number) {
   if (g === 4) return 'C4';
   if (g === 5) return 'P5';
   if (g === 6) return 'P6';
-  return `F${g}`;
+  if (g === 7) return 'F7';
+  if (g === 8) return 'F8';
+  return 'F9';
 }
 
 function unebDivisionFromAggregate(agg: number) {
@@ -180,13 +194,6 @@ function unebDivisionFromAggregate(agg: number) {
   if (agg >= 13 && agg <= 23) return 'Division 2';
   if (agg >= 24 && agg <= 29) return 'Division 3';
   if (agg >= 30 && agg <= 34) return 'Division 4';
-  return 'U';
-}
-
-function worsenDivisionOnce(div: string) {
-  if (div === 'Division 1') return 'Division 2';
-  if (div === 'Division 2') return 'Division 3';
-  if (div === 'Division 3') return 'Division 4';
   return 'U';
 }
 
@@ -234,247 +241,135 @@ function perfBand(pct: number) {
   return 'poor';
 }
 
-// Dynamic subject-specific comments based on performance
-function getSubjectComments(subjectName: string, termPct: number, gradeText: string): string {
-  const subject = subjectName.toLowerCase();
-  const grade = gradeText;
-  const pct = Math.round(termPct);
-  
-  // Grade-based feedback
-  const gradeBasedComments = {
-    D1: [
-      `Outstanding performance in ${subjectName}! Your mastery of concepts is exceptional.`,
-      `Excellent work in ${subjectName} (${pct}%). You've shown deep understanding.`,
-      `Top-tier performance in ${subjectName}. Your analytical skills are impressive.`,
-    ],
-    D2: [
-      `Very strong performance in ${subjectName} (${pct}%). Keep up the great work.`,
-      `Good understanding of ${subjectName} concepts. Consistent effort is paying off.`,
-      `Solid performance in ${subjectName}. You're on the right track.`,
-    ],
-    C3: [
-      `Satisfactory performance in ${subjectName} (${pct}%). Room for improvement.`,
-      `Average performance. Focus on weak areas to improve your grade.`,
-      `Decent effort in ${subjectName}. More practice will help you excel.`,
-    ],
-    C4: [
-      `Below average in ${subjectName} (${pct}%). Needs more attention and practice.`,
-      `${subjectName} requires improvement. Consider extra study sessions.`,
-      `Performance needs boosting in ${subjectName}. Focus on basics.`,
-    ],
-    P5: [
-      `Minimal pass in ${subjectName}. Serious improvement needed.`,
-      `Barely passing in ${subjectName}. Requires immediate attention.`,
-      `Weak performance in ${subjectName}. Needs remedial classes.`,
-    ],
-    P6: [
-      `Poor performance in ${subjectName}. Critical improvement required.`,
-      `Very weak in ${subjectName}. Intensive revision needed.`,
-      `Failing to grasp ${subjectName} concepts. Seek help immediately.`,
-    ],
-    F7: [
-      `Very poor performance. Requires urgent intervention.`,
-      `Complete misunderstanding of ${subjectName} concepts.`,
-      `Critical failure in ${subjectName}. Must improve immediately.`,
-    ],
-    F8: [
-      `Extremely poor performance. Parent consultation needed.`,
-      `Complete failure to understand ${subjectName}.`,
-      `Worst performance in ${subjectName}. Requires serious attention.`,
-    ],
-    F9: [
-      `Complete failure. Academic probation may be necessary.`,
-      `Total lack of understanding in ${subjectName}.`,
-      `Failed completely in ${subjectName}. Mandatory remedial needed.`,
-    ],
+// Comments functions
+function getSubjectComment(gradeText: string, pct: number): string {
+  const shortComments: Record<string, string[]> = {
+    D1: ['Excellent work.', 'Outstanding performance.', 'Exceptional achievement.'],
+    D2: ['Very good.', 'Strong performance.', 'Well done.'],
+    C3: ['Good effort.', 'Satisfactory work.', 'Average performance.'],
+    C4: ['Needs improvement.', 'Can do better.', 'Below average.'],
+    P5: ['Poor performance.', 'Needs help.', 'Very weak.'],
+    P6: ['Failed to meet expectations.', 'Critical improvement needed.', 'Poor.'],
+    F7: ['Failed badly.', 'No understanding shown.', 'Very poor.'],
+    F8: ['Complete failure.', 'Zero grasp of concepts.', 'Failed.'],
+    F9: ['Total failure.', 'Failed completely.', 'No attempt.'],
   };
 
-  // Subject-specific recommendations
-  const recommendations: Record<string, string[]> = {
-    'english': [
-      'Practice reading comprehension daily',
-      'Improve grammar through exercises',
-      'Write compositions weekly',
-      'Build vocabulary through reading',
-      'Practice spelling and punctuation',
-    ],
-    'math': [
-      'Solve practice problems daily',
-      'Master basic operations',
-      'Show all working steps',
-      'Practice mental calculations',
-      'Review formulas regularly',
-    ],
-    'science': [
-      'Conduct simple experiments',
-      'Draw and label diagrams',
-      'Understand scientific processes',
-      'Memorize key terms',
-      'Practice past papers',
-    ],
-    'social': [
-      'Read historical accounts',
-      'Practice map reading',
-      'Understand timelines',
-      'Connect events to causes',
-      'Write clear explanations',
-    ],
-    'default': [
-      'Regular revision',
-      'Complete all assignments',
-      'Ask questions in class',
-      'Study in groups',
-      'Use study guides',
-    ],
-  };
-
-  // Get appropriate comment based on grade
-  let gradeKey = 'D1';
-  if (grade.startsWith('D1') || grade.startsWith('D2')) gradeKey = grade.substring(0, 2);
-  else if (grade.startsWith('C3') || grade.startsWith('C4')) gradeKey = grade.substring(0, 2);
-  else if (grade.startsWith('P5') || grade.startsWith('P6')) gradeKey = grade.substring(0, 2);
-  else gradeKey = grade;
-
-  const comments = gradeBasedComments[gradeKey as keyof typeof gradeBasedComments] || 
-                  gradeBasedComments.D1;
+  const gradeKey = gradeText.startsWith('D') ? 'D1' : 
+                   gradeText.startsWith('C') ? 'C3' : 
+                   gradeText.startsWith('P') ? 'P5' : 'F7';
   
-  // Get recommendations based on subject
-  let subjectKey = 'default';
-  if (subject.includes('english')) subjectKey = 'english';
-  else if (subject.includes('math')) subjectKey = 'math';
-  else if (subject.includes('science')) subjectKey = 'science';
-  else if (subject.includes('social') || subject.includes('sst')) subjectKey = 'social';
-
-  const recs = recommendations[subjectKey];
-  const randomRec = recs[Math.floor(Math.random() * recs.length)];
-  
-  const comment = pickStable(comments, `${subjectName}${grade}${pct}`);
-  return `${comment} Recommendation: ${randomRec}`;
+  const comments = shortComments[gradeKey as keyof typeof shortComments] || shortComments.C3;
+  return pickStable(comments, `${gradeText}${pct}`);
 }
 
-// Dynamic overall remarks based on performance
-function getOverallRemarks(overallPct: number, division: string, performanceAnalysis: any): string {
-  const pct = Math.round(overallPct);
-  const band = perfBand(overallPct);
-
-  const excellentRemarks = [
-    `Exceptional performance! You've achieved ${division} with ${pct}% overall. Your consistent effort in ${performanceAnalysis?.strengthCount || 0} subjects is commendable. Maintain this excellence.`,
-    `Outstanding achievement! ${division} with ${pct}% shows dedication. Excellent work in ${performanceAnalysis?.strengthCount || 0} subjects. Keep aiming higher.`,
-    `Brilliant performance! Securing ${division} with ${pct}% is impressive. Your strength in ${performanceAnalysis?.strengthCount || 0} subjects sets you apart.`,
-  ];
-
-  const veryGoodRemarks = [
-    `Very good performance! ${division} with ${pct}% is solid. You excel in ${performanceAnalysis?.strengthCount || 0} subjects. Focus on improving ${performanceAnalysis?.improvementCount || 0} weaker areas.`,
-    `Strong work! Achieving ${division} with ${pct}% shows promise. ${performanceAnalysis?.strengthCount || 0} subjects are your strengths.`,
-    `Good overall performance! ${division} with ${pct}%. You show potential in ${performanceAnalysis?.strengthCount || 0} subjects.`,
-  ];
-
-  const goodRemarks = [
-    `Satisfactory performance! ${division} with ${pct}%. Work on consistency across all ${performanceAnalysis?.strengthCount + performanceAnalysis?.improvementCount || 0} subjects.`,
-    `Average achievement! ${division} with ${pct}%. ${performanceAnalysis?.improvementCount || 0} subjects need attention. Increase study time.`,
-    `Fair performance! ${division} with ${pct}%. Focus on ${performanceAnalysis?.improvementCount || 0} weaker subjects for better results.`,
-  ];
-
-  const fairRemarks = [
-    `Below expectations! ${division} with ${pct}%. ${performanceAnalysis?.improvementCount || 0} subjects are critically weak. Requires serious improvement.`,
-    `Needs improvement! ${division} with ${pct}% is below average. ${performanceAnalysis?.improvementCount || 0} subjects need immediate attention.`,
-    `Weak performance! ${division} with ${pct}%. ${performanceAnalysis?.improvementCount || 0} subjects are failing. Must work harder.`,
-  ];
-
-  const poorRemarks = [
-    `Poor performance! ${division} with ${pct}%. ${performanceAnalysis?.improvementCount || 0} subjects are critically weak. Urgent action required.`,
-    `Very weak! ${division} with ${pct}% shows serious academic struggle. Requires intensive remedial work.`,
-    `Unsatisfactory! ${division} with ${pct}%. Academic probation may be considered if no improvement.`,
-  ];
-
-  const pools: Record<string, string[]> = {
-    excellent: excellentRemarks,
-    very_good: veryGoodRemarks,
-    good: goodRemarks,
-    fair: fairRemarks,
-    poor: poorRemarks,
-  };
-
-  return pickStable(pools[band] || poorRemarks, `${division}${pct}overall`);
-}
-
-// Dynamic class teacher comments
-function getClassTeacherComment(overallPct: number, division: string, studentName: string, bestSubject: string, worstSubject: string): string {
-  const pct = Math.round(overallPct);
-  const band = perfBand(overallPct);
-
+function getClassTeacherComment(pct: number, division: string, studentName: string): string {
+  const band = perfBand(pct);
+  
   const templates: Record<string, string[]> = {
     excellent: [
-      `${studentName} has performed exceptionally well this term, achieving ${division} with ${pct}% overall. Their outstanding performance in ${bestSubject} demonstrates exceptional capability. Keep up the excellent work!`,
-      `Excellent term for ${studentName}! ${division} with ${pct}% shows great dedication. Strong performance in ${bestSubject} is particularly commendable.`,
-      `Outstanding achievement by ${studentName}! ${division} with ${pct}% reflects hard work and intelligence. Exceling in ${bestSubject} shows great potential.`,
+      `${studentName} has performed excellently. Division: ${division}.`,
+      `Outstanding performance by ${studentName}. ${division}.`,
+      `Excellent work throughout the term. ${division}.`,
     ],
     very_good: [
-      `${studentName} has performed very well, achieving ${division} with ${pct}%. Good effort shown throughout the term. Strong in ${bestSubject}, but could improve in ${worstSubject}.`,
-      `Very good performance from ${studentName}! ${division} with ${pct}% shows consistent effort. Excels in ${bestSubject}, needs attention in ${worstSubject}.`,
-      `Solid work by ${studentName}! ${division} with ${pct}% is commendable. ${bestSubject} is a strength, while ${worstSubject} needs more focus.`,
+      `${studentName} performed very well. ${division}.`,
+      `Good consistent performance. ${division}.`,
+      `Strong work ethic demonstrated. ${division}.`,
     ],
     good: [
-      `${studentName} has shown satisfactory performance with ${division} at ${pct}%. Room for improvement in ${worstSubject}. More consistent effort needed.`,
-      `Average performance from ${studentName}. ${division} with ${pct}% shows potential. Focus on improving ${worstSubject} for better results.`,
-      `Decent effort by ${studentName}. ${division} with ${pct}% is acceptable. ${bestSubject} shows promise, ${worstSubject} needs work.`,
+      `${studentName}'s performance was satisfactory. ${division}.`,
+      `Average performance with room for improvement. ${division}.`,
+      `Fair effort shown throughout. ${division}.`,
     ],
     fair: [
-      `${studentName}'s performance needs improvement (${division}, ${pct}%). ${worstSubject} requires immediate attention. Increased study time needed.`,
-      `Below average performance from ${studentName}. ${division} with ${pct}% is concerning. ${worstSubject} is critically weak.`,
-      `Weak performance by ${studentName}. ${division} with ${pct}% shows struggle. ${worstSubject} needs urgent remedial work.`,
+      `${studentName} needs to improve performance. ${division}.`,
+      `Below expectations, needs more effort. ${division}.`,
+      `Weak performance, requires attention. ${division}.`,
     ],
     poor: [
-      `${studentName} has performed poorly (${division}, ${pct}%). ${worstSubject} is failing. Parent consultation and remedial classes required.`,
-      `Very weak performance from ${studentName}. ${division} with ${pct}% shows serious academic issues. ${worstSubject} needs intensive intervention.`,
-      `Unsatisfactory performance by ${studentName}. ${division} with ${pct}% is alarming. Academic probation may be necessary.`,
+      `${studentName} failed to meet minimum standards. ${division}.`,
+      `Very poor performance, immediate intervention needed. ${division}.`,
+      `Unsatisfactory results across subjects. ${division}.`,
     ],
   };
 
-  return pickStable(templates[band] || templates.poor, `${studentName}${division}${pct}class`);
+  return pickStable(templates[band] || templates.good, `${studentName}${division}${pct}`);
 }
 
-// Dynamic head teacher comments
-function getHeadTeacherComment(overallPct: number, division: string, studentName: string, gradeName: string): string {
-  const pct = Math.round(overallPct);
-  const band = perfBand(overallPct);
-
+function getHeadTeacherComment(pct: number, division: string): string {
+  const band = perfBand(pct);
+  
   const templates: Record<string, string[]> = {
     excellent: [
-      `I commend ${studentName} for outstanding academic achievement - ${division} with ${pct}% in ${gradeName}. This exemplary performance reflects the highest standards of our institution.`,
-      `Exceptional work by ${studentName}! Achieving ${division} with ${pct}% in ${gradeName} sets a remarkable example for peers.`,
-      `Outstanding performance from ${studentName}. ${division} with ${pct}% demonstrates excellence in ${gradeName}. A credit to our school.`,
+      'Excellent achievement. Top performance in class.',
+      'Outstanding student. Sets a good example.',
+      'Academic excellence demonstrated throughout.',
     ],
     very_good: [
-      `${studentName} has shown commendable performance - ${division} with ${pct}% in ${gradeName}. Continue striving for excellence.`,
-      `Very good achievement by ${studentName}. ${division} with ${pct}% in ${gradeName} shows promise and dedication.`,
-      `Strong performance from ${studentName}. ${division} with ${pct}% reflects good effort in ${gradeName}.`,
+      'Very good performance. Maintain high standards.',
+      'Strong academic showing. Keep it up.',
+      'Commendable effort and results.',
     ],
     good: [
-      `${studentName} has achieved satisfactory results - ${division} with ${pct}% in ${gradeName}. Room for growth exists.`,
-      `Average performance by ${studentName}. ${division} with ${pct}% in ${gradeName} shows potential for improvement.`,
-      `Fair results from ${studentName}. ${division} with ${pct}% indicates need for more consistent effort.`,
+      'Satisfactory performance. Room for improvement.',
+      'Average results. Could do better with more effort.',
+      'Fair achievement. Needs to aim higher.',
     ],
     fair: [
-      `${studentName}'s performance needs attention - ${division} with ${pct}% in ${gradeName} is below expectations. Improvement required.`,
-      `Below standard performance from ${studentName}. ${division} with ${pct}% in ${gradeName} requires serious intervention.`,
-      `Weak performance by ${studentName}. ${division} with ${pct}% shows academic struggle in ${gradeName}.`,
+      'Below standard performance. Needs immediate improvement.',
+      'Weak results. Requires extra support.',
+      'Needs to work harder to meet expectations.',
     ],
     poor: [
-      `${studentName} has performed poorly - ${division} with ${pct}% in ${gradeName} is unacceptable. Urgent improvement needed.`,
-      `Very weak performance from ${studentName}. ${division} with ${pct}% in ${gradeName} raises serious concerns.`,
-      `Unsatisfactory results by ${studentName}. ${division} with ${pct}% indicates academic failure in ${gradeName}.`,
+      'Poor performance. Parental intervention required.',
+      'Unsatisfactory results. Urgent attention needed.',
+      'Failed to meet academic standards.',
     ],
   };
 
-  return pickStable(templates[band] || templates.poor, `${studentName}${division}${pct}head`);
+  return pickStable(templates[band] || templates.good, `${division}${pct}`);
+}
+
+function getOverallRemark(pct: number, division: string): string {
+  const band = perfBand(pct);
+  const roundPct = Math.round(pct);
+  
+  const remarks: Record<string, string[]> = {
+    excellent: [
+      `Excellent! Division ${division} with ${roundPct}% average.`,
+      `Outstanding performance! ${division}.`,
+      `Top performer! Excellent results across all subjects.`,
+    ],
+    very_good: [
+      `Very good! ${division} division with ${roundPct}% average.`,
+      `Strong performance! ${division}.`,
+      `Well done! Good academic achievement.`,
+    ],
+    good: [
+      `Satisfactory. ${division} with ${roundPct}% average.`,
+      `Average performance. ${division}.`,
+      `Fair results. Room for improvement.`,
+    ],
+    fair: [
+      `Needs improvement. ${division} with ${roundPct}% average.`,
+      `Below expectations. ${division}.`,
+      `Weak performance. Requires more effort.`,
+    ],
+    poor: [
+      `Poor performance. ${division} with ${roundPct}% average.`,
+      `Failed to meet standards. ${division}.`,
+      `Very weak results. Immediate attention required.`,
+    ],
+  };
+
+  return pickStable(remarks[band] || remarks.good, `${division}${pct}`);
 }
 
 function tinyToast(message: string) {
   const el = document.createElement('div');
-  el.className =
-    'fixed top-4 right-4 z-[9999] rounded-xl bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 py-3 shadow-2xl flex items-center gap-2 no-print animate-in slide-in-from-right-10 duration-300';
-  el.innerHTML = `<span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/10">✓</span><span class="text-sm">${message}</span>`;
+  el.className = 'fixed top-4 right-4 z-50 rounded-lg bg-gray-900 text-white px-4 py-2 text-sm shadow-lg';
+  el.textContent = message;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 2000);
 }
@@ -485,16 +380,23 @@ function teacherDisplayName(t?: TeacherJoinRow | null) {
 }
 
 function buildLocalKey(schoolId: string, gradeId: string, termId: string, studentId: string) {
-  return `student_report_comments::${schoolId}::${gradeId}::${termId}::${studentId}`;
+  return `report_comments::${schoolId}::${gradeId}::${termId}::${studentId}`;
 }
 
-type LocalCommentsPayload = {
-  subjectComments: Record<number, string>;
-  classTeacherComment: string;
-  headTeacherComment: string;
-};
-
-function analyzePerformance(subjectRows: SubjectRowWithDetails[]) {
+function analyzePerformance(subjectRows: SubjectRowWithDetails[]): PerformanceAnalysis {
+  if (subjectRows.length === 0) {
+    return {
+      bestSubject: '—',
+      worstSubject: '—',
+      bestSubjectGrade: '—',
+      worstSubjectGrade: '—',
+      strengthCount: 0,
+      improvementCount: 0,
+      subjectsAboveAverage: 0,
+      subjectsBelowAverage: 0,
+    };
+  }
+  
   const bestSubject = subjectRows.reduce((best, current) => 
     current.termPct > best.termPct ? current : best
   );
@@ -505,50 +407,50 @@ function analyzePerformance(subjectRows: SubjectRowWithDetails[]) {
 
   const strengths = subjectRows.filter(s => s.termPct >= 70);
   const improvements = subjectRows.filter(s => s.termPct < 50);
+  const aboveAverage = subjectRows.filter(s => s.termPct >= 60);
+  const belowAverage = subjectRows.filter(s => s.termPct < 60);
 
   return {
     bestSubject: bestSubject.subject_name,
     worstSubject: worstSubject.subject_name,
-    strengthCount: strengths.length,
-    improvementCount: improvements.length,
     bestSubjectGrade: bestSubject.grade_text,
     worstSubjectGrade: worstSubject.grade_text,
+    strengthCount: strengths.length,
+    improvementCount: improvements.length,
+    subjectsAboveAverage: aboveAverage.length,
+    subjectsBelowAverage: belowAverage.length,
   };
 }
 
+// ============ MAIN COMPONENT ============
 export default function StudentReportPage() {
   const router = useRouter();
 
+  // State Management
   const [authChecking, setAuthChecking] = useState(true);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [school, setSchool] = useState<SchoolRow | null>(null);
-
   const [grades, setGrades] = useState<GradeRow[]>([]);
   const [subjects, setSubjects] = useState<SubjectRow[]>([]);
   const [terms, setTerms] = useState<TermExamRow[]>([]);
   const [examSessions, setExamSessions] = useState<ExamSessionRow[]>([]);
-
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [results, setResults] = useState<ExamResultRow[]>([]);
-
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
   const [selectedGradeId, setSelectedGradeId] = useState('');
   const [selectedTermId, setSelectedTermId] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState('');
-
   const [subjectComments, setSubjectComments] = useState<Record<number, string>>({});
   const [classTeacherComment, setClassTeacherComment] = useState('');
   const [headTeacherComment, setHeadTeacherComment] = useState('');
-
   const [subjectTeacherById, setSubjectTeacherById] = useState<Record<number, string>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
+  // ============ EFFECTS ============
+  // Auth check
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();
@@ -556,11 +458,11 @@ export default function StudentReportPage() {
         router.replace('/');
         return;
       }
-      setUserEmail(data.session.user.email ?? null);
       setAuthChecking(false);
     })();
   }, [router]);
 
+  // Load profile and school data
   useEffect(() => {
     if (authChecking) return;
 
@@ -594,20 +496,20 @@ export default function StudentReportPage() {
           .eq('id', prof.school_id)
           .single();
 
-        if (sErr || !s) throw new Error(sErr?.message || 'School settings not found.');
-        const sch = s as SchoolRow;
-        setSchool(sch);
+        if (sErr || !s) throw new Error(sErr?.message || 'School not found.');
+        setSchool(s as SchoolRow);
 
+        // Load all data in parallel
         const [gradeRes, subjectRes, termRes, examSessRes] = await Promise.all([
-          supabase.from('class').select('id, grade_name').eq('school_id', sch.id).order('grade_name'),
-          supabase.from('subject').select('id, name, grade_id').eq('school_id', sch.id).order('name'),
+          supabase.from('class').select('id, grade_name').eq('school_id', s.id).order('grade_name'),
+          supabase.from('subject').select('id, name, grade_id').eq('school_id', s.id).order('name'),
           supabase
             .from('term_exam_session')
             .select('id, term_name, year, start_date, end_date')
-            .eq('school_id', sch.id)
+            .eq('school_id', s.id)
             .order('year', { ascending: false })
             .order('term_name'),
-          supabase.from('exam_session').select('id, term_id, exam_type').eq('school_id', sch.id).order('id'),
+          supabase.from('exam_session').select('id, term_id, exam_type').eq('school_id', s.id).order('id'),
         ]);
 
         if (gradeRes.error) throw gradeRes.error;
@@ -627,35 +529,41 @@ export default function StudentReportPage() {
     })();
   }, [authChecking]);
 
-  const selectedTerm = useMemo(
-    () => (selectedTermId ? terms.find((t) => t.id === Number(selectedTermId)) ?? null : null),
+  // Derived values
+  const selectedTerm = useMemo(() => 
+    selectedTermId ? terms.find(t => t.id === Number(selectedTermId)) ?? null : null,
     [terms, selectedTermId]
   );
 
-  const selectedGrade = useMemo(
-    () => (selectedGradeId ? grades.find((g) => g.id === Number(selectedGradeId)) ?? null : null),
+  const selectedGrade = useMemo(() => 
+    selectedGradeId ? grades.find(g => g.id === Number(selectedGradeId)) ?? null : null,
     [grades, selectedGradeId]
   );
 
   const subjectsForGrade = useMemo(() => {
     if (!selectedGradeId) return [];
-    return subjects.filter((s) => s.grade_id === Number(selectedGradeId));
+    return subjects.filter(s => s.grade_id === Number(selectedGradeId));
   }, [subjects, selectedGradeId]);
 
   const examSessionsForTerm = useMemo(() => {
     if (!selectedTermId) return [];
     return examSessions
-      .filter((es) => es.term_id === Number(selectedTermId))
+      .filter(es => es.term_id === Number(selectedTermId))
       .sort((a, b) => {
         const ord = (x: ExamSessionRow['exam_type']) => (x === 'BOT' ? 1 : x === 'MOT' ? 2 : 3);
         return ord(a.exam_type) - ord(b.exam_type);
       });
   }, [examSessions, selectedTermId]);
 
-  const canLoad = useMemo(() => Boolean(school?.id && selectedGradeId && selectedTermId), [school?.id, selectedGradeId, selectedTermId]);
+  const canLoad = useMemo(() => 
+    Boolean(school?.id && selectedGradeId && selectedTermId), 
+    [school?.id, selectedGradeId, selectedTermId]
+  );
+
   const sessions = examSessionsForTerm;
   const noSessions = canLoad && sessions.length === 0;
 
+  // Load students, questions, results
   useEffect(() => {
     if (!school?.id) return;
 
@@ -667,9 +575,6 @@ export default function StudentReportPage() {
         setQuestions([]);
         setResults([]);
         setSelectedStudentId('');
-        setSubjectComments({});
-        setClassTeacherComment('');
-        setHeadTeacherComment('');
         return;
       }
 
@@ -677,8 +582,9 @@ export default function StudentReportPage() {
       try {
         const gradeId = Number(selectedGradeId);
         const termId = Number(selectedTermId);
-        const sessionIds = examSessionsForTerm.map((s) => s.id);
+        const sessionIds = examSessionsForTerm.map(s => s.id);
 
+        // Load students
         const studentsRes = await supabase
           .from('students')
           .select('registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url')
@@ -688,43 +594,44 @@ export default function StudentReportPage() {
 
         if (studentsRes.error) throw studentsRes.error;
 
-        const questionsRes =
-          sessionIds.length === 0
-            ? { data: [], error: null }
-            : await supabase
-                .from('assessment_question')
-                .select('id, max_score, grade_id, subject_id, exam_type_id')
-                .eq('school_id', school.id)
-                .eq('grade_id', gradeId)
-                .eq('term_exam_id', termId)
-                .in('exam_type_id', sessionIds);
+        // Load questions
+        const questionsRes = sessionIds.length === 0
+          ? { data: [], error: null }
+          : await supabase
+              .from('assessment_question')
+              .select('id, max_score, grade_id, subject_id, exam_type_id')
+              .eq('school_id', school.id)
+              .eq('grade_id', gradeId)
+              .eq('term_exam_id', termId)
+              .in('exam_type_id', sessionIds);
 
         if ((questionsRes as any).error) throw (questionsRes as any).error;
 
         const qRows = ((questionsRes as any).data ?? []) as QuestionRow[];
-        const qIds = qRows.map((q) => q.id);
+        const qIds = qRows.map(q => q.id);
 
-        const resultsRes =
-          qIds.length === 0
-            ? { data: [], error: null }
-            : await supabase
-                .from('assessment_examresult')
-                .select('id, student_id, question_id, grade_id, exam_session_id, score')
-                .eq('school_id', school.id)
-                .eq('grade_id', gradeId)
-                .in('exam_session_id', sessionIds)
-                .in('question_id', qIds);
+        // Load results
+        const resultsRes = qIds.length === 0
+          ? { data: [], error: null }
+          : await supabase
+              .from('assessment_examresult')
+              .select('id, student_id, question_id, grade_id, exam_session_id, score')
+              .eq('school_id', school.id)
+              .eq('grade_id', gradeId)
+              .in('exam_session_id', sessionIds)
+              .in('question_id', qIds);
 
         if ((resultsRes as any).error) throw (resultsRes as any).error;
 
-        const stuRows = (studentsRes.data ?? []) as StudentRow[];
-        setStudents(stuRows);
+        setStudents((studentsRes.data ?? []) as StudentRow[]);
         setQuestions(qRows);
         setResults(((resultsRes as any).data ?? []) as ExamResultRow[]);
 
-        if (!selectedStudentId && stuRows.length > 0) setSelectedStudentId(stuRows[0].registration_id);
+        if (!selectedStudentId && studentsRes.data && studentsRes.data.length > 0) {
+          setSelectedStudentId(studentsRes.data[0].registration_id);
+        }
       } catch (e: any) {
-        setErrorMsg(e.message || 'Failed to load report data.');
+        setErrorMsg(e.message || 'Failed to load data.');
         setStudents([]);
         setQuestions([]);
         setResults([]);
@@ -734,11 +641,12 @@ export default function StudentReportPage() {
     })();
   }, [school?.id, canLoad, selectedGradeId, selectedTermId, examSessionsForTerm.length]);
 
-  const selectedStudent = useMemo(
-    () => (selectedStudentId ? students.find((s) => s.registration_id === selectedStudentId) ?? null : null),
+  const selectedStudent = useMemo(() => 
+    selectedStudentId ? students.find(s => s.registration_id === selectedStudentId) ?? null : null,
     [students, selectedStudentId]
   );
 
+  // Load subject teachers
   useEffect(() => {
     if (!school?.id || !selectedGradeId) return;
 
@@ -765,6 +673,7 @@ export default function StudentReportPage() {
     })();
   }, [school?.id, selectedGradeId]);
 
+  // Calculate possible scores by session and subject
   const possibleBySessionSubject = useMemo(() => {
     const map = new Map<number, Map<number, number>>();
     for (const q of questions) {
@@ -778,6 +687,7 @@ export default function StudentReportPage() {
     return map;
   }, [questions]);
 
+  // Map question to session and subject
   const questionToSessionSubject = useMemo(() => {
     const m = new Map<number, { sessionId: number; subjectId: number }>();
     for (const q of questions) {
@@ -788,6 +698,7 @@ export default function StudentReportPage() {
     return m;
   }, [questions]);
 
+  // Calculate totals by student, session, subject
   const totalsByStudentSessionSubject = useMemo(() => {
     const map = new Map<string, Map<number, Map<number, number>>>();
     for (const r of results) {
@@ -810,6 +721,7 @@ export default function StudentReportPage() {
     return map;
   }, [results, questionToSessionSubject]);
 
+  // Prepare subject rows for selected student
   const subjectRowsForStudent = useMemo(() => {
     if (!selectedStudent) return [];
     const sMap = totalsByStudentSessionSubject.get(selectedStudent.registration_id) ?? new Map();
@@ -823,13 +735,13 @@ export default function StudentReportPage() {
         return { sessionId: sess.id, exam_type: sess.exam_type, total, possible, pct };
       });
 
-      const valid = perSession.filter((x) => x.possible > 0);
+      const valid = perSession.filter(x => x.possible > 0);
       const totalAll = valid.reduce((a, x) => a + x.total, 0);
       const possibleAll = valid.reduce((a, x) => a + x.possible, 0);
       const termPct = possibleAll > 0 ? (totalAll / possibleAll) * 100 : 0;
 
-      const g = unebSubjectGrade(termPct);
-      const txt = unebGradeText(g);
+      const unebGrade = unebSubjectGrade(termPct);
+      const txt = unebGradeText(unebGrade);
 
       return {
         subject_id: sub.id,
@@ -839,49 +751,52 @@ export default function StudentReportPage() {
         grade_text: txt,
         pill: gradePillClass(txt),
         colorClass: gradeColor(termPct),
+        unebGrade,
       };
     });
   }, [selectedStudent, subjectsForGrade, sessions, totalsByStudentSessionSubject, possibleBySessionSubject]);
 
+  // Calculate overall percentage
   const overall = useMemo(() => {
     if (!selectedStudent) return { pct: 0 };
-    const valid = subjectRowsForStudent.map((r) => r.termPct).filter((x) => Number.isFinite(x) && x > 0);
+    const valid = subjectRowsForStudent.map(r => r.termPct).filter(x => Number.isFinite(x) && x > 0);
     const pct = valid.length ? valid.reduce((a, x) => a + x, 0) / valid.length : 0;
     return { pct };
   }, [selectedStudent, subjectRowsForStudent]);
 
+  // Calculate aggregate and division
   const aggregateAndDivision = useMemo(() => {
-    if (!selectedStudent) return { aggregate: 0, division: '—', pill: divisionPillClass('U') };
+    if (!selectedStudent) return { aggregate: 0, division: '—', pill: divisionPillClass('U'), best4Count: 0, best4Grades: [] };
 
-    const gradesArr = subjectRowsForStudent.map((r) => unebSubjectGrade(r.termPct)).sort((a, b) => a - b);
+    const gradesArr = subjectRowsForStudent
+      .filter(s => s.unebGrade > 0)
+      .map(s => s.unebGrade)
+      .sort((a, b) => a - b);
+    
     const best4 = gradesArr.slice(0, 4);
     const aggregate = best4.reduce((a, g) => a + g, 0);
+    const division = unebDivisionFromAggregate(aggregate);
 
-    let division = unebDivisionFromAggregate(aggregate);
-
-    const english = subjectRowsForStudent.find((r) => r.subject_name.toLowerCase().includes('english'));
-    const math = subjectRowsForStudent.find(
-      (r) => r.subject_name.toLowerCase().includes('math') || r.subject_name.toLowerCase().includes('mathematics')
-    );
-
-    const englishF9 = english?.grade_text === 'F9';
-    const mathF9 = math?.grade_text === 'F9';
-
-    if (englishF9 && mathF9) division = worsenDivisionOnce(division);
-
-    return { aggregate, division, pill: divisionPillClass(division) };
+    return { 
+      aggregate, 
+      division, 
+      pill: divisionPillClass(division),
+      best4Count: best4.length,
+      best4Grades: best4.map(g => unebGradeText(g))
+    };
   }, [selectedStudent, subjectRowsForStudent]);
 
+  // Performance analysis
   const performanceAnalysis = useMemo(() => {
-    if (!selectedStudent || subjectRowsForStudent.length === 0) return null;
     return analyzePerformance(subjectRowsForStudent);
-  }, [selectedStudent, subjectRowsForStudent]);
+  }, [subjectRowsForStudent]);
 
   const canEditComments = useMemo(() => {
     const role = profile?.role;
     return role === 'ADMIN' || role === 'TEACHER' || role === 'ACADEMIC';
   }, [profile?.role]);
 
+  // Load saved comments
   useEffect(() => {
     if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId) return;
 
@@ -889,7 +804,7 @@ export default function StudentReportPage() {
     try {
       const raw = localStorage.getItem(key);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as LocalCommentsPayload;
+      const parsed = JSON.parse(raw) as any;
 
       if (parsed?.subjectComments) setSubjectComments(parsed.subjectComments);
       if (typeof parsed?.classTeacherComment === 'string') setClassTeacherComment(parsed.classTeacherComment);
@@ -899,11 +814,12 @@ export default function StudentReportPage() {
     }
   }, [school?.id, selectedStudentId, selectedGradeId, selectedTermId]);
 
+  // Save comments
   useEffect(() => {
     if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId) return;
 
     const key = buildLocalKey(school.id, selectedGradeId, selectedTermId, selectedStudent.registration_id);
-    const payload: LocalCommentsPayload = { subjectComments, classTeacherComment, headTeacherComment };
+    const payload = { subjectComments, classTeacherComment, headTeacherComment };
 
     try {
       localStorage.setItem(key, JSON.stringify(payload));
@@ -912,52 +828,49 @@ export default function StudentReportPage() {
     }
   }, [school?.id, selectedStudentId, selectedGradeId, selectedTermId, subjectComments, classTeacherComment, headTeacherComment]);
 
-  // Auto-generate dynamic comments when student or term changes
+  // Auto-generate subject comments
   useEffect(() => {
-    if (!selectedStudent || subjectRowsForStudent.length === 0 || !performanceAnalysis) return;
+    if (!selectedStudent || subjectRowsForStudent.length === 0) return;
 
     setSubjectComments((prev) => {
       const next = { ...prev };
       for (const r of subjectRowsForStudent) {
         const existing = (next[r.subject_id] ?? '').trim();
         if (!existing) {
-          next[r.subject_id] = getSubjectComments(r.subject_name, r.termPct, r.grade_text);
+          const pct = Math.round(r.termPct);
+          next[r.subject_id] = getSubjectComment(r.grade_text, pct);
         }
       }
       return next;
     });
-  }, [selectedStudentId, selectedTermId, subjectRowsForStudent, performanceAnalysis]);
+  }, [selectedStudentId, subjectRowsForStudent]);
 
+  // Auto-generate class and head teacher comments
   useEffect(() => {
-    if (!selectedStudent || !performanceAnalysis) return;
+    if (!selectedStudent) return;
     
     const studentName = fmtName(selectedStudent);
     const div = aggregateAndDivision.division || '—';
     const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
-    const gradeName = selectedGrade?.grade_name || '—';
 
     setClassTeacherComment((prev) => 
-      prev.trim() ? prev : getClassTeacherComment(
-        pct, 
-        div, 
-        studentName, 
-        performanceAnalysis.bestSubject, 
-        performanceAnalysis.worstSubject
-      )
+      prev.trim() ? prev : getClassTeacherComment(pct, div, studentName)
     );
     
     setHeadTeacherComment((prev) => 
-      prev.trim() ? prev : getHeadTeacherComment(pct, div, studentName, gradeName)
+      prev.trim() ? prev : getHeadTeacherComment(pct, div)
     );
-  }, [selectedStudentId, overall.pct, aggregateAndDivision.division, performanceAnalysis, selectedGrade]);
+  }, [selectedStudentId, overall.pct, aggregateAndDivision.division]);
 
+  // ============ ACTION HANDLERS ============
   const autoFillAllComments = () => {
-    if (!selectedStudent || !performanceAnalysis) return;
+    if (!selectedStudent) return;
 
     setSubjectComments(() => {
       const next: Record<number, string> = {};
       for (const r of subjectRowsForStudent) {
-        next[r.subject_id] = getSubjectComments(r.subject_name, r.termPct, r.grade_text);
+        const pct = Math.round(r.termPct);
+        next[r.subject_id] = getSubjectComment(r.grade_text, pct);
       }
       return next;
     });
@@ -965,32 +878,21 @@ export default function StudentReportPage() {
     const studentName = fmtName(selectedStudent);
     const div = aggregateAndDivision.division || '—';
     const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
-    const gradeName = selectedGrade?.grade_name || '—';
 
-    setClassTeacherComment(
-      getClassTeacherComment(
-        pct, 
-        div, 
-        studentName, 
-        performanceAnalysis.bestSubject, 
-        performanceAnalysis.worstSubject
-      )
-    );
-    setHeadTeacherComment(
-      getHeadTeacherComment(pct, div, studentName, gradeName)
-    );
+    setClassTeacherComment(getClassTeacherComment(pct, div, studentName));
+    setHeadTeacherComment(getHeadTeacherComment(pct, div));
 
-    tinyToast('Auto-filled dynamic comments');
+    tinyToast('Auto-filled comments');
   };
 
-  const clearFrontEndComments = () => {
+  const clearAllComments = () => {
     setSubjectComments({});
     setClassTeacherComment('');
     setHeadTeacherComment('');
-    tinyToast('Cleared comments');
+    tinyToast('Cleared all comments');
   };
 
-  const printOrExport = () => {
+  const printReport = () => {
     if (!selectedStudent) return;
     window.print();
   };
@@ -1002,7 +904,7 @@ export default function StudentReportPage() {
     try {
       const gradeId = Number(selectedGradeId);
       const termId = Number(selectedTermId);
-      const sessionIds = examSessionsForTerm.map((s) => s.id);
+      const sessionIds = examSessionsForTerm.map(s => s.id);
 
       const [studentsRes, questionsRes] = await Promise.all([
         supabase
@@ -1026,40 +928,43 @@ export default function StudentReportPage() {
       if ((questionsRes as any).error) throw (questionsRes as any).error;
 
       const qRows = ((questionsRes as any).data ?? []) as QuestionRow[];
-      const qIds = qRows.map((q) => q.id);
+      const qIds = qRows.map(q => q.id);
 
-      const resultsRes =
-        qIds.length === 0
-          ? { data: [], error: null }
-          : await supabase
-              .from('assessment_examresult')
-              .select('id, student_id, question_id, grade_id, exam_session_id, score')
-              .eq('school_id', school.id)
-              .eq('grade_id', gradeId)
-              .in('exam_session_id', sessionIds)
-              .in('question_id', qIds);
+      const resultsRes = qIds.length === 0
+        ? { data: [], error: null }
+        : await supabase
+            .from('assessment_examresult')
+            .select('id, student_id, question_id, grade_id, exam_session_id, score')
+            .eq('school_id', school.id)
+            .eq('grade_id', gradeId)
+            .in('exam_session_id', sessionIds)
+            .in('question_id', qIds);
 
       if ((resultsRes as any).error) throw (resultsRes as any).error;
 
-      const stuRows = (studentsRes.data ?? []) as StudentRow[];
-      setStudents(stuRows);
+      setStudents((studentsRes.data ?? []) as StudentRow[]);
       setQuestions(qRows);
       setResults(((resultsRes as any).data ?? []) as ExamResultRow[]);
 
-      tinyToast('Data refreshed successfully');
+      tinyToast('Data refreshed');
     } catch (e: any) {
-      setErrorMsg('Failed to refresh data: ' + e.message);
+      setErrorMsg('Refresh failed: ' + e.message);
     } finally {
       setRefreshing(false);
     }
   };
 
+  const overallRemark = selectedStudent ? 
+    getOverallRemark(overall.pct, aggregateAndDivision.division) : 
+    '';
+
+  // ============ RENDER STATES ============
   if (authChecking || loading) {
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="flex flex-col items-center justify-center h-screen">
           <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-          <p className="mt-4 text-gray-600">Loading report card...</p>
+          <p className="mt-4 text-gray-600">Loading...</p>
         </div>
       </div>
     );
@@ -1076,13 +981,13 @@ export default function StudentReportPage() {
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <School className="w-8 h-8 text-blue-600" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">School Configuration Required</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No School</h3>
               <p className="text-gray-600 mb-6">
-                Your account must be linked to a school before you can generate report cards.
+                Link your account to a school first.
               </p>
               <button
                 onClick={() => router.push('/settings')}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 Go to Settings
               </button>
@@ -1092,10 +997,6 @@ export default function StudentReportPage() {
       </div>
     );
   }
-
-  const overallRemarks = selectedStudent && performanceAnalysis ? 
-    getOverallRemarks(overall.pct, aggregateAndDivision.division, performanceAnalysis) : 
-    'No remarks available';
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1109,8 +1010,8 @@ export default function StudentReportPage() {
             <div className="mb-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
                 <div>
-                  <h1 className="text-2xl font-bold text-gray-900">Student Report Card</h1>
-                  <p className="text-gray-600 mt-1">Generate academic performance reports</p>
+                  <h1 className="text-2xl font-bold text-gray-900">Report Card</h1>
+                  <p className="text-gray-600 mt-1">Academic performance report with UNEB aggregates</p>
                 </div>
                 
                 <div className="flex items-center gap-2">
@@ -1134,9 +1035,9 @@ export default function StudentReportPage() {
                   )}
                   
                   <button
-                    onClick={printOrExport}
+                    onClick={printReport}
                     disabled={!selectedStudent || noSessions}
-                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
                       ${!selectedStudent || noSessions
                         ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
                         : 'bg-blue-600 text-white hover:bg-blue-700'
@@ -1157,7 +1058,7 @@ export default function StudentReportPage() {
                 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Grade/Class</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Grade</label>
                     <select
                       value={selectedGradeId}
                       onChange={(e) => {
@@ -1205,11 +1106,11 @@ export default function StudentReportPage() {
                       className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50"
                     >
                       <option value="">
-                        {canLoad ? (students.length ? 'Select student' : 'No students found') : 'Select grade + term first'}
+                        {canLoad ? (students.length ? 'Select student' : 'No students') : 'Select grade + term'}
                       </option>
                       {students.map((s) => (
                         <option key={s.registration_id} value={s.registration_id}>
-                          {fmtName(s)} ({s.registration_id})
+                          {fmtName(s)}
                         </option>
                       ))}
                     </select>
@@ -1219,13 +1120,11 @@ export default function StudentReportPage() {
                 {selectedStudent && (
                   <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
                     <div className="text-sm text-gray-600">
-                      <span>Selected: <span className="font-semibold text-gray-900">{fmtName(selectedStudent)}</span></span>
+                      <span>Student: <span className="font-semibold text-gray-900">{fmtName(selectedStudent)}</span></span>
                       <span className="mx-2">•</span>
                       <span>Class: <span className="font-semibold text-gray-900">{selectedGrade?.grade_name || '—'}</span></span>
                       <span className="mx-2">•</span>
                       <span>Term: <span className="font-semibold text-gray-900">{termLabel(selectedTerm)}</span></span>
-                      <span className="mx-2">•</span>
-                      <span>LIN: <span className="font-semibold text-gray-900">{selectedStudent.lin_id || '—'}</span></span>
                     </div>
                     <div className="flex gap-2">
                       <button
@@ -1234,14 +1133,14 @@ export default function StudentReportPage() {
                         className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 disabled:text-gray-400"
                       >
                         <Wand2 className="w-4 h-4" />
-                        Auto Comments
+                        Auto
                       </button>
                       <button
-                        onClick={clearFrontEndComments}
+                        onClick={clearAllComments}
                         disabled={!selectedStudent || noSessions}
-                        className="inline-flex items-center gap-1 text-sm text-red-600 hover:text-red-800 disabled:text-gray-400"
+                        className="text-sm text-red-600 hover:text-red-800 disabled:text-gray-400"
                       >
-                        Clear All
+                        Clear
                       </button>
                     </div>
                   </div>
@@ -1261,9 +1160,9 @@ export default function StudentReportPage() {
                 <div className="mx-auto mb-6 h-20 w-20 rounded-full bg-gray-100 flex items-center justify-center">
                   <User className="h-10 w-10 text-gray-400" />
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">Select a Student</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">Select Student</h3>
                 <p className="text-gray-600 max-w-md mx-auto">
-                  Choose a grade, term, and student from the filters above to generate their academic report card.
+                  Choose a grade, term, and student to generate report.
                 </p>
               </div>
             ) : noSessions ? (
@@ -1271,21 +1170,22 @@ export default function StudentReportPage() {
                 <div className="mx-auto mb-6 h-20 w-20 rounded-full bg-amber-100 flex items-center justify-center">
                   <FileText className="h-10 w-10 text-amber-600" />
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">No Exam Sessions Found</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">No Exams</h3>
                 <p className="text-gray-600 max-w-md mx-auto mb-6">
-                  Create exam sessions for this term to generate comprehensive report cards.
+                  Create exam sessions for this term.
                 </p>
                 <button
                   onClick={() => router.push('/academics/exam-sessions')}
-                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
                 >
-                  Create Exam Sessions
+                  Create Exams
                 </button>
               </div>
             ) : (
               <div className="space-y-6">
-                {/* Performance Summary */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {/* Performance Summary Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                  {/* Overall Percentage */}
                   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                     <div className="flex items-center justify-between">
                       <div>
@@ -1298,6 +1198,7 @@ export default function StudentReportPage() {
                     </div>
                   </div>
                   
+                  {/* Division */}
                   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                     <div className="flex items-center justify-between">
                       <div>
@@ -1307,7 +1208,6 @@ export default function StudentReportPage() {
                             {aggregateAndDivision.division}
                           </span>
                         </div>
-                        <p className="text-xs text-gray-500 mt-2">Aggregate: {aggregateAndDivision.aggregate}</p>
                       </div>
                       <div className="p-2 bg-emerald-50 rounded-lg">
                         <Award className="h-6 w-6 text-emerald-600" />
@@ -1315,36 +1215,64 @@ export default function StudentReportPage() {
                     </div>
                   </div>
                   
+                  {/* Total Aggregates */}
+                  <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm text-gray-500">Aggregates</p>
+                        <div className="flex items-end gap-2 mt-1">
+                          <p className="text-2xl font-bold text-gray-900">{aggregateAndDivision.aggregate}</p>
+                          <p className="text-xs text-gray-600 mb-1">Total</p>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">Best 4: {aggregateAndDivision.best4Grades.join(', ')}</p>
+                      </div>
+                      <div className="p-2 bg-purple-50 rounded-lg">
+                        <Hash className="h-6 w-6 text-purple-600" />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Best Subject */}
                   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-gray-500">Best Subject</p>
                         <p className="text-lg font-semibold text-gray-900 mt-1 truncate">
-                          {performanceAnalysis?.bestSubject || '—'}
+                          {performanceAnalysis.bestSubject}
                         </p>
-                        <p className="text-sm text-gray-600 mt-1">
-                          Grade: {performanceAnalysis?.bestSubjectGrade || '—'}
-                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`text-xs font-medium px-2 py-0.5 rounded ${gradePillClass(performanceAnalysis.bestSubjectGrade)}`}>
+                            {performanceAnalysis.bestSubjectGrade}
+                          </span>
+                        </div>
                       </div>
                       <div className="p-2 bg-green-50 rounded-lg">
-                        <TrendingUp className="h-6 w-6 text-green-600" />
+                        <Trophy className="h-6 w-6 text-green-600" />
                       </div>
                     </div>
                   </div>
                   
+                  {/* Subjects Summary */}
                   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-gray-500">Performance</p>
-                        <p className="text-lg font-semibold text-gray-900 mt-1">
-                          {performanceAnalysis?.strengthCount || 0} strong
+                        <p className="text-sm text-gray-500">Subjects</p>
+                        <p className="text-lg font-bold text-gray-900 mt-1">
+                          {subjectRowsForStudent.length} total
                         </p>
-                        <p className="text-sm text-gray-600">
-                          {performanceAnalysis?.improvementCount || 0} need improvement
-                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs text-emerald-600">
+                            <CheckCircle className="inline w-3 h-3 mr-1" />
+                            {performanceAnalysis.subjectsAboveAverage} above avg
+                          </span>
+                          <span className="text-xs text-rose-600">
+                            <AlertCircle className="inline w-3 h-3 mr-1" />
+                            {performanceAnalysis.subjectsBelowAverage} below avg
+                          </span>
+                        </div>
                       </div>
                       <div className="p-2 bg-amber-50 rounded-lg">
-                        <Target className="h-6 w-6 text-amber-600" />
+                        <Layers className="h-6 w-6 text-amber-600" />
                       </div>
                     </div>
                   </div>
@@ -1360,7 +1288,7 @@ export default function StudentReportPage() {
                           {school.school_badge ? (
                             <img 
                               src={school.school_badge} 
-                              alt="School badge" 
+                              alt="School" 
                               className="h-12 w-12 object-contain"
                             />
                           ) : (
@@ -1379,93 +1307,110 @@ export default function StudentReportPage() {
                         
                         <div className="text-right">
                           <div className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">
-                            TERM REPORT
+                            UNEB REPORT CARD
                           </div>
                           <p className="text-sm font-bold text-gray-900 mt-1">{termLabel(selectedTerm)}</p>
                           <p className="text-xs text-gray-600">
-                            {new Date().toLocaleDateString('en-GB', { 
-                              day: '2-digit', 
-                              month: 'short', 
-                              year: 'numeric' 
-                            })}
+                            {new Date().toLocaleDateString('en-GB')}
                           </p>
                         </div>
                       </div>
 
-                      {/* Student Info with Profile Picture */}
-                      <div className="mb-6 grid grid-cols-3 gap-4">
+                      {/* Student Info & Aggregates */}
+                      <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {/* Student Information */}
                         <div className="col-span-2 border border-gray-200 rounded-lg p-4">
                           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Student Information</p>
                           <div className="flex items-start justify-between">
                             <div>
                               <p className="text-sm font-bold text-gray-900">{fmtName(selectedStudent)}</p>
-                              <div className="mt-2 space-y-1">
+                              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
                                 <p className="text-xs text-gray-600">
-                                  Registration ID: <span className="font-semibold">{selectedStudent.registration_id}</span>
+                                  ID: <span className="font-semibold">{selectedStudent.registration_id}</span>
                                 </p>
                                 <p className="text-xs text-gray-600">
-                                  LIN ID: <span className="font-semibold">{selectedStudent.lin_id || '—'}</span>
-                                </p>
-                                <p className="text-xs text-gray-600">
-                                  Gender: <span className="font-semibold">{selectedStudent.gender || '—'}</span>
+                                  LIN: <span className="font-semibold">{selectedStudent.lin_id || '—'}</span>
                                 </p>
                                 {selectedStudent.date_of_birth && (
                                   <p className="text-xs text-gray-600">
                                     DOB: <span className="font-semibold">{formatDate(selectedStudent.date_of_birth)}</span>
                                   </p>
                                 )}
+                                {selectedStudent.gender && (
+                                  <p className="text-xs text-gray-600">
+                                    Gender: <span className="font-semibold">{selectedStudent.gender}</span>
+                                  </p>
+                                )}
+                                <p className="text-xs text-gray-600">
+                                  Class: <span className="font-semibold">{selectedGrade?.grade_name || '—'}</span>
+                                </p>
+                                <p className="text-xs text-gray-600">
+                                  Term: <span className="font-semibold">{termLabel(selectedTerm)}</span>
+                                </p>
                               </div>
                             </div>
                             {selectedStudent.profile_picture_url ? (
-                              <div className="w-20 h-20 rounded-lg overflow-hidden border border-gray-200">
+                              <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200">
                                 <img 
                                   src={selectedStudent.profile_picture_url} 
-                                  alt="Student profile" 
+                                  alt="Student" 
                                   className="w-full h-full object-cover"
                                 />
                               </div>
                             ) : (
-                              <div className="w-20 h-20 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center">
-                                <User className="h-10 w-10 text-gray-400" />
+                              <div className="w-16 h-16 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center">
+                                <User className="h-8 w-8 text-gray-400" />
                               </div>
                             )}
                           </div>
                         </div>
                         
-                        <div className="border border-gray-200 rounded-lg p-4">
-                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Academic Information</p>
-                          <p className="text-sm font-bold text-gray-900">{selectedGrade?.grade_name || '—'}</p>
-                          <div className="mt-3 space-y-2">
+                        {/* Academic Performance Summary */}
+                        <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Academic Summary</p>
+                          
+                          <div className="space-y-3">
+                            {/* Overall & Division */}
                             <div className="flex items-center justify-between">
-                              <span className="text-xs text-gray-700">Overall %:</span>
-                              <span className="text-sm font-bold text-gray-900">{overall.pct.toFixed(1)}%</span>
+                              <div>
+                                <p className="text-xs text-gray-600">Overall %</p>
+                                <p className="text-xl font-bold text-gray-900">{overall.pct.toFixed(1)}%</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-600">Division</p>
+                                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold text-white ${aggregateAndDivision.pill}`}>
+                                  {aggregateAndDivision.division}
+                                </span>
+                              </div>
                             </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-gray-700">Division:</span>
-                              <span className={`text-xs font-bold px-2 py-1 rounded text-white ${aggregateAndDivision.pill}`}>
-                                {aggregateAndDivision.division}
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-gray-700">Aggregate:</span>
-                              <span className="text-xs font-bold text-gray-900">{aggregateAndDivision.aggregate}</span>
+                            
+                            {/* Aggregates */}
+                            <div className="pt-2 border-t border-gray-200">
+                              <p className="text-xs text-gray-600 mb-2">UNEB Aggregates</p>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-sm font-medium text-gray-700">Total Aggregate:</span>
+                                <span className="text-lg font-bold text-gray-900">{aggregateAndDivision.aggregate}</span>
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
 
-                      {/* Subjects Table with Comments */}
+                      {/* Subjects Table */}
                       <div className="mb-6">
-                        <p className="text-sm font-bold text-gray-900 mb-3">Subject Performance</p>
+                        <p className="text-sm font-bold text-gray-900 mb-3">Subjects Performance</p>
                         
-                        <div className="space-y-3">
+                        <div className="space-y-2">
                           {subjectRowsForStudent.map((r) => (
                             <div key={r.subject_id} className="border border-gray-200 rounded-lg overflow-hidden">
                               <div className="grid grid-cols-12 gap-0">
-                                {/* Subject Name and Scores */}
+                                {/* Subject & Grades */}
                                 <div className="col-span-5 p-3 border-r border-gray-200">
                                   <div className="flex items-center justify-between mb-2">
-                                    <p className="font-medium text-gray-900">{r.subject_name}</p>
+                                    <div>
+                                      <p className="font-medium text-gray-900">{r.subject_name}</p>
+                                      <p className="text-xs text-gray-500">UNEB Grade: {r.grade_text}</p>
+                                    </div>
                                     <span className={`inline-flex items-center justify-center rounded px-2 py-1 text-xs font-bold ${r.pill}`}>
                                       {r.grade_text}
                                     </span>
@@ -1488,7 +1433,7 @@ export default function StudentReportPage() {
                                   </div>
                                 </div>
                                 
-                                {/* Comment Section */}
+                                {/* Comments & Teacher */}
                                 <div className="col-span-7 p-3 bg-gray-50">
                                   <div className="flex items-start gap-2">
                                     <div className="flex-1">
@@ -1501,13 +1446,13 @@ export default function StudentReportPage() {
                                           }))
                                         }
                                         disabled={!isEditing}
-                                        className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none min-h-[60px]"
-                                        placeholder="Teacher comments..."
-                                        rows={3}
+                                        className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none min-h-[40px]"
+                                        placeholder="Teacher's comment..."
+                                        rows={1}
                                       />
                                     </div>
                                     <div className="text-right min-w-[100px]">
-                                      <p className="text-xs text-gray-500">Teacher</p>
+                                      <p className="text-xs text-gray-500">Subject Teacher</p>
                                       <p className="text-xs font-medium text-gray-700 mt-1 truncate">
                                         {subjectTeacherById[r.subject_id] || '—'}
                                       </p>
@@ -1520,54 +1465,68 @@ export default function StudentReportPage() {
                         </div>
                       </div>
 
-                      {/* Head Teacher's Comment */}
-                      <div className="mb-6 border border-gray-200 rounded-lg p-4 bg-gray-50">
-                        <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">Head Teacher's Comment</p>
-                        <textarea
-                          value={headTeacherComment}
-                          onChange={(e) => setHeadTeacherComment(e.target.value)}
-                          disabled={!isEditing}
-                          className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
-                          placeholder="Head teacher's comments..."
-                          rows={3}
-                        />
-                        <div className="mt-3 pt-3 border-t border-gray-200">
-                          <p className="text-xs text-gray-500">Signature: _________________________</p>
+                      {/* Comments Section */}
+                      <div className="space-y-4">
+                        {/* Head Teacher */}
+                        <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Head Teacher</p>
+                            <p className="text-xs text-gray-500">Official Comment</p>
+                          </div>
+                          <textarea
+                            value={headTeacherComment}
+                            onChange={(e) => setHeadTeacherComment(e.target.value)}
+                            disabled={!isEditing}
+                            className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
+                            placeholder="Head teacher's official comment..."
+                            rows={2}
+                          />
+                          <div className="mt-2 pt-2 border-t border-gray-200">
+                            <p className="text-xs text-gray-500">Signature: ________________</p>
+                          </div>
                         </div>
-                      </div>
 
-                      {/* Class Teacher's Comment */}
-                      <div className="mb-6 border border-gray-200 rounded-lg p-4">
-                        <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">Class Teacher's Comment</p>
-                        <textarea
-                          value={classTeacherComment}
-                          onChange={(e) => setClassTeacherComment(e.target.value)}
-                          disabled={!isEditing}
-                          className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
-                          placeholder="Class teacher's comments..."
-                          rows={3}
-                        />
-                        <div className="mt-3 pt-3 border-t border-gray-200">
-                          <p className="text-xs text-gray-500">Signature: _________________________</p>
+                        {/* Class Teacher */}
+                        <div className="border border-gray-200 rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Class Teacher</p>
+                            <p className="text-xs text-gray-500">Class Performance Comment</p>
+                          </div>
+                          <textarea
+                            value={classTeacherComment}
+                            onChange={(e) => setClassTeacherComment(e.target.value)}
+                            disabled={!isEditing}
+                            className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
+                            placeholder="Class teacher's performance comment..."
+                            rows={2}
+                          />
+                          <div className="mt-2 pt-2 border-t border-gray-200">
+                            <p className="text-xs text-gray-500">Signature: ________________</p>
+                          </div>
                         </div>
-                      </div>
 
-                      {/* General Remarks - Dynamic based on performance */}
-                      <div className="mb-6 border border-gray-200 rounded-lg p-4 bg-blue-50">
-                        <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">General Remarks</p>
-                        <p className="text-sm text-gray-800 whitespace-pre-wrap">
-                          {overallRemarks}
-                        </p>
+                        {/* General Remarks */}
+                        <div className="border border-gray-200 rounded-lg p-4 bg-blue-50">
+                          <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">Overall Remarks</p>
+                          <p className="text-sm font-medium text-gray-800">
+                            {overallRemark}
+                          </p>
+                          <div className="mt-3 flex items-center justify-between text-xs text-gray-600">
+                            <span>Aggregate: {aggregateAndDivision.aggregate} | Division: {aggregateAndDivision.division}</span>
+                            <span>Average: {overall.pct.toFixed(1)}%</span>
+                          </div>
+                        </div>
                       </div>
 
                       {/* Footer */}
-                      <div className="pt-4 border-t border-gray-200">
+                      <div className="pt-4 mt-6 border-t border-gray-200">
                         <div className="flex items-center justify-between text-xs text-gray-500">
                           <div>
-                            <span>{school.website || school.email || 'Official School Report'}</span>
+                            <span>{school.website || school.email || 'Official Report'}</span>
                           </div>
-                          <div>
-                            <span>Generated by EducWave</span>
+                          <div className="text-right">
+                            <p>Generated on {new Date().toLocaleDateString('en-GB')}</p>
+                            <p className="mt-1">UNEB Grading System Applied</p>
                           </div>
                         </div>
                       </div>
@@ -1591,23 +1550,14 @@ function PrintCSS() {
       .print-page {
         width: 210mm;
         min-height: 297mm;
-        max-height: 297mm;
         background: #fff;
         margin: 0 auto;
         overflow: hidden;
-        position: relative;
       }
 
       .print-inner {
         padding: 15mm 15mm 10mm 15mm;
-        height: 100%;
         box-sizing: border-box;
-      }
-
-      .print-inner > * {
-        max-width: 180mm;
-        margin-left: auto;
-        margin-right: auto;
       }
 
       @page {
@@ -1621,15 +1571,12 @@ function PrintCSS() {
           print-color-adjust: exact !important;
         }
 
-        html,
-        body {
+        html, body {
           margin: 0 !important;
           padding: 0 !important;
           background: #fff !important;
           width: 210mm !important;
           min-height: 297mm !important;
-          max-height: 297mm !important;
-          overflow: hidden !important;
         }
 
         body * {
@@ -1649,24 +1596,8 @@ function PrintCSS() {
           margin: 0 !important;
           padding: 0 !important;
           border: none !important;
-          border-radius: 0 !important;
           box-shadow: none !important;
           page-break-after: avoid !important;
-          page-break-inside: avoid !important;
-          overflow: hidden !important;
-        }
-
-        .print-inner {
-          padding: 15mm 15mm 10mm 15mm !important;
-          height: 297mm !important;
-          overflow: hidden !important;
-        }
-
-        table {
-          page-break-inside: avoid !important;
-        }
-
-        tr {
           page-break-inside: avoid !important;
         }
 
@@ -1681,13 +1612,6 @@ function PrintCSS() {
           overflow: hidden !important;
           color: #000 !important;
         }
-
-        @media print and (color) {
-          * {
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-        }
       }
 
       @media screen {
@@ -1697,10 +1621,6 @@ function PrintCSS() {
           background: white;
           margin: 0 auto;
           overflow: auto;
-        }
-
-        .print-inner {
-          min-height: 297mm;
         }
       }
     `}</style>

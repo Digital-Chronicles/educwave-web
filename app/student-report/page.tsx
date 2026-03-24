@@ -1600,19 +1600,19 @@ export default function StudentReportPage() {
                           </p>
                         </div>
                         <div>
-                                                      {selectedStudent.profile_picture_url ? (
-                              <div className="w-10 h-10 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0">
-                                <Image
-                                  src={selectedStudent.profile_picture_url}
-                                  alt="Student"
-                                  className="w-full h-full object-cover"
-                                />
-                              </div>
-                            ) : (
-                              <div className="w-10 h-10 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center flex-shrink-0">
-                                <User className="h-5 w-5 text-gray-400" />
-                              </div>
-                            )}
+                          {selectedStudent.profile_picture_url ? (
+                            <div className="w-10 h-10 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0">
+                              <img
+                                src={selectedStudent.profile_picture_url}
+                                alt="Student"
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                          ) : (
+                            <div className="w-10 h-10 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center flex-shrink-0">
+                              <User className="h-5 w-5 text-gray-400" />
+                            </div>
+                          )}
                         </div>
                       </div>
                       {/* Student Info & Aggregates - Compact Row */}
@@ -1621,7 +1621,6 @@ export default function StudentReportPage() {
                           {/* Student Info - Left Section */}
                           <div className="flex items-center gap-3 flex-1">
                             {/* Avatar */}
-
 
                             {/* Student Details */}
                             <div className="flex items-center gap-4 flex-wrap">
@@ -1788,7 +1787,7 @@ export default function StudentReportPage() {
 
                               {/* Table */}
                               <table className="w-full text-xs border-collapse">
-                                <thead className="bg-gray-50 p-1 mt-1 " >
+                                <thead className="bg-gray-50 p-1 mt-1 ">
                                   <tr className="mt-0  pl-4">
                                     <th className="border p-1   text-left">
                                       Subject
@@ -1893,7 +1892,9 @@ export default function StudentReportPage() {
 
                                 <tfoot>
                                   <tr className="font-bold bg-gray-100 p-2">
-                                    <td className="text-left p-2 font-semi-bold">Total</td>
+                                    <td className="text-left p-2 font-semi-bold">
+                                      Total
+                                    </td>
 
                                     <td className="text-center">
                                       {subjectRowsForStudent.length * 100}
@@ -1967,7 +1968,6 @@ export default function StudentReportPage() {
                             className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
                             placeholder="Class teacher's performance comment..."
                             rows={2}
-                            
                           />
 
                           <div className="mt-0 pt-0">

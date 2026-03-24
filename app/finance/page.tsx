@@ -20,7 +20,7 @@ import {
   BarChart3,
 } from 'lucide-react';
 
-type AppRole = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
+type AppRole = 'ADMIN' | 'ACADEMIC' | 'FINANCE' | 'STUDENT' | 'PARENT';
 type TabKey = 'overview' | 'schoolFees' | 'otherFees' | 'tuition' | 'transactions';
 
 type FeeTerm = 'T1' | 'T2' | 'T3';

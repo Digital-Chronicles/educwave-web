@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import supabase from '@/lib/supabaseClient';
-import Navbar from '@/components/Navbar';
-import AppShell from '@/components/AppShell';
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import supabase from "@/lib/supabaseClient";
+import Navbar from "@/components/Navbar";
+import AppShell from "@/components/AppShell";
 import {
   Award,
   BookOpen,
@@ -27,10 +27,16 @@ import {
   AlertCircle,
   CheckCircle,
   XCircle,
-} from 'lucide-react';
+} from "lucide-react";
 
 // ============ TYPES ============
-type AppRole = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
+type AppRole =
+  | "ADMIN"
+  | "ACADEMIC"
+  | "TEACHER"
+  | "FINANCE"
+  | "STUDENT"
+  | "PARENT";
 
 interface ProfileRow {
   user_id: string;
@@ -59,11 +65,12 @@ interface SubjectRow {
   id: number;
   name: string;
   grade_id: number | null;
+  teacher_id: string | null;
 }
 
 interface TermExamRow {
   id: number;
-  term_name: 'TERM_1' | 'TERM_2' | 'TERM_3';
+  term_name: "TERM_1" | "TERM_2" | "TERM_3";
   year: number;
   start_date: string;
   end_date: string;
@@ -71,7 +78,7 @@ interface TermExamRow {
 
 interface ExamSessionRow {
   id: number;
-  exam_type: 'BOT' | 'MOT' | 'EOT';
+  exam_type: "BOT" | "MOT" | "EOT";
   term_id: number;
 }
 
@@ -109,9 +116,9 @@ interface TeacherJoinRow {
 }
 
 interface SubjectTeacherAssignmentRow {
-  subject_id: number;
+  subject_id: string;
   teacher_user_id: string;
-  teachers?: TeacherJoinRow[] | null;
+  teachers: TeacherJoinRow[] | TeacherJoinRow | null;
 }
 
 interface SubjectRowWithDetails {
@@ -119,7 +126,7 @@ interface SubjectRowWithDetails {
   subject_name: string;
   perSession: Array<{
     sessionId: number;
-    exam_type: 'BOT' | 'MOT' | 'EOT';
+    exam_type: "BOT" | "MOT" | "EOT";
     total: number;
     possible: number;
     pct: number;
@@ -141,82 +148,93 @@ interface PerformanceAnalysis {
   subjectsAboveAverage: number;
   subjectsBelowAverage: number;
 }
+// Create a lookup
+// Example, after fetching teachers and subjects
 
 // ============ HELPER FUNCTIONS ============
-const fmtName = (s: StudentRow) => `${s.first_name ?? ''} ${s.last_name ?? ''}`.trim();
+const fmtName = (s: StudentRow) =>
+  `${s.first_name ?? ""} ${s.last_name ?? ""}`.trim();
 
 function formatDate(dateStr: string | null) {
-  if (!dateStr) return '—';
-  return new Date(dateStr).toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
+  if (!dateStr) return "—";
+  return new Date(dateStr).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
   });
 }
 
 function termLabel(t?: TermExamRow | null) {
-  if (!t) return '—';
-  const tn = t.term_name === 'TERM_1' ? 'Term 1' : t.term_name === 'TERM_2' ? 'Term 2' : 'Term 3';
+  if (!t) return "—";
+  const tn =
+    t.term_name === "TERM_1"
+      ? "Term 1"
+      : t.term_name === "TERM_2"
+        ? "Term 2"
+        : "Term 3";
   return `${tn} ${t.year}`;
 }
 
-function examTypeLabel(t: 'BOT' | 'MOT' | 'EOT') {
+function examTypeLabel(t: "BOT" | "MOT" | "EOT") {
   return t;
 }
 
 // UNEB Grading System
 function unebSubjectGrade(pct: number): number {
-  if (pct >= 80) return 1;
-  if (pct >= 70) return 2;
-  if (pct >= 60) return 3;
-  if (pct >= 50) return 4;
-  if (pct >= 45) return 5;
-  if (pct >= 40) return 6;
-  if (pct >= 30) return 7;
-  if (pct >= 20) return 8;
+  if (pct >= 95) return 1;
+  if (pct >= 80) return 2;
+  if (pct >= 70) return 3;
+  if (pct >= 60) return 4;
+  if (pct >= 55) return 5;
+  if (pct >= 50) return 6;
+  if (pct >= 45) return 7;
+  if (pct >= 40) return 8;
   return 9;
 }
 
 function unebGradeText(g: number) {
-  if (g === 1) return 'D1';
-  if (g === 2) return 'D2';
-  if (g === 3) return 'C3';
-  if (g === 4) return 'C4';
-  if (g === 5) return 'P5';
-  if (g === 6) return 'P6';
-  if (g === 7) return 'F7';
-  if (g === 8) return 'F8';
-  return 'F9';
+  if (g === 1) return "D1";
+  if (g === 2) return "D2";
+  if (g === 3) return "C3";
+  if (g === 4) return "C4";
+  if (g === 5) return "P5";
+  if (g === 6) return "P6";
+  if (g === 7) return "F7";
+  if (g === 8) return "F8";
+  return "F9";
 }
 
 function unebDivisionFromAggregate(agg: number) {
-  if (agg >= 4 && agg <= 12) return 'Division 1';
-  if (agg >= 13 && agg <= 23) return 'Division 2';
-  if (agg >= 24 && agg <= 29) return 'Division 3';
-  if (agg >= 30 && agg <= 34) return 'Division 4';
-  return 'U';
+  if (agg >= 4 && agg <= 12) return "Division 1";
+  if (agg >= 13 && agg <= 23) return "Division 2";
+  if (agg >= 24 && agg <= 29) return "Division 3";
+  if (agg >= 30 && agg <= 34) return "Division 4";
+  return "U";
 }
 
 function gradePillClass(txt: string) {
-  if (txt.startsWith('D')) return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
-  if (txt.startsWith('C')) return 'bg-blue-50 text-blue-700 border border-blue-200';
-  if (txt.startsWith('P')) return 'bg-amber-50 text-amber-700 border border-amber-200';
-  return 'bg-rose-50 text-rose-700 border border-rose-200';
+  if (txt.startsWith("D"))
+    return "bg-emerald-50 text-emerald-700 border border-emerald-200";
+  if (txt.startsWith("C"))
+    return "bg-blue-50 text-blue-700 border border-blue-200";
+  if (txt.startsWith("P"))
+    return "bg-amber-50 text-amber-700 border border-amber-200";
+  return "bg-rose-50 text-rose-700 border border-rose-200";
 }
 
 function divisionPillClass(division: string) {
-  if (division === 'Division 1') return 'bg-emerald-600';
-  if (division === 'Division 2') return 'bg-blue-600';
-  if (division === 'Division 3') return 'bg-amber-600';
-  if (division === 'Division 4') return 'bg-orange-600';
-  return 'bg-slate-600';
+  if (division === "Division 1") return "bg-emerald-600";
+  if (division === "Division 2") return "bg-blue-600";
+  if (division === "Division 3") return "bg-amber-600";
+  if (division === "Division 4") return "bg-orange-600";
+  return "bg-slate-600";
 }
 
 function gradeColor(pct: number) {
-  if (pct >= 80) return 'text-emerald-600';
-  if (pct >= 60) return 'text-blue-600';
-  if (pct >= 50) return 'text-amber-600';
-  return 'text-rose-600';
+  if (pct >= 80) return "text-emerald-600";
+  if (pct >= 60) return "text-blue-600";
+  if (pct >= 50) return "text-amber-600";
+  return "text-rose-600";
 }
 
 function stableHash(input: string) {
@@ -229,43 +247,61 @@ function stableHash(input: string) {
 }
 
 function pickStable(list: string[], key: string) {
-  if (!list.length) return '';
+  if (!list.length) return "";
   return list[stableHash(key) % list.length];
 }
 
 function perfBand(pct: number) {
-  if (pct >= 85) return 'excellent';
-  if (pct >= 70) return 'very_good';
-  if (pct >= 60) return 'good';
-  if (pct >= 50) return 'fair';
-  return 'poor';
+  if (pct >= 85) return "excellent";
+  if (pct >= 70) return "very_good";
+  if (pct >= 60) return "good";
+  if (pct >= 50) return "fair";
+  return "poor";
 }
 
 // Comments functions
 function getSubjectComment(gradeText: string, pct: number): string {
   const shortComments: Record<string, string[]> = {
-    D1: ['Excellent work.', 'Outstanding performance.', 'Exceptional achievement.'],
-    D2: ['Very good.', 'Strong performance.', 'Well done.'],
-    C3: ['Good effort.', 'Satisfactory work.', 'Average performance.'],
-    C4: ['Needs improvement.', 'Can do better.', 'Below average.'],
-    P5: ['Poor performance.', 'Needs help.', 'Very weak.'],
-    P6: ['Failed to meet expectations.', 'Critical improvement needed.', 'Poor.'],
-    F7: ['Failed badly.', 'No understanding shown.', 'Very poor.'],
-    F8: ['Complete failure.', 'Zero grasp of concepts.', 'Failed.'],
-    F9: ['Total failure.', 'Failed completely.', 'No attempt.'],
+    D1: [
+      "Excellent work.",
+      "Outstanding performance.",
+      "Exceptional achievement.",
+    ],
+    D2: ["Very good.", "Strong performance.", "Well done."],
+    C3: ["Good effort.", "Satisfactory work.", "Average performance."],
+    C4: ["Needs improvement.", "Can do better.", "Below average."],
+    P5: ["Poor performance.", "Needs help.", "Very weak."],
+    P6: [
+      "Failed to meet expectations.",
+      "Critical improvement needed.",
+      "Poor.",
+    ],
+    F7: ["Failed badly.", "No understanding shown.", "Very poor."],
+    F8: ["Complete failure.", "Zero grasp of concepts.", "Failed."],
+    F9: ["Total failure.", "Failed completely.", "No attempt."],
   };
 
-  const gradeKey = gradeText.startsWith('D') ? 'D1' : 
-                   gradeText.startsWith('C') ? 'C3' : 
-                   gradeText.startsWith('P') ? 'P5' : 'F7';
-  
-  const comments = shortComments[gradeKey as keyof typeof shortComments] || shortComments.C3;
+  const gradeKey = gradeText.startsWith("D")
+    ? "D1"
+    : gradeText.startsWith("C")
+      ? "C3"
+      : gradeText.startsWith("P")
+        ? "P5"
+        : "F7";
+
+  const comments =
+    shortComments[gradeText as keyof typeof shortComments] || shortComments.C3;
+
   return pickStable(comments, `${gradeText}${pct}`);
 }
 
-function getClassTeacherComment(pct: number, division: string, studentName: string): string {
+function getClassTeacherComment(
+  pct: number,
+  division: string,
+  studentName: string,
+): string {
   const band = perfBand(pct);
-  
+
   const templates: Record<string, string[]> = {
     excellent: [
       `${studentName} has performed excellently. Division: ${division}.`,
@@ -288,43 +324,46 @@ function getClassTeacherComment(pct: number, division: string, studentName: stri
       `Weak performance, requires attention. ${division}.`,
     ],
     poor: [
-      `${studentName} failed to meet minimum standards. ${division}.`,
+      `${studentName} failed to meet minimum standards. .`,
       `Very poor performance, immediate intervention needed. ${division}.`,
       `Unsatisfactory results across subjects. ${division}.`,
     ],
   };
 
-  return pickStable(templates[band] || templates.good, `${studentName}${division}${pct}`);
+  return pickStable(
+    templates[band] || templates.good,
+    `${studentName}${division}${pct}`,
+  );
 }
 
 function getHeadTeacherComment(pct: number, division: string): string {
   const band = perfBand(pct);
-  
+
   const templates: Record<string, string[]> = {
     excellent: [
-      'Excellent achievement. Top performance in class.',
-      'Outstanding student. Sets a good example.',
-      'Academic excellence demonstrated throughout.',
+      "Excellent achievement. Top performance in class.",
+      "Outstanding student. Sets a good example.",
+      "Academic excellence demonstrated throughout.",
     ],
     very_good: [
-      'Very good performance. Maintain high standards.',
-      'Strong academic showing. Keep it up.',
-      'Commendable effort and results.',
+      "Very good performance. Maintain high standards.",
+      "Strong academic showing. Keep it up.",
+      "Commendable effort and results.",
     ],
     good: [
-      'Satisfactory performance. Room for improvement.',
-      'Average results. Could do better with more effort.',
-      'Fair achievement. Needs to aim higher.',
+      "Satisfactory performance. Room for improvement.",
+      "Average results. Could do better with more effort.",
+      "Fair achievement. Needs to aim higher.",
     ],
     fair: [
-      'Below standard performance. Needs immediate improvement.',
-      'Weak results. Requires extra support.',
-      'Needs to work harder to meet expectations.',
+      "Below standard performance. Needs immediate improvement.",
+      "Weak results. Requires extra support.",
+      "Needs to work harder to meet expectations.",
     ],
     poor: [
-      'Poor performance. Parental intervention required.',
-      'Unsatisfactory results. Urgent attention needed.',
-      'Failed to meet academic standards.',
+      "Poor performance. Parental intervention required.",
+      "Unsatisfactory results. Urgent attention needed.",
+      "Failed to meet academic standards.",
     ],
   };
 
@@ -334,7 +373,7 @@ function getHeadTeacherComment(pct: number, division: string): string {
 function getOverallRemark(pct: number, division: string): string {
   const band = perfBand(pct);
   const roundPct = Math.round(pct);
-  
+
   const remarks: Record<string, string[]> = {
     excellent: [
       `Excellent! Division ${division} with ${roundPct}% average.`,
@@ -367,48 +406,56 @@ function getOverallRemark(pct: number, division: string): string {
 }
 
 function tinyToast(message: string) {
-  const el = document.createElement('div');
-  el.className = 'fixed top-4 right-4 z-50 rounded-lg bg-gray-900 text-white px-4 py-2 text-sm shadow-lg';
+  const el = document.createElement("div");
+  el.className =
+    "fixed top-4 right-4 z-50 rounded-lg bg-gray-900 text-white px-4 py-2 text-sm shadow-lg";
   el.textContent = message;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 2000);
 }
 
 function teacherDisplayName(t?: TeacherJoinRow | null) {
-  if (!t) return '';
-  return `${t.initials ?? ''} ${t.first_name ?? ''} ${t.last_name ?? ''}`.trim();
+  if (!t) return "";
+  return `${t.initials ?? ""} ${t.first_name ?? ""} ${t.last_name ?? ""}`.trim();
 }
 
-function buildLocalKey(schoolId: string, gradeId: string, termId: string, studentId: string) {
+function buildLocalKey(
+  schoolId: string,
+  gradeId: string,
+  termId: string,
+  studentId: string,
+) {
   return `report_comments::${schoolId}::${gradeId}::${termId}::${studentId}`;
 }
 
-function analyzePerformance(subjectRows: SubjectRowWithDetails[]): PerformanceAnalysis {
+function analyzePerformance(
+  subjectRows: SubjectRowWithDetails[],
+): PerformanceAnalysis {
   if (subjectRows.length === 0) {
     return {
-      bestSubject: '—',
-      worstSubject: '—',
-      bestSubjectGrade: '—',
-      worstSubjectGrade: '—',
+      bestSubject: "—",
+      worstSubject: "—",
+      bestSubjectGrade: "—",
+      worstSubjectGrade: "—",
       strengthCount: 0,
       improvementCount: 0,
       subjectsAboveAverage: 0,
       subjectsBelowAverage: 0,
     };
   }
-  
-  const bestSubject = subjectRows.reduce((best, current) => 
-    current.termPct > best.termPct ? current : best
-  );
-  
-  const worstSubject = subjectRows.reduce((worst, current) => 
-    current.termPct < worst.termPct ? current : worst
+
+  const bestSubject = subjectRows.reduce((best, current) =>
+    current.termPct > best.termPct ? current : best,
   );
 
-  const strengths = subjectRows.filter(s => s.termPct >= 70);
-  const improvements = subjectRows.filter(s => s.termPct < 50);
-  const aboveAverage = subjectRows.filter(s => s.termPct >= 60);
-  const belowAverage = subjectRows.filter(s => s.termPct < 60);
+  const worstSubject = subjectRows.reduce((worst, current) =>
+    current.termPct < worst.termPct ? current : worst,
+  );
+
+  const strengths = subjectRows.filter((s) => s.termPct >= 70);
+  const improvements = subjectRows.filter((s) => s.termPct < 50);
+  const aboveAverage = subjectRows.filter((s) => s.termPct >= 60);
+  const belowAverage = subjectRows.filter((s) => s.termPct < 60);
 
   return {
     bestSubject: bestSubject.subject_name,
@@ -439,15 +486,22 @@ export default function StudentReportPage() {
   const [results, setResults] = useState<ExamResultRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [selectedGradeId, setSelectedGradeId] = useState('');
-  const [selectedTermId, setSelectedTermId] = useState('');
-  const [selectedStudentId, setSelectedStudentId] = useState('');
-  const [subjectComments, setSubjectComments] = useState<Record<number, string>>({});
-  const [classTeacherComment, setClassTeacherComment] = useState('');
-  const [headTeacherComment, setHeadTeacherComment] = useState('');
-  const [subjectTeacherById, setSubjectTeacherById] = useState<Record<number, string>>({});
+  const [selectedGradeId, setSelectedGradeId] = useState("");
+  const [selectedTermId, setSelectedTermId] = useState("");
+  const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [subjectComments, setSubjectComments] = useState<
+    Record<number, string>
+  >({});
+  const [classTeacherComment, setClassTeacherComment] = useState("");
+  const [headTeacherComment, setHeadTeacherComment] = useState("");
+  const [subjectTeacherById, setSubjectTeacherById] = useState<
+    Record<number, string>
+  >({});
   const [isEditing, setIsEditing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [teachers, setTeachers] = useState<
+    Array<{ id: string; first_name: string; last_name: string }>
+  >([]);
 
   // ============ EFFECTS ============
   // Auth check
@@ -455,7 +509,7 @@ export default function StudentReportPage() {
     (async () => {
       const { data } = await supabase.auth.getSession();
       if (!data.session) {
-        router.replace('/');
+        router.replace("/");
         return;
       }
       setAuthChecking(false);
@@ -472,15 +526,16 @@ export default function StudentReportPage() {
 
       try {
         const { data: userData, error: uErr } = await supabase.auth.getUser();
-        if (uErr || !userData.user) throw new Error(uErr?.message || 'Could not load user.');
+        if (uErr || !userData.user)
+          throw new Error(uErr?.message || "Could not load user.");
 
         const { data: p, error: pErr } = await supabase
-          .from('profiles')
-          .select('user_id, email, full_name, role, school_id')
-          .eq('user_id', userData.user.id)
+          .from("profiles")
+          .select("user_id, email, full_name, role, school_id")
+          .eq("user_id", userData.user.id)
           .single();
 
-        if (pErr || !p) throw new Error(pErr?.message || 'Profile not found.');
+        if (pErr || !p) throw new Error(pErr?.message || "Profile not found.");
         const prof = p as ProfileRow;
         setProfile(prof);
 
@@ -491,25 +546,39 @@ export default function StudentReportPage() {
         }
 
         const { data: s, error: sErr } = await supabase
-          .from('general_information')
-          .select('id, school_name, location, contact_number, email, website, school_badge')
-          .eq('id', prof.school_id)
+          .from("general_information")
+          .select(
+            "id, school_name, location, contact_number, email, website, school_badge",
+          )
+          .eq("id", prof.school_id)
           .single();
 
-        if (sErr || !s) throw new Error(sErr?.message || 'School not found.');
+        if (sErr || !s) throw new Error(sErr?.message || "School not found.");
         setSchool(s as SchoolRow);
 
         // Load all data in parallel
         const [gradeRes, subjectRes, termRes, examSessRes] = await Promise.all([
-          supabase.from('class').select('id, grade_name').eq('school_id', s.id).order('grade_name'),
-          supabase.from('subject').select('id, name, grade_id').eq('school_id', s.id).order('name'),
           supabase
-            .from('term_exam_session')
-            .select('id, term_name, year, start_date, end_date')
-            .eq('school_id', s.id)
-            .order('year', { ascending: false })
-            .order('term_name'),
-          supabase.from('exam_session').select('id, term_id, exam_type').eq('school_id', s.id).order('id'),
+            .from("class")
+            .select("id, grade_name")
+            .eq("school_id", s.id)
+            .order("grade_name"),
+          supabase
+            .from("subject")
+            .select("id, name, grade_id")
+            .eq("school_id", s.id)
+            .order("name"),
+          supabase
+            .from("term_exam_session")
+            .select("id, term_name, year, start_date, end_date")
+            .eq("school_id", s.id)
+            .order("year", { ascending: false })
+            .order("term_name"),
+          supabase
+            .from("exam_session")
+            .select("id, term_id, exam_type")
+            .eq("school_id", s.id)
+            .order("id"),
         ]);
 
         if (gradeRes.error) throw gradeRes.error;
@@ -522,7 +591,7 @@ export default function StudentReportPage() {
         setTerms((termRes.data ?? []) as TermExamRow[]);
         setExamSessions((examSessRes.data ?? []) as ExamSessionRow[]);
       } catch (e: any) {
-        setErrorMsg(e.message || 'Failed to load setup.');
+        setErrorMsg(e.message || "Failed to load setup.");
       } finally {
         setLoading(false);
       }
@@ -530,34 +599,41 @@ export default function StudentReportPage() {
   }, [authChecking]);
 
   // Derived values
-  const selectedTerm = useMemo(() => 
-    selectedTermId ? terms.find(t => t.id === Number(selectedTermId)) ?? null : null,
-    [terms, selectedTermId]
+  const selectedTerm = useMemo(
+    () =>
+      selectedTermId
+        ? (terms.find((t) => t.id === Number(selectedTermId)) ?? null)
+        : null,
+    [terms, selectedTermId],
   );
 
-  const selectedGrade = useMemo(() => 
-    selectedGradeId ? grades.find(g => g.id === Number(selectedGradeId)) ?? null : null,
-    [grades, selectedGradeId]
+  const selectedGrade = useMemo(
+    () =>
+      selectedGradeId
+        ? (grades.find((g) => g.id === Number(selectedGradeId)) ?? null)
+        : null,
+    [grades, selectedGradeId],
   );
 
   const subjectsForGrade = useMemo(() => {
     if (!selectedGradeId) return [];
-    return subjects.filter(s => s.grade_id === Number(selectedGradeId));
+    return subjects.filter((s) => s.grade_id === Number(selectedGradeId));
   }, [subjects, selectedGradeId]);
 
   const examSessionsForTerm = useMemo(() => {
     if (!selectedTermId) return [];
     return examSessions
-      .filter(es => es.term_id === Number(selectedTermId))
+      .filter((es) => es.term_id === Number(selectedTermId))
       .sort((a, b) => {
-        const ord = (x: ExamSessionRow['exam_type']) => (x === 'BOT' ? 1 : x === 'MOT' ? 2 : 3);
+        const ord = (x: ExamSessionRow["exam_type"]) =>
+          x === "BOT" ? 1 : x === "MOT" ? 2 : 3;
         return ord(a.exam_type) - ord(b.exam_type);
       });
   }, [examSessions, selectedTermId]);
 
-  const canLoad = useMemo(() => 
-    Boolean(school?.id && selectedGradeId && selectedTermId), 
-    [school?.id, selectedGradeId, selectedTermId]
+  const canLoad = useMemo(
+    () => Boolean(school?.id && selectedGradeId && selectedTermId),
+    [school?.id, selectedGradeId, selectedTermId],
   );
 
   const sessions = examSessionsForTerm;
@@ -574,7 +650,7 @@ export default function StudentReportPage() {
         setStudents([]);
         setQuestions([]);
         setResults([]);
-        setSelectedStudentId('');
+        setSelectedStudentId("");
         return;
       }
 
@@ -582,44 +658,50 @@ export default function StudentReportPage() {
       try {
         const gradeId = Number(selectedGradeId);
         const termId = Number(selectedTermId);
-        const sessionIds = examSessionsForTerm.map(s => s.id);
+        const sessionIds = examSessionsForTerm.map((s) => s.id);
 
         // Load students
         const studentsRes = await supabase
-          .from('students')
-          .select('registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url')
-          .eq('school_id', school.id)
-          .eq('current_grade_id', gradeId)
-          .order('first_name');
+          .from("students")
+          .select(
+            "registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url",
+          )
+          .eq("school_id", school.id)
+          .eq("current_grade_id", gradeId)
+          .order("first_name");
 
         if (studentsRes.error) throw studentsRes.error;
 
         // Load questions
-        const questionsRes = sessionIds.length === 0
-          ? { data: [], error: null }
-          : await supabase
-              .from('assessment_question')
-              .select('id, max_score, grade_id, subject_id, exam_type_id')
-              .eq('school_id', school.id)
-              .eq('grade_id', gradeId)
-              .eq('term_exam_id', termId)
-              .in('exam_type_id', sessionIds);
+        const questionsRes =
+          sessionIds.length === 0
+            ? { data: [], error: null }
+            : await supabase
+                .from("assessment_question")
+                .select("id, max_score, grade_id, subject_id, exam_type_id")
+                .eq("school_id", school.id)
+                .eq("grade_id", gradeId)
+                .eq("term_exam_id", termId)
+                .in("exam_type_id", sessionIds);
 
         if ((questionsRes as any).error) throw (questionsRes as any).error;
 
         const qRows = ((questionsRes as any).data ?? []) as QuestionRow[];
-        const qIds = qRows.map(q => q.id);
+        const qIds = qRows.map((q) => q.id);
 
         // Load results
-        const resultsRes = qIds.length === 0
-          ? { data: [], error: null }
-          : await supabase
-              .from('assessment_examresult')
-              .select('id, student_id, question_id, grade_id, exam_session_id, score')
-              .eq('school_id', school.id)
-              .eq('grade_id', gradeId)
-              .in('exam_session_id', sessionIds)
-              .in('question_id', qIds);
+        const resultsRes =
+          qIds.length === 0
+            ? { data: [], error: null }
+            : await supabase
+                .from("assessment_examresult")
+                .select(
+                  "id, student_id, question_id, grade_id, exam_session_id, score",
+                )
+                .eq("school_id", school.id)
+                .eq("grade_id", gradeId)
+                .in("exam_session_id", sessionIds)
+                .in("question_id", qIds);
 
         if ((resultsRes as any).error) throw (resultsRes as any).error;
 
@@ -627,11 +709,15 @@ export default function StudentReportPage() {
         setQuestions(qRows);
         setResults(((resultsRes as any).data ?? []) as ExamResultRow[]);
 
-        if (!selectedStudentId && studentsRes.data && studentsRes.data.length > 0) {
+        if (
+          !selectedStudentId &&
+          studentsRes.data &&
+          studentsRes.data.length > 0
+        ) {
           setSelectedStudentId(studentsRes.data[0].registration_id);
         }
       } catch (e: any) {
-        setErrorMsg(e.message || 'Failed to load data.');
+        setErrorMsg(e.message || "Failed to load data.");
         setStudents([]);
         setQuestions([]);
         setResults([]);
@@ -639,11 +725,21 @@ export default function StudentReportPage() {
         setLoading(false);
       }
     })();
-  }, [school?.id, canLoad, selectedGradeId, selectedTermId, examSessionsForTerm.length]);
+  }, [
+    school?.id,
+    canLoad,
+    selectedGradeId,
+    selectedTermId,
+    examSessionsForTerm.length,
+  ]);
 
-  const selectedStudent = useMemo(() => 
-    selectedStudentId ? students.find(s => s.registration_id === selectedStudentId) ?? null : null,
-    [students, selectedStudentId]
+  const selectedStudent = useMemo(
+    () =>
+      selectedStudentId
+        ? (students.find((s) => s.registration_id === selectedStudentId) ??
+          null)
+        : null,
+    [students, selectedStudentId],
   );
 
   // Load subject teachers
@@ -653,18 +749,34 @@ export default function StudentReportPage() {
     (async () => {
       try {
         const { data, error } = await supabase
-          .from('subject_teacher_assignments')
-          .select('subject_id, teacher_user_id, teachers:teacher_user_id ( initials, first_name, last_name )')
-          .eq('school_id', school.id)
-          .eq('grade_id', Number(selectedGradeId));
+          .from("subject_teacher_assignments")
+          .select("*")
+          .limit(5);
+
+        console.log("test assignments", data, error);
+        // const { data, error } = await supabase
+        //   .from("subject_teacher_assignments")
+        //   .select(
+        //     "subject_id, teacher_user_id, teachers:teacher_user_id ( initials, first_name, last_name )",
+        // //   )
+        //   .eq("school_id", school.id)
+        //   .eq("grade_id", Number(selectedGradeId));
 
         if (error) return;
 
         const rows = (data ?? []) as SubjectTeacherAssignmentRow[];
-        const map: Record<number, string> = {};
+        console.log("assignments rows", rows);
+
+        const map: Record<string, string> = {};
+
         for (const r of rows) {
-          const teacher = r.teachers?.[0];
-          map[r.subject_id] = teacherDisplayName(teacher);
+          const teacher = Array.isArray(r.teachers)
+            ? r.teachers[0]
+            : r.teachers;
+
+          if (teacher) {
+            map[r.subject_id] = teacherDisplayName(teacher);
+          }
         }
         setSubjectTeacherById(map);
       } catch {
@@ -672,6 +784,8 @@ export default function StudentReportPage() {
       }
     })();
   }, [school?.id, selectedGradeId]);
+
+  console.log("subjectTeacherById", subjectTeacherById);
 
   // Calculate possible scores by session and subject
   const possibleBySessionSubject = useMemo(() => {
@@ -724,18 +838,29 @@ export default function StudentReportPage() {
   // Prepare subject rows for selected student
   const subjectRowsForStudent = useMemo(() => {
     if (!selectedStudent) return [];
-    const sMap = totalsByStudentSessionSubject.get(selectedStudent.registration_id) ?? new Map();
+    const sMap =
+      totalsByStudentSessionSubject.get(selectedStudent.registration_id) ??
+      new Map();
 
     return subjectsForGrade.map((sub) => {
       const perSession = sessions.map((sess) => {
         const totalsForSess = sMap.get(sess.id) ?? new Map();
         const total = Number(totalsForSess.get(sub.id) ?? 0);
-        const possible = Number((possibleBySessionSubject.get(sess.id)?.get(sub.id) ?? 0) as number);
+        const possible = Number(
+          (possibleBySessionSubject.get(sess.id)?.get(sub.id) ?? 0) as number,
+        );
         const pct = possible > 0 ? (total / possible) * 100 : 0;
-        return { sessionId: sess.id, exam_type: sess.exam_type, total, possible, pct };
+        return {
+          sessionId: sess.id,
+          exam_type: sess.exam_type,
+          total,
+          possible,
+          pct,
+        };
       });
+      console.log("subjectTeacherById", subjectTeacherById);
 
-      const valid = perSession.filter(x => x.possible > 0);
+      const valid = perSession.filter((x) => x.possible > 0);
       const totalAll = valid.reduce((a, x) => a + x.total, 0);
       const possibleAll = valid.reduce((a, x) => a + x.possible, 0);
       const termPct = possibleAll > 0 ? (totalAll / possibleAll) * 100 : 0;
@@ -754,35 +879,52 @@ export default function StudentReportPage() {
         unebGrade,
       };
     });
-  }, [selectedStudent, subjectsForGrade, sessions, totalsByStudentSessionSubject, possibleBySessionSubject]);
+  }, [
+    selectedStudent,
+    subjectsForGrade,
+    sessions,
+    totalsByStudentSessionSubject,
+    possibleBySessionSubject,
+  ]);
 
   // Calculate overall percentage
   const overall = useMemo(() => {
     if (!selectedStudent) return { pct: 0 };
-    const valid = subjectRowsForStudent.map(r => r.termPct).filter(x => Number.isFinite(x) && x > 0);
-    const pct = valid.length ? valid.reduce((a, x) => a + x, 0) / valid.length : 0;
+    const valid = subjectRowsForStudent
+      .map((r) => r.termPct)
+      .filter((x) => Number.isFinite(x) && x > 0);
+    const pct = valid.length
+      ? valid.reduce((a, x) => a + x, 0) / valid.length
+      : 0;
     return { pct };
   }, [selectedStudent, subjectRowsForStudent]);
 
   // Calculate aggregate and division
   const aggregateAndDivision = useMemo(() => {
-    if (!selectedStudent) return { aggregate: 0, division: '—', pill: divisionPillClass('U'), best4Count: 0, best4Grades: [] };
+    if (!selectedStudent)
+      return {
+        aggregate: 0,
+        division: "—",
+        pill: divisionPillClass("U"),
+        best4Count: 0,
+        best4Grades: [],
+      };
 
     const gradesArr = subjectRowsForStudent
-      .filter(s => s.unebGrade > 0)
-      .map(s => s.unebGrade)
+      .filter((s) => s.unebGrade > 0)
+      .map((s) => s.unebGrade)
       .sort((a, b) => a - b);
-    
+
     const best4 = gradesArr.slice(0, 4);
     const aggregate = best4.reduce((a, g) => a + g, 0);
     const division = unebDivisionFromAggregate(aggregate);
 
-    return { 
-      aggregate, 
-      division, 
+    return {
+      aggregate,
+      division,
       pill: divisionPillClass(division),
       best4Count: best4.length,
-      best4Grades: best4.map(g => unebGradeText(g))
+      best4Grades: best4.map((g) => unebGradeText(g)),
     };
   }, [selectedStudent, subjectRowsForStudent]);
 
@@ -793,22 +935,76 @@ export default function StudentReportPage() {
 
   const canEditComments = useMemo(() => {
     const role = profile?.role;
-    return role === 'ADMIN' || role === 'TEACHER' || role === 'ACADEMIC';
+    return role === "ADMIN" || role === "TEACHER" || role === "ACADEMIC";
   }, [profile?.role]);
+
+  //Totals for marks, agg, positions
+  // Calculate total marks for the selected student
+  const totalMarks = useMemo(() => {
+    if (!selectedStudent) return 0;
+
+    let total = 0;
+    for (const r of subjectRowsForStudent) {
+      total += r.perSession.reduce((acc, s) => acc + s.total, 0);
+    }
+    return total;
+  }, [selectedStudent, subjectRowsForStudent]);
+
+  // Calculate total possible marks for the selected grade/session
+  const totalPossible = useMemo(() => {
+    let total = 0;
+    for (const r of subjectRowsForStudent) {
+      total += r.perSession.reduce((acc, s) => acc + s.possible, 0);
+    }
+
+    return total;
+  }, [subjectRowsForStudent]);
+
+  // Calculate position among students
+  const position = useMemo(() => {
+    if (!selectedGrade || !selectedTerm || !selectedStudent)
+      return { rank: "-", outOf: "-" };
+
+    // Sum total marks per student
+    const studentTotals = students.map((s) => {
+      const sRows = subjectRowsForStudent; // or calculate per student if needed
+      const t = sRows.reduce(
+        (acc, r) => acc + r.perSession.reduce((a, p) => a + p.total, 0),
+        0,
+      );
+      return { id: s.registration_id, total: t };
+    });
+
+    // Sort descending
+    studentTotals.sort((a, b) => b.total - a.total);
+
+    const idx = studentTotals.findIndex(
+      (s) => s.id === selectedStudent.registration_id,
+    );
+    return { rank: idx + 1, outOf: studentTotals.length };
+  }, [students, selectedStudent, subjectRowsForStudent]);
 
   // Load saved comments
   useEffect(() => {
-    if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId) return;
+    if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId)
+      return;
 
-    const key = buildLocalKey(school.id, selectedGradeId, selectedTermId, selectedStudent.registration_id);
+    const key = buildLocalKey(
+      school.id,
+      selectedGradeId,
+      selectedTermId,
+      selectedStudent.registration_id,
+    );
     try {
       const raw = localStorage.getItem(key);
       if (!raw) return;
       const parsed = JSON.parse(raw) as any;
 
       if (parsed?.subjectComments) setSubjectComments(parsed.subjectComments);
-      if (typeof parsed?.classTeacherComment === 'string') setClassTeacherComment(parsed.classTeacherComment);
-      if (typeof parsed?.headTeacherComment === 'string') setHeadTeacherComment(parsed.headTeacherComment);
+      if (typeof parsed?.classTeacherComment === "string")
+        setClassTeacherComment(parsed.classTeacherComment);
+      if (typeof parsed?.headTeacherComment === "string")
+        setHeadTeacherComment(parsed.headTeacherComment);
     } catch {
       // ignore
     }
@@ -816,17 +1012,35 @@ export default function StudentReportPage() {
 
   // Save comments
   useEffect(() => {
-    if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId) return;
+    if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId)
+      return;
 
-    const key = buildLocalKey(school.id, selectedGradeId, selectedTermId, selectedStudent.registration_id);
-    const payload = { subjectComments, classTeacherComment, headTeacherComment };
+    const key = buildLocalKey(
+      school.id,
+      selectedGradeId,
+      selectedTermId,
+      selectedStudent.registration_id,
+    );
+    const payload = {
+      subjectComments,
+      classTeacherComment,
+      headTeacherComment,
+    };
 
     try {
       localStorage.setItem(key, JSON.stringify(payload));
     } catch {
       // ignore
     }
-  }, [school?.id, selectedStudentId, selectedGradeId, selectedTermId, subjectComments, classTeacherComment, headTeacherComment]);
+  }, [
+    school?.id,
+    selectedStudentId,
+    selectedGradeId,
+    selectedTermId,
+    subjectComments,
+    classTeacherComment,
+    headTeacherComment,
+  ]);
 
   // Auto-generate subject comments
   useEffect(() => {
@@ -835,7 +1049,7 @@ export default function StudentReportPage() {
     setSubjectComments((prev) => {
       const next = { ...prev };
       for (const r of subjectRowsForStudent) {
-        const existing = (next[r.subject_id] ?? '').trim();
+        const existing = (next[r.subject_id] ?? "").trim();
         if (!existing) {
           const pct = Math.round(r.termPct);
           next[r.subject_id] = getSubjectComment(r.grade_text, pct);
@@ -846,20 +1060,17 @@ export default function StudentReportPage() {
   }, [selectedStudentId, subjectRowsForStudent]);
 
   // Auto-generate class and head teacher comments
+
   useEffect(() => {
     if (!selectedStudent) return;
-    
+
     const studentName = fmtName(selectedStudent);
-    const div = aggregateAndDivision.division || '—';
+    const div = aggregateAndDivision.division || "—";
     const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
 
-    setClassTeacherComment((prev) => 
-      prev.trim() ? prev : getClassTeacherComment(pct, div, studentName)
-    );
-    
-    setHeadTeacherComment((prev) => 
-      prev.trim() ? prev : getHeadTeacherComment(pct, div)
-    );
+    setClassTeacherComment(getClassTeacherComment(pct, div, studentName));
+
+    setHeadTeacherComment(getHeadTeacherComment(pct, div));
   }, [selectedStudentId, overall.pct, aggregateAndDivision.division]);
 
   // ============ ACTION HANDLERS ============
@@ -876,20 +1087,20 @@ export default function StudentReportPage() {
     });
 
     const studentName = fmtName(selectedStudent);
-    const div = aggregateAndDivision.division || '—';
+    const div = aggregateAndDivision.division || "—";
     const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
 
     setClassTeacherComment(getClassTeacherComment(pct, div, studentName));
     setHeadTeacherComment(getHeadTeacherComment(pct, div));
 
-    tinyToast('Auto-filled comments');
+    tinyToast("Auto-filled comments");
   };
 
   const clearAllComments = () => {
     setSubjectComments({});
-    setClassTeacherComment('');
-    setHeadTeacherComment('');
-    tinyToast('Cleared all comments');
+    setClassTeacherComment("");
+    setHeadTeacherComment("");
+    tinyToast("Cleared all comments");
   };
 
   const printReport = () => {
@@ -899,46 +1110,51 @@ export default function StudentReportPage() {
 
   const handleRefresh = async () => {
     if (!school?.id || !selectedGradeId || !selectedTermId) return;
-    
+
     setRefreshing(true);
     try {
       const gradeId = Number(selectedGradeId);
       const termId = Number(selectedTermId);
-      const sessionIds = examSessionsForTerm.map(s => s.id);
+      const sessionIds = examSessionsForTerm.map((s) => s.id);
 
       const [studentsRes, questionsRes] = await Promise.all([
         supabase
-          .from('students')
-          .select('registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url')
-          .eq('school_id', school.id)
-          .eq('current_grade_id', gradeId)
-          .order('first_name'),
+          .from("students")
+          .select(
+            "registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url",
+          )
+          .eq("school_id", school.id)
+          .eq("current_grade_id", gradeId)
+          .order("first_name"),
         sessionIds.length === 0
           ? { data: [], error: null }
           : supabase
-              .from('assessment_question')
-              .select('id, max_score, grade_id, subject_id, exam_type_id')
-              .eq('school_id', school.id)
-              .eq('grade_id', gradeId)
-              .eq('term_exam_id', termId)
-              .in('exam_type_id', sessionIds),
+              .from("assessment_question")
+              .select("id, max_score, grade_id, subject_id, exam_type_id")
+              .eq("school_id", school.id)
+              .eq("grade_id", gradeId)
+              .eq("term_exam_id", termId)
+              .in("exam_type_id", sessionIds),
       ]);
 
       if (studentsRes.error) throw studentsRes.error;
       if ((questionsRes as any).error) throw (questionsRes as any).error;
 
       const qRows = ((questionsRes as any).data ?? []) as QuestionRow[];
-      const qIds = qRows.map(q => q.id);
+      const qIds = qRows.map((q) => q.id);
 
-      const resultsRes = qIds.length === 0
-        ? { data: [], error: null }
-        : await supabase
-            .from('assessment_examresult')
-            .select('id, student_id, question_id, grade_id, exam_session_id, score')
-            .eq('school_id', school.id)
-            .eq('grade_id', gradeId)
-            .in('exam_session_id', sessionIds)
-            .in('question_id', qIds);
+      const resultsRes =
+        qIds.length === 0
+          ? { data: [], error: null }
+          : await supabase
+              .from("assessment_examresult")
+              .select(
+                "id, student_id, question_id, grade_id, exam_session_id, score",
+              )
+              .eq("school_id", school.id)
+              .eq("grade_id", gradeId)
+              .in("exam_session_id", sessionIds)
+              .in("question_id", qIds);
 
       if ((resultsRes as any).error) throw (resultsRes as any).error;
 
@@ -946,17 +1162,17 @@ export default function StudentReportPage() {
       setQuestions(qRows);
       setResults(((resultsRes as any).data ?? []) as ExamResultRow[]);
 
-      tinyToast('Data refreshed');
+      tinyToast("Data refreshed");
     } catch (e: any) {
-      setErrorMsg('Refresh failed: ' + e.message);
+      setErrorMsg("Refresh failed: " + e.message);
     } finally {
       setRefreshing(false);
     }
   };
 
-  const overallRemark = selectedStudent ? 
-    getOverallRemark(overall.pct, aggregateAndDivision.division) : 
-    '';
+  const overallRemark = selectedStudent
+    ? getOverallRemark(overall.pct, aggregateAndDivision.division)
+    : "";
 
   // ============ RENDER STATES ============
   if (authChecking || loading) {
@@ -981,12 +1197,14 @@ export default function StudentReportPage() {
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <School className="w-8 h-8 text-blue-600" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">No School</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                No School
+              </h3>
               <p className="text-gray-600 mb-6">
                 Link your account to a school first.
               </p>
               <button
-                onClick={() => router.push('/settings')}
+                onClick={() => router.push("/settings")}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 Go to Settings
@@ -1003,44 +1221,55 @@ export default function StudentReportPage() {
       <Navbar />
       <div className="flex">
         <AppShell />
-        
+
         <main className="flex-1 p-4 md:p-6">
           <div className="max-w-7xl mx-auto">
             {/* Header */}
             <div className="mb-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
                 <div>
-                  <h1 className="text-2xl font-bold text-gray-900">Report Card</h1>
-                  <p className="text-gray-600 mt-1">Academic performance report with UNEB aggregates</p>
+                  <h1 className="text-2xl font-bold text-gray-900">
+                    Student Report Card
+                  </h1>
+                  <p className="text-gray-600 mt-1">
+                    Academic performance report with UNEB aggregates
+                  </p>
                 </div>
-                
+
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleRefresh}
                     disabled={refreshing || !selectedStudent}
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm text-gray-700 disabled:opacity-50"
                   >
-                    <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                    <RefreshCw
+                      className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+                    />
                     Refresh
                   </button>
-                  
+
                   {canEditComments && (
                     <button
                       onClick={() => setIsEditing(!isEditing)}
                       className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm text-gray-700"
                     >
-                      {isEditing ? <Save className="w-4 h-4" /> : <Edit className="w-4 h-4" />}
-                      {isEditing ? 'Save' : 'Edit'}
+                      {isEditing ? (
+                        <Save className="w-4 h-4" />
+                      ) : (
+                        <Edit className="w-4 h-4" />
+                      )}
+                      {isEditing ? "Save" : "Edit"}
                     </button>
                   )}
-                  
+
                   <button
                     onClick={printReport}
                     disabled={!selectedStudent || noSessions}
                     className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
-                      ${!selectedStudent || noSessions
-                        ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                        : 'bg-blue-600 text-white hover:bg-blue-700'
+                      ${
+                        !selectedStudent || noSessions
+                          ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                          : "bg-blue-600 text-white hover:bg-blue-700"
                       }`}
                   >
                     <Printer className="w-4 h-4" />
@@ -1048,23 +1277,27 @@ export default function StudentReportPage() {
                   </button>
                 </div>
               </div>
-              
+
               {/* Filters */}
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-4">
                 <div className="flex items-center gap-2 mb-4">
                   <Filter className="w-5 h-5 text-gray-500" />
-                  <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
+                  <h3 className="text-sm font-semibold text-gray-700">
+                    Filters
+                  </h3>
                 </div>
-                
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Grade</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Grade
+                    </label>
                     <select
                       value={selectedGradeId}
                       onChange={(e) => {
                         setSelectedGradeId(e.target.value);
-                        setSelectedTermId('');
-                        setSelectedStudentId('');
+                        setSelectedTermId("");
+                        setSelectedStudentId("");
                       }}
                       className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                     >
@@ -1076,29 +1309,35 @@ export default function StudentReportPage() {
                       ))}
                     </select>
                   </div>
-                  
+
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Term</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Term
+                    </label>
                     <select
                       value={selectedTermId}
                       onChange={(e) => {
                         setSelectedTermId(e.target.value);
-                        setSelectedStudentId('');
+                        setSelectedStudentId("");
                       }}
                       disabled={!selectedGradeId}
                       className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50"
                     >
-                      <option value="">{selectedGradeId ? 'Select term' : 'Select grade first'}</option>
+                      <option value="">
+                        {selectedGradeId ? "Select term" : "Select grade first"}
+                      </option>
                       {terms.map((t) => (
                         <option key={t.id} value={t.id}>
-                          {t.term_name.replace('_', ' ')} {t.year}
+                          {t.term_name.replace("_", " ")} {t.year}
                         </option>
                       ))}
                     </select>
                   </div>
-                  
+
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Student</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Student
+                    </label>
                     <select
                       value={selectedStudentId}
                       onChange={(e) => setSelectedStudentId(e.target.value)}
@@ -1106,25 +1345,47 @@ export default function StudentReportPage() {
                       className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50"
                     >
                       <option value="">
-                        {canLoad ? (students.length ? 'Select student' : 'No students') : 'Select grade + term'}
+                        {canLoad
+                          ? students.length
+                            ? "Select student"
+                            : "No students"
+                          : "Select grade + term"}
                       </option>
                       {students.map((s) => (
-                        <option key={s.registration_id} value={s.registration_id}>
+                        <option
+                          key={s.registration_id}
+                          value={s.registration_id}
+                        >
                           {fmtName(s)}
                         </option>
                       ))}
                     </select>
                   </div>
                 </div>
-                
+
                 {selectedStudent && (
                   <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
                     <div className="text-sm text-gray-600">
-                      <span>Student: <span className="font-semibold text-gray-900">{fmtName(selectedStudent)}</span></span>
+                      <span>
+                        Student:{" "}
+                        <span className="font-semibold text-gray-900">
+                          {fmtName(selectedStudent)}
+                        </span>
+                      </span>
                       <span className="mx-2">•</span>
-                      <span>Class: <span className="font-semibold text-gray-900">{selectedGrade?.grade_name || '—'}</span></span>
+                      <span>
+                        Class:{" "}
+                        <span className="font-semibold text-gray-900">
+                          {selectedGrade?.grade_name || "—"}
+                        </span>
+                      </span>
                       <span className="mx-2">•</span>
-                      <span>Term: <span className="font-semibold text-gray-900">{termLabel(selectedTerm)}</span></span>
+                      <span>
+                        Term:{" "}
+                        <span className="font-semibold text-gray-900">
+                          {termLabel(selectedTerm)}
+                        </span>
+                      </span>
                     </div>
                     <div className="flex gap-2">
                       <button
@@ -1146,7 +1407,7 @@ export default function StudentReportPage() {
                   </div>
                 )}
               </div>
-              
+
               {errorMsg && (
                 <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
                   {errorMsg}
@@ -1160,7 +1421,9 @@ export default function StudentReportPage() {
                 <div className="mx-auto mb-6 h-20 w-20 rounded-full bg-gray-100 flex items-center justify-center">
                   <User className="h-10 w-10 text-gray-400" />
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">Select Student</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  Select Student
+                </h3>
                 <p className="text-gray-600 max-w-md mx-auto">
                   Choose a grade, term, and student to generate report.
                 </p>
@@ -1170,12 +1433,14 @@ export default function StudentReportPage() {
                 <div className="mx-auto mb-6 h-20 w-20 rounded-full bg-amber-100 flex items-center justify-center">
                   <FileText className="h-10 w-10 text-amber-600" />
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">No Exams</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  No Exams
+                </h3>
                 <p className="text-gray-600 max-w-md mx-auto mb-6">
                   Create exam sessions for this term.
                 </p>
                 <button
-                  onClick={() => router.push('/academics/exam-sessions')}
+                  onClick={() => router.push("/academics/exam-sessions")}
                   className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
                 >
                   Create Exams
@@ -1190,21 +1455,25 @@ export default function StudentReportPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-gray-500">Overall %</p>
-                        <p className="text-2xl font-bold text-gray-900 mt-1">{overall.pct.toFixed(1)}%</p>
+                        <p className="text-2xl font-bold text-gray-900 mt-1">
+                          {overall.pct.toFixed(1)}%
+                        </p>
                       </div>
                       <div className="p-2 bg-blue-50 rounded-lg">
                         <BarChart3 className="h-6 w-6 text-blue-600" />
                       </div>
                     </div>
                   </div>
-                  
+
                   {/* Division */}
                   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-gray-500">Division</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold text-white ${aggregateAndDivision.pill}`}>
+                          <span
+                            className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold text-white ${aggregateAndDivision.pill}`}
+                          >
                             {aggregateAndDivision.division}
                           </span>
                         </div>
@@ -1214,24 +1483,28 @@ export default function StudentReportPage() {
                       </div>
                     </div>
                   </div>
-                  
+
                   {/* Total Aggregates */}
                   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-gray-500">Aggregates</p>
                         <div className="flex items-end gap-2 mt-1">
-                          <p className="text-2xl font-bold text-gray-900">{aggregateAndDivision.aggregate}</p>
+                          <p className="text-2xl font-bold text-gray-900">
+                            {aggregateAndDivision.aggregate}
+                          </p>
                           <p className="text-xs text-gray-600 mb-1">Total</p>
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">Best 4: {aggregateAndDivision.best4Grades.join(', ')}</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Best 4: {aggregateAndDivision.best4Grades.join(", ")}
+                        </p>
                       </div>
                       <div className="p-2 bg-purple-50 rounded-lg">
                         <Hash className="h-6 w-6 text-purple-600" />
                       </div>
                     </div>
                   </div>
-                  
+
                   {/* Best Subject */}
                   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                     <div className="flex items-center justify-between">
@@ -1241,7 +1514,9 @@ export default function StudentReportPage() {
                           {performanceAnalysis.bestSubject}
                         </p>
                         <div className="flex items-center gap-2 mt-1">
-                          <span className={`text-xs font-medium px-2 py-0.5 rounded ${gradePillClass(performanceAnalysis.bestSubjectGrade)}`}>
+                          <span
+                            className={`text-xs font-medium px-2 py-0.5 rounded ${gradePillClass(performanceAnalysis.bestSubjectGrade)}`}
+                          >
                             {performanceAnalysis.bestSubjectGrade}
                           </span>
                         </div>
@@ -1251,7 +1526,7 @@ export default function StudentReportPage() {
                       </div>
                     </div>
                   </div>
-                  
+
                   {/* Subjects Summary */}
                   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                     <div className="flex items-center justify-between">
@@ -1283,13 +1558,15 @@ export default function StudentReportPage() {
                   <div className="print-page">
                     <div className="print-inner">
                       {/* Header */}
-                      <div className="flex items-center justify-between mb-6 pb-4 border-b">
+                      <div className="flex items-center justify-between mb-2 pb-4 border-b">
                         <div className="flex items-center gap-3">
                           {school.school_badge ? (
-                            <img 
-                              src={school.school_badge} 
-                              alt="School" 
-                              className="h-12 w-12 object-contain"
+                            <img
+                              src={school.school_badge}
+                              alt="School"
+                              width={48}
+                              height={48}
+                              className="object-contain"
                             />
                           ) : (
                             <div className="h-12 w-12 rounded-lg bg-blue-100 flex items-center justify-center">
@@ -1297,235 +1574,442 @@ export default function StudentReportPage() {
                             </div>
                           )}
                           <div>
-                            <h2 className="text-lg font-bold text-gray-900">{school.school_name}</h2>
+                            <h2 className="text-lg font-bold text-gray-900">
+                              {school.school_name}
+                            </h2>
                             <p className="text-xs text-gray-600">
-                              {school.location && <span className="mr-3">{school.location}</span>}
-                              {school.contact_number && <span>📞 {school.contact_number}</span>}
+                              {school.location && (
+                                <span className="mr-3">{school.location}</span>
+                              )}
+                              {school.contact_number && (
+                                <span>📞 {school.contact_number}</span>
+                              )}
                             </p>
                           </div>
                         </div>
-                        
-                        <div className="text-right">
+
+                        <div className="text-center justify-center">
                           <div className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">
-                            UNEB REPORT CARD
+                            STUDENT REPORT CARD
                           </div>
-                          <p className="text-sm font-bold text-gray-900 mt-1">{termLabel(selectedTerm)}</p>
+                          <p className="text-sm font-bold text-gray-900 mt-1">
+                            {termLabel(selectedTerm)}
+                          </p>
                           <p className="text-xs text-gray-600">
-                            {new Date().toLocaleDateString('en-GB')}
+                            {new Date().toLocaleDateString("en-GB")}
                           </p>
                         </div>
-                      </div>
-
-                      {/* Student Info & Aggregates */}
-                      <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {/* Student Information */}
-                        <div className="col-span-2 border border-gray-200 rounded-lg p-4">
-                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Student Information</p>
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <p className="text-sm font-bold text-gray-900">{fmtName(selectedStudent)}</p>
-                              <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
-                                <p className="text-xs text-gray-600">
-                                  ID: <span className="font-semibold">{selectedStudent.registration_id}</span>
-                                </p>
-                                <p className="text-xs text-gray-600">
-                                  LIN: <span className="font-semibold">{selectedStudent.lin_id || '—'}</span>
-                                </p>
-                                {selectedStudent.date_of_birth && (
-                                  <p className="text-xs text-gray-600">
-                                    DOB: <span className="font-semibold">{formatDate(selectedStudent.date_of_birth)}</span>
-                                  </p>
-                                )}
-                                {selectedStudent.gender && (
-                                  <p className="text-xs text-gray-600">
-                                    Gender: <span className="font-semibold">{selectedStudent.gender}</span>
-                                  </p>
-                                )}
-                                <p className="text-xs text-gray-600">
-                                  Class: <span className="font-semibold">{selectedGrade?.grade_name || '—'}</span>
-                                </p>
-                                <p className="text-xs text-gray-600">
-                                  Term: <span className="font-semibold">{termLabel(selectedTerm)}</span>
-                                </p>
-                              </div>
-                            </div>
-                            {selectedStudent.profile_picture_url ? (
-                              <div className="w-16 h-16 rounded-lg overflow-hidden border border-gray-200">
-                                <img 
-                                  src={selectedStudent.profile_picture_url} 
-                                  alt="Student" 
+                        <div>
+                                                      {selectedStudent.profile_picture_url ? (
+                              <div className="w-10 h-10 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0">
+                                <Image
+                                  src={selectedStudent.profile_picture_url}
+                                  alt="Student"
                                   className="w-full h-full object-cover"
                                 />
                               </div>
                             ) : (
-                              <div className="w-16 h-16 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center">
-                                <User className="h-8 w-8 text-gray-400" />
+                              <div className="w-10 h-10 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center flex-shrink-0">
+                                <User className="h-5 w-5 text-gray-400" />
                               </div>
                             )}
-                          </div>
                         </div>
-                        
-                        {/* Academic Performance Summary */}
-                        <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
-                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Academic Summary</p>
-                          
-                          <div className="space-y-3">
-                            {/* Overall & Division */}
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <p className="text-xs text-gray-600">Overall %</p>
-                                <p className="text-xl font-bold text-gray-900">{overall.pct.toFixed(1)}%</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-600">Division</p>
-                                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold text-white ${aggregateAndDivision.pill}`}>
-                                  {aggregateAndDivision.division}
+                      </div>
+                      {/* Student Info & Aggregates - Compact Row */}
+                      <div className="mb-0 border border-gray-200 rounded-lg bg-white">
+                        <div className="flex items-center justify-between p-3 gap-4">
+                          {/* Student Info - Left Section */}
+                          <div className="flex items-center gap-3 flex-1">
+                            {/* Avatar */}
+
+
+                            {/* Student Details */}
+                            <div className="flex items-center gap-4 flex-wrap">
+                              <p className="text-sm font-bold text-gray-900">
+                                {fmtName(selectedStudent)}
+                              </p>
+                              <div className="flex items-center gap-3 text-xs text-gray-600">
+                                <span>
+                                  ID:{" "}
+                                  <span className="font-semibold">
+                                    {selectedStudent.registration_id}
+                                  </span>
+                                </span>
+                                <span>
+                                  LIN:{" "}
+                                  <span className="font-semibold">
+                                    {selectedStudent.lin_id || "—"}
+                                  </span>
+                                </span>
+                                {selectedStudent.date_of_birth && (
+                                  <span>
+                                    DOB:{" "}
+                                    <span className="font-semibold">
+                                      {formatDate(
+                                        selectedStudent.date_of_birth,
+                                      )}
+                                    </span>
+                                  </span>
+                                )}
+                                {selectedStudent.gender && (
+                                  <span>
+                                    Gender:{" "}
+                                    <span className="font-semibold">
+                                      {selectedStudent.gender}
+                                    </span>
+                                  </span>
+                                )}
+                                <span>
+                                  Class:{" "}
+                                  <span className="font-semibold">
+                                    {selectedGrade?.grade_name || "—"}
+                                  </span>
+                                </span>
+                                <span>
+                                  Term:{" "}
+                                  <span className="font-semibold">
+                                    {termLabel(selectedTerm)}
+                                  </span>
                                 </span>
                               </div>
                             </div>
-                            
-                            {/* Aggregates */}
-                            <div className="pt-2 border-t border-gray-200">
-                              <p className="text-xs text-gray-600 mb-2">UNEB Aggregates</p>
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-sm font-medium text-gray-700">Total Aggregate:</span>
-                                <span className="text-lg font-bold text-gray-900">{aggregateAndDivision.aggregate}</span>
-                              </div>
+                          </div>
+
+                          {/* Divider */}
+                          <div className="w-px h-8 bg-gray-200"></div>
+
+                          {/* Academic Summary - Right Section */}
+                          <div className="flex items-center gap-6">
+                            {/* Overall Percentage */}
+                            <div className="text-center">
+                              <p className="text-xs text-gray-500">Overall %</p>
+                              <p className="text-lg font-bold text-gray-900">
+                                {overall.pct.toFixed(1)}%
+                              </p>
+                            </div>
+
+                            {/* Division */}
+                            <div className="text-center">
+                              <p className="text-xs text-gray-500">Division</p>
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold text-white ${aggregateAndDivision.pill}`}
+                              >
+                                {aggregateAndDivision.division}
+                              </span>
+                            </div>
+
+                            {/* Total Aggregate */}
+                            <div className="text-center">
+                              <p className="text-xs text-gray-500">Aggregate</p>
+                              <p className="text-lg font-bold text-gray-900">
+                                {aggregateAndDivision.aggregate}
+                              </p>
                             </div>
                           </div>
                         </div>
                       </div>
 
                       {/* Subjects Table */}
-                      <div className="mb-6">
-                        <p className="text-sm font-bold text-gray-900 mb-3">Subjects Performance</p>
-                        
-                        <div className="space-y-2">
-                          {subjectRowsForStudent.map((r) => (
-                            <div key={r.subject_id} className="border border-gray-200 rounded-lg overflow-hidden">
-                              <div className="grid grid-cols-12 gap-0">
-                                {/* Subject & Grades */}
-                                <div className="col-span-5 p-3 border-r border-gray-200">
-                                  <div className="flex items-center justify-between mb-2">
-                                    <div>
-                                      <p className="font-medium text-gray-900">{r.subject_name}</p>
-                                      <p className="text-xs text-gray-500">UNEB Grade: {r.grade_text}</p>
-                                    </div>
-                                    <span className={`inline-flex items-center justify-center rounded px-2 py-1 text-xs font-bold ${r.pill}`}>
-                                      {r.grade_text}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-4">
-                                    {r.perSession.map((ps) => (
-                                      <div key={ps.sessionId} className="text-center">
-                                        <p className="text-xs text-gray-500">{examTypeLabel(ps.exam_type)}</p>
-                                        <p className={`text-sm font-medium ${ps.possible > 0 ? 'text-gray-900' : 'text-gray-400'}`}>
-                                          {ps.possible > 0 ? `${ps.pct.toFixed(0)}%` : '—'}
-                                        </p>
-                                      </div>
-                                    ))}
-                                    <div className="text-center">
-                                      <p className="text-xs text-gray-500">Term</p>
-                                      <p className={`text-sm font-bold ${r.colorClass}`}>
-                                        {r.termPct.toFixed(0)}%
-                                      </p>
-                                    </div>
-                                  </div>
-                                </div>
-                                
-                                {/* Comments & Teacher */}
-                                <div className="col-span-7 p-3 bg-gray-50">
-                                  <div className="flex items-start gap-2">
-                                    <div className="flex-1">
-                                      <textarea
-                                        value={subjectComments[r.subject_id] ?? ''}
-                                        onChange={(e) =>
-                                          setSubjectComments((prev) => ({
-                                            ...prev,
-                                            [r.subject_id]: e.target.value,
-                                          }))
-                                        }
-                                        disabled={!isEditing}
-                                        className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none min-h-[40px]"
-                                        placeholder="Teacher's comment..."
-                                        rows={1}
-                                      />
-                                    </div>
-                                    <div className="text-right min-w-[100px]">
-                                      <p className="text-xs text-gray-500">Subject Teacher</p>
-                                      <p className="text-xs font-medium text-gray-700 mt-1 truncate">
-                                        {subjectTeacherById[r.subject_id] || '—'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
+                      <div className="mb-2 space-y-1">
+                        {sessions.map((sess) => {
+                          // ✅ TOTAL AGG PER SESSION
+                          const totalAgg = subjectRowsForStudent.reduce(
+                            (acc, r) => {
+                              const ps = r.perSession.find(
+                                (p) => p.sessionId === sess.id,
+                              );
+                              const mark = ps?.total ?? 0;
+                              const gradeNum = mark
+                                ? unebSubjectGrade(mark)
+                                : 0;
+                              return acc + (gradeNum ?? 0);
+                            },
+                            0,
+                          );
 
+                          // ✅ TOTAL MARKS PER SESSION
+                          const totalMarks = subjectRowsForStudent.reduce(
+                            (acc, r) => {
+                              const ps = r.perSession.find(
+                                (p) => p.sessionId === sess.id,
+                              );
+                              return acc + (ps?.total ?? 0);
+                            },
+                            0,
+                          );
+                          const studentTotals = students.map((s) => {
+                            const sMapForStudent =
+                              totalsByStudentSessionSubject.get(
+                                s.registration_id,
+                              ) ?? new Map();
+                            const total = subjectsForGrade.reduce(
+                              (acc, sub) => {
+                                const totalsForSess =
+                                  sMapForStudent.get(sess.id) ?? new Map();
+                                return (
+                                  acc + Number(totalsForSess.get(sub.id) ?? 0)
+                                );
+                              },
+                              0,
+                            );
+
+                            return {
+                              id: s.registration_id,
+                              total,
+                            };
+                          });
+
+                          // sort by performance (highest first)
+                          studentTotals.sort((a, b) => b.total - a.total);
+
+                          // find current student's position
+                          const rank =
+                            studentTotals.findIndex(
+                              (s) => s.id === selectedStudent?.registration_id,
+                            ) + 1;
+
+                          const outOf = studentTotals.length;
+
+                          return (
+                            <div
+                              key={sess.id}
+                              className="border border-gray-200 rounded-lg overflow-hidden"
+                            >
+                              {/* Section Title */}
+                              <div className="bg-gray-100 px-2 py-2 border-b">
+                                <p className="text-sm text-center font-bold text-gray-900">
+                                  {sess.exam_type === "BOT"
+                                    ? "BEGINNING OF TERM"
+                                    : sess.exam_type === "MOT"
+                                      ? "MID OF TERM"
+                                      : "END OF TERM"}
+                                </p>
+                              </div>
+
+                              {/* Table */}
+                              <table className="w-full text-xs border-collapse">
+                                <thead className="bg-gray-50 p-1 mt-1 " >
+                                  <tr className="mt-0  pl-4">
+                                    <th className="border p-1   text-left">
+                                      Subject
+                                    </th>
+                                    <th className="border p-1 text-center">
+                                      Full Marks
+                                    </th>
+                                    <th className="border p-1 text-center">
+                                      Mark Obtained
+                                    </th>
+                                    <th className="border p-1 text-center">
+                                      Grade
+                                    </th>
+                                    <th className="border p-1 text-center">
+                                      Agg
+                                    </th>
+                                    <th className="border p-1 text-left">
+                                      Subject Teacher Remark
+                                    </th>
+                                    <th className="border p-1 text-center">
+                                      Initials
+                                    </th>
+                                  </tr>
+                                </thead>
+
+                                <tbody>
+                                  {subjectRowsForStudent.map((r) => {
+                                    const ps = r.perSession.find(
+                                      (p) => p.sessionId === sess.id,
+                                    );
+
+                                    const full = 100;
+                                    const mark = ps?.total ?? 0;
+
+                                    const gradeNum =
+                                      mark !== null
+                                        ? unebSubjectGrade(mark)
+                                        : null;
+
+                                    const gradeText = gradeNum
+                                      ? unebGradeText(gradeNum)
+                                      : "—";
+
+                                    const autoComment =
+                                      mark !== null
+                                        ? getSubjectComment(gradeText, mark)
+                                        : "";
+
+                                    const agg = gradeNum ?? "";
+
+                                    return (
+                                      <tr key={`${sess.id}-${r.subject_id}`}>
+                                        <td className="border p-1 font-medium">
+                                          {r.subject_name}
+                                        </td>
+
+                                        <td className="border p-1 text-center">
+                                          {full}
+                                        </td>
+
+                                        <td className="border p-1 text-center">
+                                          {mark}
+                                        </td>
+
+                                        <td className="border p-1 text-center font-semibold">
+                                          {gradeText}
+                                        </td>
+
+                                        <td className="border p-1 text-center font-semibold">
+                                          {agg}
+                                        </td>
+
+                                        <td className="border p-1">
+                                          <textarea
+                                            value={
+                                              isEditing
+                                                ? (subjectComments[
+                                                    r.subject_id
+                                                  ] ?? "")
+                                                : autoComment
+                                            }
+                                            onChange={(e) =>
+                                              setSubjectComments((prev) => ({
+                                                ...prev,
+                                                [r.subject_id]: e.target.value,
+                                              }))
+                                            }
+                                            disabled={!isEditing}
+                                            className="w-full bg-transparent outline-none resize-none"
+                                            rows={1}
+                                          />
+                                        </td>
+
+                                        <td className="border p-1 text-center">
+                                          {subjectTeacherById[r.subject_id] ||
+                                            "—"}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+
+                                <tfoot>
+                                  <tr className="font-bold bg-gray-100 p-2">
+                                    <td className="text-left p-2 font-semi-bold">Total</td>
+
+                                    <td className="text-center">
+                                      {subjectRowsForStudent.length * 100}
+                                    </td>
+
+                                    <td className="text-center">
+                                      {totalMarks}
+                                    </td>
+
+                                    <td className="text-center">—</td>
+
+                                    <td className="text-center">{totalAgg}</td>
+
+                                    <td colSpan={2} className="text-right pr-4">
+                                      Position: {rank} /{outOf}
+                                      &nbsp;&nbsp;|&nbsp;&nbsp; DIV:{" "}
+                                      {aggregateAndDivision.division}
+                                    </td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            </div>
+                          );
+                        })}
+                      </div>
                       {/* Comments Section */}
                       <div className="space-y-4">
                         {/* Head Teacher */}
-                        <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                        <div className="border border-gray-200 rounded-lg pl-4 p-2 bg-gray-50">
                           <div className="flex items-center justify-between mb-2">
-                            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Head Teacher</p>
-                            <p className="text-xs text-gray-500">Official Comment</p>
+                            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                              Head Teacher
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              Official Comment
+                            </p>
                           </div>
                           <textarea
                             value={headTeacherComment}
-                            onChange={(e) => setHeadTeacherComment(e.target.value)}
+                            onChange={(e) =>
+                              setHeadTeacherComment(e.target.value)
+                            }
                             disabled={!isEditing}
                             className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
                             placeholder="Head teacher's official comment..."
                             rows={2}
                           />
-                          <div className="mt-2 pt-2 border-t border-gray-200">
-                            <p className="text-xs text-gray-500">Signature: ________________</p>
+                          <div className="mt-2">
+                            <p className="text-xs text-gray-500">
+                              Signature: ________________
+                            </p>
                           </div>
                         </div>
 
                         {/* Class Teacher */}
-                        <div className="border border-gray-200 rounded-lg p-4">
-                          <div className="flex items-center justify-between mb-2">
-                            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Class Teacher</p>
-                            <p className="text-xs text-gray-500">Class Performance Comment</p>
+                        <div className="border border-gray-200 rounded-lg p-2 pl-4 mb-10">
+                          <div className="flex items-center justify-between mb-1">
+                            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                              Class Teacher
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              Class Performance Comment
+                            </p>
                           </div>
                           <textarea
                             value={classTeacherComment}
-                            onChange={(e) => setClassTeacherComment(e.target.value)}
+                            onChange={(e) =>
+                              setClassTeacherComment(e.target.value)
+                            }
                             disabled={!isEditing}
                             className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
                             placeholder="Class teacher's performance comment..."
                             rows={2}
+                            
                           />
-                          <div className="mt-2 pt-2 border-t border-gray-200">
-                            <p className="text-xs text-gray-500">Signature: ________________</p>
+
+                          <div className="mt-0 pt-0">
+                            <p className="text-xs text-gray-500">
+                              Signature: ________________
+                            </p>
                           </div>
                         </div>
 
-                        {/* General Remarks */}
-                        <div className="border border-gray-200 rounded-lg p-4 bg-blue-50">
-                          <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">Overall Remarks</p>
+                        {/* General Remarks
+                        <div className="border border-gray-200 rounded-lg p-2  bg-blue-50">
+                          <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-0">
+                            Overall Remarks
+                          </p>
                           <p className="text-sm font-medium text-gray-800">
                             {overallRemark}
                           </p>
                           <div className="mt-3 flex items-center justify-between text-xs text-gray-600">
-                            <span>Aggregate: {aggregateAndDivision.aggregate} | Division: {aggregateAndDivision.division}</span>
+                            <span>
+                              Aggregate: {aggregateAndDivision.aggregate} |
+                               : {aggregateAndDivision.division}
+                            </span>
                             <span>Average: {overall.pct.toFixed(1)}%</span>
                           </div>
-                        </div>
+                        </div> */}
                       </div>
 
                       {/* Footer */}
-                      <div className="pt-4 mt-6 border-t border-gray-200">
+                      <div className="pt-1 mt-1 border-t border-gray-200">
                         <div className="flex items-center justify-between text-xs text-gray-500">
                           <div>
-                            <span>{school.website || school.email || 'Official Report'}</span>
+                            <span>
+                              {school.website ||
+                                school.email ||
+                                "Official Report"}
+                            </span>
                           </div>
                           <div className="text-right">
-                            <p>Generated on {new Date().toLocaleDateString('en-GB')}</p>
+                            <p>
+                              Generated on{" "}
+                              {new Date().toLocaleDateString("en-GB")}
+                            </p>
                             <p className="mt-1">UNEB Grading System Applied</p>
                           </div>
                         </div>
@@ -1571,7 +2055,8 @@ function PrintCSS() {
           print-color-adjust: exact !important;
         }
 
-        html, body {
+        html,
+        body {
           margin: 0 !important;
           padding: 0 !important;
           background: #fff !important;
@@ -1583,7 +2068,8 @@ function PrintCSS() {
           visibility: hidden;
         }
 
-        .print-page, .print-page * {
+        .print-page,
+        .print-page * {
           visibility: visible;
         }
 

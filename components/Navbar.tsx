@@ -20,6 +20,8 @@ import {
   BookOpen,
   CreditCard,
   Sparkles,
+  ClipboardList,
+  Calendar,
 } from 'lucide-react';
 
 type GeneralInformationRow = {
@@ -76,6 +78,7 @@ const MODULE_ICONS: Record<string, React.ReactNode> = {
   students: <Users size={14} />,
   finance: <CreditCard size={14} />,
   academics: <BookOpen size={14} />,
+  'lesson-plans': <ClipboardList size={14} />,
 };
 
 export default function Navbar() {
@@ -355,6 +358,7 @@ export default function Navbar() {
           icon: <UserCircle size={14} className="text-emerald-500" />,
         }));
 
+        // Updated module links with Academics Plans included
         const moduleLinks: SearchItem[] = [
           { 
             kind: 'module' as const, 
@@ -363,6 +367,22 @@ export default function Navbar() {
             subtitle: 'Manage student records',
             href: '/students',
             icon: <Users size={14} className="text-violet-500" />,
+          },
+          { 
+            kind: 'module' as const, 
+            id: 'academics', 
+            title: 'Academics Management', 
+            subtitle: 'Manage grades, subjects, exams & curriculum',
+            href: '/academics',
+            icon: <BookOpen size={14} className="text-blue-500" />,
+          },
+          { 
+            kind: 'module' as const, 
+            id: 'lesson-plans', 
+            title: 'Lesson Plans', 
+            subtitle: 'Create daily, weekly, termly & yearly plans',
+            href: '/academics/plans',
+            icon: <ClipboardList size={14} className="text-indigo-500" />,
           },
           { 
             kind: 'module' as const, 
@@ -380,7 +400,7 @@ export default function Navbar() {
             href: '/finance/stats',
             icon: <Sparkles size={14} className="text-blue-500" />,
           },
-        ].filter((m) => m.title.toLowerCase().includes(term.toLowerCase()));
+        ].filter((m) => m.title.toLowerCase().includes(term.toLowerCase()) || m.subtitle.toLowerCase().includes(term.toLowerCase()));
 
         const merged = [...sItems, ...pItems, ...moduleLinks].slice(0, maxResults);
 
@@ -485,7 +505,7 @@ export default function Navbar() {
                 }}
                 onFocus={() => setSearchOpen(true)}
                 onKeyDown={onSearchKeyDown}
-                placeholder="Search students, staff, modules..."
+                placeholder="Search students, staff, modules, lesson plans..."
                 className={cn(
                   'w-full rounded-2xl border border-slate-200 bg-white/80 px-11 py-3 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all duration-300',
                   'focus:border-blue-500 focus:bg-white focus:shadow-lg focus:shadow-blue-500/10',
@@ -611,17 +631,69 @@ export default function Navbar() {
 
           {/* Right: Actions */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={toggleTheme}
-              className={cn(
-                "relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-slate-700 hover:bg-slate-100 transition-all duration-300 hover:scale-105 active:scale-95 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800",
-                themeTransition && "animate-pulse"
-              )}
-              title="Toggle theme"
-            >
-              {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
-              <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-blue-500 animate-ping opacity-75" />
-            </button>
+            {/* Quick Links Dropdown */}
+            <div className="relative hidden md:block">
+              <button
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white/80 px-4 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-all duration-300 hover:scale-105 active:scale-95 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800"
+                onClick={() => {
+                  const dropdown = document.getElementById('quick-links-dropdown');
+                  if (dropdown) {
+                    dropdown.classList.toggle('hidden');
+                  }
+                }}
+              >
+                <Sparkles size={16} />
+                Quick Links
+                <ChevronDown size={14} />
+              </button>
+              <div
+                id="quick-links-dropdown"
+                className="absolute right-0 mt-2 w-64 hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-950 z-50 animate-in fade-in slide-in-from-top-2 duration-200"
+              >
+                <div className="p-2">
+                  <button
+                    onClick={() => router.push('/academics')}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition-all duration-200"
+                  >
+                    <BookOpen size={18} className="text-blue-500" />
+                    <div className="text-left">
+                      <p className="font-medium">Academics</p>
+                      <p className="text-xs text-slate-500">Manage grades, subjects & exams</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => router.push('/academics/plans')}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition-all duration-200"
+                  >
+                    <ClipboardList size={18} className="text-indigo-500" />
+                    <div className="text-left">
+                      <p className="font-medium">Lesson Plans</p>
+                      <p className="text-xs text-slate-500">Daily, weekly, termly & yearly plans</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => router.push('/students')}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition-all duration-200"
+                  >
+                    <Users size={18} className="text-emerald-500" />
+                    <div className="text-left">
+                      <p className="font-medium">Students</p>
+                      <p className="text-xs text-slate-500">Manage student records</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => router.push('/finance/management')}
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition-all duration-200"
+                  >
+                    <CreditCard size={18} className="text-amber-500" />
+                    <div className="text-left">
+                      <p className="font-medium">Finance</p>
+                      <p className="text-xs text-slate-500">Tuitions & transactions</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
 
             <button
               className="hidden md:inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-slate-700 hover:bg-slate-100 transition-all duration-300 hover:scale-105 active:scale-95 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800 group"
@@ -629,22 +701,6 @@ export default function Navbar() {
               onClick={() => router.push('/help')}
             >
               <HelpCircle size={18} className="group-hover:rotate-12 transition-transform" />
-            </button>
-
-            <button
-              className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-slate-700 hover:bg-slate-100 transition-all duration-300 hover:scale-105 active:scale-95 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800 group"
-              title="Notifications (click to clear)"
-              onClick={() => setNotifications(0)}
-            >
-              <Bell size={18} className="group-hover:animate-shake" />
-              {notifications > 0 && (
-                <>
-                  <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-red-500 px-1.5 text-[11px] font-semibold text-white shadow-lg group-hover:scale-110 transition-transform">
-                    {notifications}
-                  </span>
-                  <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-red-500 px-1.5 text-[11px] font-semibold text-white shadow-lg animate-ping opacity-60" />
-                </>
-              )}
             </button>
 
             {/* User menu */}
@@ -781,6 +837,16 @@ export default function Navbar() {
               <Search size={20} className="text-emerald-600 dark:text-emerald-400" />
             </div>
             <span className="text-[11px] font-medium">Search</span>
+          </button>
+
+          <button
+            onClick={() => router.push('/academics/plans')}
+            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all duration-200 hover:scale-105 active:scale-95 group flex-1"
+          >
+            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-50 dark:from-indigo-500/20 dark:to-indigo-500/10 flex items-center justify-center group-hover:from-indigo-200 group-hover:to-indigo-100 dark:group-hover:from-indigo-500/30 transition-all">
+              <ClipboardList size={20} className="text-indigo-600 dark:text-indigo-400" />
+            </div>
+            <span className="text-[11px] font-medium">Plans</span>
           </button>
 
           <button

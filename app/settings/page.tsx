@@ -1,11 +1,12 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
 import AppShell from '@/components/AppShell';
-import { AlertTriangle, CheckCircle2, Loader2, School, User2, Shield } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, School, User2, Shield, Upload, X } from 'lucide-react';
+import Image from 'next/image';
 
 type Role = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
 
@@ -48,11 +49,13 @@ function safeMetaName(meta: any) {
 
 export default function SettingsPage() {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // auth + loading
   const [authChecking, setAuthChecking] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   // identity
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -74,6 +77,8 @@ export default function SettingsPage() {
   const [schoolEmail, setSchoolEmail] = useState('');
   const [website, setWebsite] = useState('');
   const [establishedYear, setEstablishedYear] = useState('');
+  const [schoolBadge, setSchoolBadge] = useState<string | null>(null);
+  const [tempImagePreview, setTempImagePreview] = useState<string | null>(null);
 
   const isAdmin = profile?.role === 'ADMIN';
 
@@ -188,6 +193,7 @@ export default function SettingsPage() {
         setSchoolEmail(schoolRow.email ?? '');
         setWebsite(schoolRow.website ?? '');
         setEstablishedYear(schoolRow.established_year ? String(schoolRow.established_year) : '');
+        setSchoolBadge(schoolRow.school_badge ?? null);
       } catch (e: any) {
         setErrorMsg(e?.message || 'Unexpected error while loading settings.');
       } finally {
@@ -195,6 +201,149 @@ export default function SettingsPage() {
       }
     })();
   }, [authChecking]);
+
+  // ---------------------------
+  // UPLOAD SCHOOL BADGE
+  // ---------------------------
+  const handleImageUpload = async (file: File) => {
+    if (!isAdmin) {
+      setErrorMsg('Only ADMIN can upload school badge.');
+      return null;
+    }
+
+    if (!school?.id && !profile?.school_id) {
+      setErrorMsg('Please create/save the school first before uploading a badge.');
+      return null;
+    }
+
+    const schoolId = school?.id || profile?.school_id;
+    if (!schoolId) return null;
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      setErrorMsg('Only JPEG, PNG, WEBP, and GIF images are allowed.');
+      return null;
+    }
+
+    // Validate file size (max 2MB)
+    const maxSize = 2 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setErrorMsg('Image size must be less than 2MB.');
+      return null;
+    }
+
+    setUploadingImage(true);
+    setErrorMsg(null);
+
+    try {
+      // Create a unique filename
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${schoolId}_${Date.now()}.${fileExt}`;
+      const filePath = `school-badges/${fileName}`;
+
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('school-assets') // Make sure this bucket exists in your Supabase project
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false,
+        });
+
+      if (uploadError) throw new Error(uploadError.message);
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('school-assets')
+        .getPublicUrl(filePath);
+
+      const publicUrl = urlData.publicUrl;
+
+      // Update school record with new badge URL
+      const { error: updateError } = await supabase
+        .from('general_information')
+        .update({ school_badge: publicUrl })
+        .eq('id', schoolId);
+
+      if (updateError) throw new Error(updateError.message);
+
+      // Update local state
+      setSchoolBadge(publicUrl);
+      if (school) {
+        setSchool({ ...school, school_badge: publicUrl });
+      }
+      
+      setSuccessMsg('School badge uploaded successfully!');
+      return publicUrl;
+    } catch (e: any) {
+      setErrorMsg(e?.message || 'Failed to upload image.');
+      return null;
+    } finally {
+      setUploadingImage(false);
+      setTempImagePreview(null);
+    }
+  };
+
+  const handleRemoveBadge = async () => {
+    if (!isAdmin) {
+      setErrorMsg('Only ADMIN can remove school badge.');
+      return;
+    }
+
+    if (!school?.id) return;
+
+    setUploadingImage(true);
+    setErrorMsg(null);
+
+    try {
+      // Extract filename from URL if exists
+      if (schoolBadge) {
+        const urlParts = schoolBadge.split('/');
+        const fileName = urlParts[urlParts.length - 1];
+        const filePath = `school-badges/${fileName}`;
+        
+        // Try to delete from storage (optional - you might want to keep the file)
+        await supabase.storage
+          .from('school-assets')
+          .remove([filePath]);
+      }
+
+      // Update school record
+      const { error: updateError } = await supabase
+        .from('general_information')
+        .update({ school_badge: null })
+        .eq('id', school.id);
+
+      if (updateError) throw new Error(updateError.message);
+
+      // Update local state
+      setSchoolBadge(null);
+      if (school) {
+        setSchool({ ...school, school_badge: null });
+      }
+      
+      setSuccessMsg('School badge removed successfully!');
+    } catch (e: any) {
+      setErrorMsg(e?.message || 'Failed to remove badge.');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      // Show preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setTempImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+      
+      // Upload immediately
+      handleImageUpload(file);
+    }
+  };
 
   // ---------------------------
   // SAVE SCHOOL (CREATE OR UPDATE)
@@ -243,6 +392,7 @@ export default function SettingsPage() {
             email: em,
             website: website.trim() ? website.trim() : null,
             established_year: yearNum,
+            // Keep existing school_badge
           })
           .eq('id', school.id);
 
@@ -293,6 +443,7 @@ export default function SettingsPage() {
           website: website.trim() ? website.trim() : null,
           established_year: yearNum,
           registered_by_user_id: userId,
+          school_badge: null, // Initially null, can be added after creation
         })
         .select(
           'id,school_name,school_badge,box_no,location,contact_number,email,website,established_year,registered_by_user_id,created_at,updated_at'
@@ -474,6 +625,66 @@ export default function SettingsPage() {
                   </div>
                 )}
 
+                {/* School Badge Upload Section */}
+                {isAdmin && school && (
+                  <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <label className="block font-medium text-slate-700 text-xs mb-2">School Badge / Logo</label>
+                    <div className="flex items-start gap-4 flex-wrap">
+                      {/* Current Badge Preview */}
+                      {(schoolBadge || tempImagePreview) && (
+                        <div className="relative">
+                          <div className="w-24 h-24 rounded-lg border border-slate-200 bg-white overflow-hidden flex items-center justify-center">
+                            <Image
+                              src={tempImagePreview || schoolBadge || ''}
+                              alt="School badge"
+                              width={96}
+                              height={96}
+                              className="object-contain"
+                            />
+                          </div>
+                          {isAdmin && !uploadingImage && (
+                            <button
+                              onClick={handleRemoveBadge}
+                              className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
+                              title="Remove badge"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Upload Button */}
+                      <div className="flex-1">
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif"
+                          onChange={handleFileSelect}
+                          className="hidden"
+                          disabled={uploadingImage || !isAdmin}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={uploadingImage || !isAdmin}
+                          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-medium hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed"
+                        >
+                          {uploadingImage ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Upload className="h-4 w-4" />
+                          )}
+                          {uploadingImage ? 'Uploading...' : schoolBadge ? 'Change Badge' : 'Upload Badge'}
+                        </button>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Recommended: Square image, max 2MB (JPEG, PNG, WEBP, GIF)
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <form onSubmit={handleSaveSchool} className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                   <div className="space-y-1">
                     <label htmlFor="school_name" className="block font-medium text-slate-700">
@@ -601,7 +812,7 @@ export default function SettingsPage() {
                 </form>
 
                 <div className="mt-3 text-[11px] text-slate-400">
-                  If school loading fails, it’s usually an RLS issue on <b>general_information</b>. Ensure the logged-in user can read their linked school.
+                  If school loading fails, it's usually an RLS issue on <b>general_information</b>. Ensure the logged-in user can read their linked school.
                 </div>
               </div>
             </section>

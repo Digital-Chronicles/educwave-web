@@ -1,6 +1,6 @@
 'use client';
 
-import React, { FormEvent, useEffect, useMemo, useState } from 'react';
+import React, { FormEvent, useEffect, useMemo, useState, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
@@ -50,6 +50,8 @@ import {
   Share2,
   Eye,
   EyeOff,
+  Upload,
+  Loader2,
 } from 'lucide-react';
 
 /* ---------------- Types ---------------- */
@@ -152,6 +154,187 @@ interface StudentTuitionDescriptionRow {
 }
 
 /* ---------------- UI Components ---------------- */
+
+// Student Avatar Upload Component
+function StudentAvatarUpload({ 
+  studentId, 
+  currentAvatarUrl, 
+  onAvatarUploaded 
+}: { 
+  studentId: string; 
+  currentAvatarUrl: string | null; 
+  onAvatarUploaded: (url: string) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(currentAvatarUrl);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedTypes.includes(file.type)) {
+      alert('Only JPEG, PNG, WEBP, and GIF images are allowed.');
+      return;
+    }
+
+    // Validate file size (max 2MB)
+    const maxSize = 2 * 1024 * 1024;
+    if (file.size > maxSize) {
+      alert('Image size must be less than 2MB.');
+      return;
+    }
+
+    // Show preview immediately
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setPreviewUrl(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+
+    // Upload to Supabase
+    await uploadImage(file);
+  };
+
+  const uploadImage = async (file: File) => {
+    setUploading(true);
+
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `students/${studentId}_${Date.now()}.${fileExt}`;
+      const filePath = fileName;
+
+      // Upload to storage
+      const { error: uploadError } = await supabase.storage
+        .from('student-avatars')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true,
+        });
+
+      if (uploadError) throw new Error(uploadError.message);
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('student-avatars')
+        .getPublicUrl(filePath);
+
+      const publicUrl = urlData.publicUrl;
+
+      // Update the students table with the new profile_picture_url
+      const { error: updateError } = await supabase
+        .from('students')
+        .update({ profile_picture_url: publicUrl })
+        .eq('registration_id', studentId);
+
+      if (updateError) throw new Error(updateError.message);
+
+      // Notify parent component
+      onAvatarUploaded(publicUrl);
+      setPreviewUrl(publicUrl);
+      
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      alert(error.message || 'Failed to upload image.');
+      // Revert preview on error
+      setPreviewUrl(currentAvatarUrl);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    if (!currentAvatarUrl) return;
+
+    setUploading(true);
+    try {
+      // Update database to remove profile_picture_url
+      const { error: updateError } = await supabase
+        .from('students')
+        .update({ profile_picture_url: null })
+        .eq('registration_id', studentId);
+
+      if (updateError) throw new Error(updateError.message);
+
+      onAvatarUploaded('');
+      setPreviewUrl(null);
+      
+    } catch (error: any) {
+      console.error('Remove error:', error);
+      alert(error.message || 'Failed to remove profile picture.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      {/* Avatar Preview */}
+      <div className="relative">
+        {previewUrl ? (
+          <div className="relative w-24 h-24 rounded-full overflow-hidden border-2 border-slate-200 bg-white shadow-md">
+            <img
+              src={previewUrl}
+              alt="Student profile"
+              className="object-cover w-full h-full"
+            />
+            {uploading && (
+              <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-white" />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center border-2 border-slate-200 shadow-md">
+            <User className="h-10 w-10 text-blue-600" />
+          </div>
+        )}
+        
+        {/* Remove button (only if avatar exists) */}
+        {currentAvatarUrl && !uploading && (
+          <button
+            onClick={handleRemoveAvatar}
+            className="absolute -top-2 -right-2 p-1.5 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors shadow-md hover:scale-110 transition-transform"
+            title="Remove photo"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+
+      {/* Upload Button */}
+      <div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          onChange={handleFileSelect}
+          className="hidden"
+          disabled={uploading}
+        />
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-gray-300 bg-white text-gray-700 text-xs font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+        >
+          {uploading ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Upload className="h-3 w-3" />
+          )}
+          {uploading ? 'Uploading...' : currentAvatarUrl ? 'Change Photo' : 'Upload Photo'}
+        </button>
+        <p className="text-[10px] text-gray-400 mt-1 text-center">
+          Max 2MB (JPEG, PNG, WEBP)
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function Modal({
   open,
   title,
@@ -881,16 +1064,33 @@ export default function StudentProfileClient() {
               
               <div className="relative flex items-center justify-between">
                 <div className="flex items-center gap-6">
-                  <div className="relative">
-                    <div className="h-24 w-24 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-3xl font-bold shadow-lg">
-                      {student ? `${student.first_name[0]}${student.last_name[0]}` : 'NS'}
-                    </div>
-                    <div className="absolute -bottom-2 -right-2 bg-white rounded-full p-1.5 shadow-lg">
-                      <div className="h-6 w-6 rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 flex items-center justify-center">
-                        <UserCheck size={12} className="text-white" />
+                  {/* Avatar with upload capability */}
+                  {!isCreateMode && student && (
+                    <StudentAvatarUpload
+                      studentId={student.registration_id}
+                      currentAvatarUrl={student.profile_picture_url}
+                      onAvatarUploaded={(newUrl) => {
+                        setStudent(prev => prev ? { ...prev, profile_picture_url: newUrl || null } : null);
+                        setSuccessMsg('Profile picture updated successfully!');
+                        setTimeout(() => setSuccessMsg(null), 3000);
+                      }}
+                    />
+                  )}
+                  
+                  {/* Fallback for create mode */}
+                  {isCreateMode && (
+                    <div className="relative">
+                      <div className="h-24 w-24 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-3xl font-bold shadow-lg">
+                        NS
+                      </div>
+                      <div className="absolute -bottom-2 -right-2 bg-white rounded-full p-1.5 shadow-lg">
+                        <div className="h-6 w-6 rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 flex items-center justify-center">
+                          <UserCheck size={12} className="text-white" />
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
+                  
                   <div>
                     <div className="flex items-center gap-4 mb-2">
                       <h1 className="text-4xl font-bold text-gray-900 tracking-tight">
@@ -1384,6 +1584,20 @@ export default function StudentProfileClient() {
         widthClass="max-w-2xl"
       >
         <form onSubmit={handleSavePersonalInfo} className="space-y-6">
+          {/* Show current avatar in edit mode */}
+          {!isCreateMode && student?.profile_picture_url && (
+            <div className="flex justify-center pb-4 border-b border-gray-200">
+              <div className="text-center">
+                <img 
+                  src={student.profile_picture_url} 
+                  alt="Current profile" 
+                  className="w-20 h-20 rounded-full object-cover border-2 border-blue-500 mx-auto mb-2"
+                />
+                <p className="text-xs text-gray-500">Current profile picture</p>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">First Name *</label>

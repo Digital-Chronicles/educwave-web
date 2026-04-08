@@ -197,8 +197,8 @@ function unebGradeText(g: number) {
   if (g === 2) return "D2";
   if (g === 3) return "C3";
   if (g === 4) return "C4";
-  if (g === 5) return "P5";
-  if (g === 6) return "P6";
+  if (g === 5) return "C5";
+  if (g === 6) return "C6";
   if (g === 7) return "F7";
   if (g === 8) return "F8";
   return "F9";
@@ -270,15 +270,15 @@ function getSubjectComment(gradeText: string, pct: number): string {
     D2: ["Very good.", "Strong performance.", "Well done."],
     C3: ["Good effort.", "Satisfactory work.", "Average performance."],
     C4: ["Needs improvement.", "Can do better.", "Below average."],
-    P5: ["Poor performance.", "Needs help.", "Very weak."],
-    P6: [
+    C5: ["Poor performance.", "Needs help.", "Very weak."],
+   C6: [
       "Failed to meet expectations.",
       "Critical improvement needed.",
       "Poor.",
     ],
-    F7: ["Failed badly.", "No understanding shown.", "Very poor."],
+    F7: ["More Effort Needed.", "No understanding shown.", "Very poor."],
     F8: ["Complete failure.", "Zero grasp of concepts.", "Failed."],
-    F9: ["Total failure.", "Failed completely.", "No attempt."],
+    F9: ["Aim higher.", "Wake Up.", "Try harder."],
   };
 
   const gradeKey = gradeText.startsWith("D")
@@ -286,7 +286,7 @@ function getSubjectComment(gradeText: string, pct: number): string {
     : gradeText.startsWith("C")
       ? "C3"
       : gradeText.startsWith("P")
-        ? "P5"
+        ? "C5"
         : "F7";
 
   const comments =
@@ -1664,47 +1664,42 @@ export default function StudentReportPage() {
                                     {selectedGrade?.grade_name || "—"}
                                   </span>
                                 </span>
-                                <span>
-                                  Term:{" "}
-                                  <span className="font-semibold">
-                                    {termLabel(selectedTerm)}
-                                  </span>
-                                </span>
+                               
                               </div>
                             </div>
                           </div>
 
                           {/* Divider */}
-                          <div className="w-px h-8 bg-gray-200"></div>
+                          {/* <div className="w-px h-8 bg-gray-200"></div> */}
 
                           {/* Academic Summary - Right Section */}
-                          <div className="flex items-center gap-6">
+                          {/* <div className="flex items-center gap-6">
                             {/* Overall Percentage */}
-                            <div className="text-center">
+                            {/* <div className="text-center">
                               <p className="text-xs text-gray-500">Overall %</p>
                               <p className="text-lg font-bold text-gray-900">
                                 {overall.pct.toFixed(1)}%
                               </p>
-                            </div>
+                            </div> */}
 
                             {/* Division */}
-                            <div className="text-center">
+                            {/* <div className="text-center">
                               <p className="text-xs text-gray-500">Division</p>
                               <span
                                 className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold text-white ${aggregateAndDivision.pill}`}
                               >
                                 {aggregateAndDivision.division}
                               </span>
-                            </div>
+                            </div> */}
 
                             {/* Total Aggregate */}
-                            <div className="text-center">
+                            {/* <div className="text-center">
                               <p className="text-xs text-gray-500">Aggregate</p>
                               <p className="text-lg font-bold text-gray-900">
                                 {aggregateAndDivision.aggregate}
                               </p>
                             </div>
-                          </div>
+                          </div> */} 
                         </div>
                       </div>
 

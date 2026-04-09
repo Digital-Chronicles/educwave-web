@@ -1,28 +1,32 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import supabase from '@/lib/supabaseClient';
 import {
   Bell,
+  BookOpen,
   ChevronDown,
+  ClipboardList,
+  CreditCard,
+  FileText,
   HelpCircle,
   Home,
+  LayoutDashboard,
   Loader2,
   LogOut,
-  Moon,
+  School,
   Search,
   Settings,
-  Sun,
-  UserCircle,
-  School,
-  Users,
-  BookOpen,
-  CreditCard,
   Sparkles,
-  ClipboardList,
-  Calendar,
+  UserCircle,
+  Users,
+  X,
 } from 'lucide-react';
+
+// ============================================================================
+// Types
+// ============================================================================
 
 type GeneralInformationRow = {
   id: string;
@@ -45,6 +49,10 @@ type StudentRow = {
   school_id: string;
 };
 
+type TeacherLookupRow = {
+  registration_id: string;
+};
+
 type SearchKind = 'student' | 'profile' | 'module';
 
 type SearchItem = {
@@ -56,116 +64,284 @@ type SearchItem = {
   icon?: React.ReactNode;
 };
 
+type NavShortcut = {
+  label: string;
+  href: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  allowedRoles?: string[];
+};
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const ROLE_HINTS = ['ADMIN', 'ACADEMIC', 'TEACHER', 'FINANCE', 'STUDENT', 'PARENT'] as const;
+const NAVBAR_HEIGHT_PX = 72;
+const FINANCE_ACCESS_ROLES = ['ADMIN', 'FINANCE'];
+
+const PRIMARY_NAV: NavShortcut[] = [
+  { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, allowedRoles: ['ADMIN', 'ACADEMIC', 'TEACHER', 'FINANCE', 'STUDENT', 'PARENT'] },
+  { label: 'Students', href: '/students', icon: Users, allowedRoles: ['ADMIN', 'ACADEMIC', 'TEACHER', 'FINANCE'] },
+  { label: 'Academics', href: '/academics', icon: BookOpen, allowedRoles: ['ADMIN', 'ACADEMIC', 'TEACHER'] },
+  { label: 'Plans', href: '/academics/plans', icon: ClipboardList, allowedRoles: ['ADMIN', 'ACADEMIC', 'TEACHER'] },
+  { label: 'Assessments', href: '/assessments', icon: FileText, allowedRoles: ['ADMIN', 'ACADEMIC', 'TEACHER'] },
+  { label: 'Finance', href: '/finance', icon: CreditCard, allowedRoles: FINANCE_ACCESS_ROLES },
+];
+
+const QUICK_LINKS: NavShortcut[] = [
+  { label: 'Students', href: '/students', icon: Users, allowedRoles: ['ADMIN', 'ACADEMIC', 'TEACHER', 'FINANCE'] },
+  { label: 'Academics', href: '/academics', icon: BookOpen, allowedRoles: ['ADMIN', 'ACADEMIC', 'TEACHER'] },
+  { label: 'Lesson Plans', href: '/academics/plans', icon: ClipboardList, allowedRoles: ['ADMIN', 'ACADEMIC', 'TEACHER'] },
+  { label: 'Create Notes', href: '/notes/create', icon: ClipboardList, allowedRoles: ['ADMIN', 'ACADEMIC', 'TEACHER'] },
+  { label: 'Assessments', href: '/assessments', icon: FileText, allowedRoles: ['ADMIN', 'ACADEMIC', 'TEACHER'] },
+  { label: 'Quizzes', href: '/quizzes', icon: FileText, allowedRoles: ['ADMIN', 'ACADEMIC', 'TEACHER'] },
+  { label: 'Finance', href: '/finance', icon: CreditCard, allowedRoles: FINANCE_ACCESS_ROLES },
+  { label: 'Reports', href: '/student-report', icon: FileText, allowedRoles: ['ADMIN', 'ACADEMIC', 'TEACHER', 'FINANCE'] },
+];
+
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
 }
 
 function useDebounced<T>(value: T, delay = 250) {
-  const [v, setV] = useState(value);
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
   useEffect(() => {
-    const t = setTimeout(() => setV(value), delay);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
   }, [value, delay]);
-  return v;
+
+  return debouncedValue;
 }
 
-const ROLE_HINTS = ['ADMIN', 'ACADEMIC', 'TEACHER', 'FINANCE', 'STUDENT', 'PARENT'] as const;
-
-// Keep this in sync with h-16
-const NAVBAR_HEIGHT_PX = 64;
-
-const MODULE_ICONS: Record<string, React.ReactNode> = {
-  students: <Users size={14} />,
-  finance: <CreditCard size={14} />,
-  academics: <BookOpen size={14} />,
-  'lesson-plans': <ClipboardList size={14} />,
+const getFinanceModuleLink = (hasFinanceAccess: boolean): SearchItem | null => {
+  if (!hasFinanceAccess) return null;
+  return {
+    kind: 'module',
+    id: 'finance',
+    title: 'Finance',
+    subtitle: 'Tuitions, transactions and analytics',
+    href: '/finance',
+    icon: <CreditCard size={14} className="text-amber-500" />,
+  };
 };
+
+// ============================================================================
+// Main Component
+// ============================================================================
 
 export default function Navbar() {
   const router = useRouter();
+  const pathname = usePathname();
 
-  // Theme
-  const [isDarkMode, setIsDarkMode] = useState(false);
-  const [themeTransition, setThemeTransition] = useState(false);
-
-  // Menus
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement | null>(null);
-
-  // Notifications (demo)
-  const [notifications, setNotifications] = useState(3);
-
-  // Auth/Profile
+  // State
   const [profileLoading, setProfileLoading] = useState(true);
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [school, setSchool] = useState<GeneralInformationRow | null>(null);
+  const [teacherProfileHref, setTeacherProfileHref] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState(3);
 
-  // Search
-  const [q, setQ] = useState('');
-  const debouncedQ = useDebounced(q, 250);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [items, setItems] = useState<SearchItem[]>([]);
-  const [activeIndex, setActiveIndex] = useState<number>(-1);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isQuickLinksOpen, setIsQuickLinksOpen] = useState(false);
 
+  // Refs
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
+  const quickLinksRef = useRef<HTMLDivElement | null>(null);
   const searchWrapRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const debouncedQuery = useDebounced(searchQuery, 250);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchItems, setSearchItems] = useState<SearchItem[]>([]);
+  const [activeItemIndex, setActiveItemIndex] = useState<number>(-1);
+
   const maxResults = 8;
-  const term = debouncedQ.trim();
-  const canSearch = term.length >= 2;
+  const trimmedQuery = debouncedQuery.trim();
+  const canSearch = trimmedQuery.length >= 2;
 
-  // ---------- THEME ----------
-  useEffect(() => {
-    const saved = localStorage.getItem('theme');
-    const prefersDark =
-      window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  // Derived values - Fixed: ensure boolean, not boolean | null
+  const hasFinanceAccess = useMemo(() => {
+    return profile?.role ? FINANCE_ACCESS_ROLES.includes(profile.role as any) : false;
+  }, [profile]);
 
-    const nextDark = saved ? saved === 'dark' : prefersDark;
-    setIsDarkMode(nextDark);
-    document.documentElement.classList.toggle('dark', nextDark);
-  }, []);
+  // Fixed: Handle null role by defaulting to 'STUDENT'
+  const userRole = profile?.role ?? 'STUDENT';
+  
+  const filteredPrimaryNav = useMemo(() => {
+    return PRIMARY_NAV.filter(item => item.allowedRoles?.includes(userRole));
+  }, [userRole]);
 
-  const toggleTheme = () => {
-    setThemeTransition(true);
-    setIsDarkMode((prev) => {
-      const next = !prev;
-      document.documentElement.classList.toggle('dark', next);
-      localStorage.setItem('theme', next ? 'dark' : 'light');
-      return next;
-    });
-    setTimeout(() => setThemeTransition(false), 300);
+  const filteredQuickLinks = useMemo(() => {
+    return QUICK_LINKS.filter(item => item.allowedRoles?.includes(userRole));
+  }, [userRole]);
+
+  const displayName = useMemo(() => {
+    if (!profile) return 'User';
+    if (profile.full_name?.trim()) return profile.full_name.trim();
+    if (profile.email?.trim()) return profile.email.split('@')[0];
+    return 'User';
+  }, [profile]);
+
+  const displayEmail = useMemo(() => profile?.email ?? '', [profile]);
+  
+  const firstName = useMemo(() => displayName.split(' ')[0] || 'User', [displayName]);
+
+  const userInitials = useMemo(() => {
+    const parts = displayName.trim().split(/\s+/).slice(0, 2);
+    const initials = parts.map((p) => p[0]?.toUpperCase()).join('');
+    return initials || 'U';
+  }, [displayName]);
+
+  const roleLabel = useMemo(() => userRole.toString().toUpperCase(), [userRole]);
+
+  const schoolName = useMemo(() => school?.school_name || 'School', [school]);
+
+  const profileHref = useMemo(() => {
+    if (userRole === 'TEACHER' && teacherProfileHref) {
+      return teacherProfileHref;
+    }
+    return '/profile';
+  }, [userRole, teacherProfileHref]);
+
+  const roleColor = useMemo(() => {
+    switch (userRole) {
+      case 'ADMIN':
+        return 'from-red-500 to-pink-600';
+      case 'TEACHER':
+        return 'from-emerald-500 to-teal-600';
+      case 'ACADEMIC':
+        return 'from-blue-500 to-indigo-600';
+      case 'FINANCE':
+        return 'from-amber-500 to-orange-600';
+      case 'STUDENT':
+        return 'from-violet-500 to-purple-600';
+      case 'PARENT':
+        return 'from-cyan-500 to-sky-600';
+      default:
+        return 'from-gray-500 to-slate-600';
+    }
+  }, [userRole]);
+
+  // ==========================================================================
+  // Event Handlers
+  // ==========================================================================
+
+  const closeAllMenus = () => {
+    setIsUserMenuOpen(false);
+    setIsQuickLinksOpen(false);
+    setIsSearchOpen(false);
   };
 
-  // ---------- CLOSE MENUS ON OUTSIDE CLICK / ESC ----------
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    setSearchItems([]);
+    setActiveItemIndex(-1);
+    setIsSearchOpen(false);
+    searchInputRef.current?.focus();
+  };
+
+  const handleGoToResultsPage = (query: string) => {
+    const clean = query.trim();
+    if (!clean) return;
+    router.push(`/search?q=${encodeURIComponent(clean)}`);
+    setIsSearchOpen(false);
+  };
+
+  const handleOpenSearchItem = (item: SearchItem) => {
+    router.push(item.href);
+    setIsSearchOpen(false);
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!isSearchOpen) setIsSearchOpen(true);
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        if (!searchItems.length) return;
+        setActiveItemIndex((prev) => (prev + 1) % searchItems.length);
+        break;
+      
+      case 'ArrowUp':
+        e.preventDefault();
+        if (!searchItems.length) return;
+        setActiveItemIndex((prev) => (prev - 1 + searchItems.length) % searchItems.length);
+        break;
+      
+      case 'Enter':
+        e.preventDefault();
+        if (activeItemIndex >= 0 && searchItems[activeItemIndex]) {
+          handleOpenSearchItem(searchItems[activeItemIndex]);
+        } else {
+          handleGoToResultsPage(searchQuery);
+        }
+        break;
+    }
+  };
+
+  const handleSignOut = async () => {
+    setIsUserMenuOpen(false);
+    await supabase.auth.signOut();
+    router.replace('/');
+  };
+
+  const isActiveRoute = (href: string) => {
+    if (href === '/dashboard') return pathname === '/dashboard';
+    return pathname === href || pathname.startsWith(`${href}/`);
+  };
+
+  // Helper function to check if a search item matches the search term
+  const doesItemMatchSearch = (item: SearchItem, term: string): boolean => {
+    const lowerTerm = term.toLowerCase();
+    const titleMatch = item.title.toLowerCase().includes(lowerTerm);
+    const subtitleMatch = item.subtitle ? item.subtitle.toLowerCase().includes(lowerTerm) : false;
+    return titleMatch || subtitleMatch;
+  };
+
+  // ==========================================================================
+  // Effects
+  // ==========================================================================
+
+  // Close menus on outside click and escape key
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setIsUserMenuOpen(false);
-        setSearchOpen(false);
+        closeAllMenus();
       }
     };
 
-    const onMouseDown = (e: MouseEvent) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+    const handleMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+
+      if (userMenuRef.current && !userMenuRef.current.contains(target)) {
         setIsUserMenuOpen(false);
       }
-      if (searchWrapRef.current && !searchWrapRef.current.contains(e.target as Node)) {
-        setSearchOpen(false);
+      if (quickLinksRef.current && !quickLinksRef.current.contains(target)) {
+        setIsQuickLinksOpen(false);
+      }
+      if (searchWrapRef.current && !searchWrapRef.current.contains(target)) {
+        setIsSearchOpen(false);
       }
     };
 
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('mousedown', handleMouseDown);
 
     return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('mousedown', handleMouseDown);
     };
   }, []);
 
-  // ---------- LOAD LOGGED-IN USER + PROFILE + SCHOOL ----------
+  // Load user profile
   useEffect(() => {
     let cancelled = false;
 
@@ -185,36 +361,36 @@ export default function Navbar() {
           return;
         }
 
-        const { data: p, error: pErr } = await supabase
+        const { data: profileData, error: profileErr } = await supabase
           .from('profiles')
           .select('user_id, email, full_name, role, school_id')
           .eq('user_id', user.id)
           .maybeSingle();
 
-        if (pErr) throw pErr;
+        if (profileErr) throw profileErr;
 
-        const merged: ProfileRow = {
+        const mergedProfile: ProfileRow = {
           user_id: user.id,
-          email: p?.email ?? user.email ?? null,
-          full_name: p?.full_name ?? null,
-          role: (p?.role as any) ?? null,
-          school_id: p?.school_id ?? null,
+          email: profileData?.email ?? user.email ?? null,
+          full_name: profileData?.full_name ?? null,
+          role: profileData?.role ?? null,
+          school_id: profileData?.school_id ?? null,
         };
 
         if (!cancelled) {
-          setProfile(merged);
+          setProfile(mergedProfile);
           setSchool(null);
         }
 
-        if (merged.school_id) {
-          const { data: s, error: sErr } = await supabase
+        if (mergedProfile.school_id) {
+          const { data: schoolData, error: schoolErr } = await supabase
             .from('general_information')
             .select('id, school_name')
-            .eq('id', merged.school_id)
+            .eq('id', mergedProfile.school_id)
             .maybeSingle();
 
           if (!cancelled) {
-            if (!sErr && s) setSchool(s);
+            if (!schoolErr && schoolData) setSchool(schoolData);
             else setSchool(null);
           }
         }
@@ -229,65 +405,61 @@ export default function Navbar() {
     }
 
     loadProfile();
+
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const displayName = useMemo(() => {
-    if (!profile) return 'User';
-    if (profile.full_name?.trim()) return profile.full_name.trim();
-    if (profile.email?.trim()) return profile.email.split('@')[0];
-    return 'User';
-  }, [profile]);
-
-  const displayEmail = useMemo(() => profile?.email ?? '', [profile]);
-
-  const userInitials = useMemo(() => {
-    const name = displayName.trim();
-    const parts = name.split(/\s+/).slice(0, 2);
-    const initials = parts.map((p) => p[0]?.toUpperCase()).join('');
-    return initials || 'U';
-  }, [displayName]);
-
-  const roleLabel = useMemo(
-    () => (profile?.role || 'STUDENT').toString().toUpperCase(),
-    [profile]
-  );
-
-  const roleColor = useMemo(() => {
-    const role = (profile?.role || 'STUDENT').toUpperCase();
-    switch (role) {
-      case 'ADMIN': return 'from-red-500 to-pink-600';
-      case 'TEACHER': return 'from-emerald-500 to-teal-600';
-      case 'ACADEMIC': return 'from-blue-500 to-indigo-600';
-      case 'FINANCE': return 'from-amber-500 to-orange-600';
-      case 'STUDENT': return 'from-violet-500 to-purple-600';
-      case 'PARENT': return 'from-cyan-500 to-sky-600';
-      default: return 'from-gray-500 to-slate-600';
-    }
-  }, [profile]);
-
-  const schoolName = useMemo(() => school?.school_name || 'School', [school]);
-
-  // ---------- SCHOOL-SCOPED SEARCH ----------
+  // Load teacher profile href
   useEffect(() => {
     let cancelled = false;
 
-    async function run() {
+    async function loadTeacherProfileHref() {
+      setTeacherProfileHref(null);
+
+      if (!profile?.user_id || userRole !== 'TEACHER') {
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('teachers')
+        .select('registration_id')
+        .eq('user_id', profile.user_id)
+        .maybeSingle();
+
+      if (!cancelled && !error && (data as TeacherLookupRow | null)?.registration_id) {
+        setTeacherProfileHref(
+          `/teachers/${encodeURIComponent((data as TeacherLookupRow).registration_id)}`
+        );
+      }
+    }
+
+    loadTeacherProfileHref();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.user_id, userRole]);
+
+  // Search functionality
+  useEffect(() => {
+    let cancelled = false;
+
+    async function performSearch() {
       setSearchError(null);
 
       if (!canSearch) {
-        setItems([]);
-        setActiveIndex(-1);
+        setSearchItems([]);
+        setActiveItemIndex(-1);
         setSearchLoading(false);
         return;
       }
 
       const schoolId = profile?.school_id;
       if (!schoolId) {
-        setItems([]);
-        setActiveIndex(-1);
+        setSearchItems([]);
+        setActiveItemIndex(-1);
         setSearchError('No school linked to your account.');
         setSearchLoading(false);
         return;
@@ -301,7 +473,7 @@ export default function Navbar() {
           .select('registration_id, first_name, last_name, guardian_phone, school_id')
           .eq('school_id', schoolId)
           .or(
-            `registration_id.ilike.%${term}%,first_name.ilike.%${term}%,last_name.ilike.%${term}%,guardian_phone.ilike.%${term}%`
+            `registration_id.ilike.%${trimmedQuery}%,first_name.ilike.%${trimmedQuery}%,last_name.ilike.%${trimmedQuery}%,guardian_phone.ilike.%${trimmedQuery}%`
           )
           .limit(Math.ceil(maxResults / 2));
 
@@ -309,22 +481,22 @@ export default function Navbar() {
           .from('profiles')
           .select('user_id, email, full_name, role, school_id')
           .eq('school_id', schoolId)
-          .or(`email.ilike.%${term}%,full_name.ilike.%${term}%`)
+          .or(`email.ilike.%${trimmedQuery}%,full_name.ilike.%${trimmedQuery}%`)
           .limit(Math.ceil(maxResults / 2));
 
-        const termUpper = term.toUpperCase();
+        const termUpper = trimmedQuery.toUpperCase();
         const isRoleSearch = ROLE_HINTS.includes(termUpper as any);
 
         const profilesRolePromise = isRoleSearch
           ? supabase
-              .from('profiles')
-              .select('user_id, email, full_name, role, school_id')
-              .eq('school_id', schoolId)
-              .eq('role', termUpper)
-              .limit(Math.ceil(maxResults / 2))
+            .from('profiles')
+            .select('user_id, email, full_name, role, school_id')
+            .eq('school_id', schoolId)
+            .eq('role', termUpper)
+            .limit(Math.ceil(maxResults / 2))
           : null;
 
-        const [sRes, pTextRes, pRoleRes] = await Promise.all([
+        const [studentsRes, profilesTextRes, profilesRoleRes] = await Promise.all([
           studentsPromise,
           profilesTextPromise,
           profilesRolePromise ?? Promise.resolve({ data: [], error: null } as any),
@@ -332,496 +504,487 @@ export default function Navbar() {
 
         if (cancelled) return;
 
-        if (sRes.error) throw sRes.error;
-        if (pTextRes.error) throw pTextRes.error;
-        if (pRoleRes?.error) throw pRoleRes.error;
+        if (studentsRes.error) throw studentsRes.error;
+        if (profilesTextRes.error) throw profilesTextRes.error;
+        if (profilesRoleRes?.error) throw profilesRoleRes.error;
 
-        const sItems: SearchItem[] = (((sRes.data as StudentRow[]) || []) as StudentRow[]).map((s) => ({
-          kind: 'student' as const,
-          id: s.registration_id,
-          title: `${s.first_name} ${s.last_name}`,
-          subtitle: `${s.registration_id}${s.guardian_phone ? ` • ${s.guardian_phone}` : ''}`,
-          href: `/students/${encodeURIComponent(s.registration_id)}`,
+        // Map students to search items
+        const studentItems: SearchItem[] = (((studentsRes.data as StudentRow[]) || []) as StudentRow[]).map((student) => ({
+          kind: 'student',
+          id: student.registration_id,
+          title: `${student.first_name} ${student.last_name}`,
+          subtitle: `${student.registration_id}${student.guardian_phone ? ` • ${student.guardian_phone}` : ''}`,
+          href: `/students/${encodeURIComponent(student.registration_id)}`,
           icon: <Users size={14} className="text-blue-500" />,
         }));
 
+        // Merge profiles from both queries
         const profileMap = new Map<string, ProfileRow>();
-        for (const p of (((pTextRes.data as ProfileRow[]) || []) as ProfileRow[])) profileMap.set(p.user_id, p);
-        for (const p of ((((pRoleRes as any)?.data as ProfileRow[]) || []) as ProfileRow[])) profileMap.set(p.user_id, p);
+        for (const profileItem of (((profilesTextRes.data as ProfileRow[]) || []) as ProfileRow[])) {
+          profileMap.set(profileItem.user_id, profileItem);
+        }
+        for (const profileItem of ((((profilesRoleRes as any)?.data as ProfileRow[]) || []) as ProfileRow[])) {
+          profileMap.set(profileItem.user_id, profileItem);
+        }
 
-        const pItems: SearchItem[] = Array.from(profileMap.values()).map((p) => ({
-          kind: 'profile' as const,
-          id: p.user_id,
-          title: p.full_name || p.email || 'Profile',
-          subtitle: `${(p.role || 'STUDENT').toString().toUpperCase()}${p.email ? ` • ${p.email}` : ''}`,
-          href: `/users/${p.user_id}`,
+        const profileItems: SearchItem[] = Array.from(profileMap.values()).map((profileItem) => ({
+          kind: 'profile',
+          id: profileItem.user_id,
+          title: profileItem.full_name || profileItem.email || 'Profile',
+          subtitle: `${(profileItem.role || 'STUDENT').toString().toUpperCase()}${profileItem.email ? ` • ${profileItem.email}` : ''}`,
+          href: `/users/${profileItem.user_id}`,
           icon: <UserCircle size={14} className="text-emerald-500" />,
         }));
 
-        // Updated module links with Academics Plans included
-        const moduleLinks: SearchItem[] = [
-          { 
-            kind: 'module' as const, 
-            id: 'students', 
-            title: 'Students', 
+        // Build module links with role-based filtering
+        const allModuleLinks: SearchItem[] = [
+          {
+            kind: 'module' as const,
+            id: 'students',
+            title: 'Students',
             subtitle: 'Manage student records',
             href: '/students',
             icon: <Users size={14} className="text-violet-500" />,
           },
-          { 
-            kind: 'module' as const, 
-            id: 'academics', 
-            title: 'Academics Management', 
-            subtitle: 'Manage grades, subjects, exams & curriculum',
+          {
+            kind: 'module' as const,
+            id: 'academics',
+            title: 'Academics',
+            subtitle: 'Grades, subjects, exams and curriculum',
             href: '/academics',
             icon: <BookOpen size={14} className="text-blue-500" />,
           },
-          { 
-            kind: 'module' as const, 
-            id: 'lesson-plans', 
-            title: 'Lesson Plans', 
-            subtitle: 'Create daily, weekly, termly & yearly plans',
+          {
+            kind: 'module' as const,
+            id: 'lesson-plans',
+            title: 'Lesson Plans',
+            subtitle: 'Daily, weekly, termly and yearly plans',
             href: '/academics/plans',
             icon: <ClipboardList size={14} className="text-indigo-500" />,
           },
-          { 
-            kind: 'module' as const, 
-            id: 'finance-management', 
-            title: 'Finance Management', 
-            subtitle: 'Tuitions & transactions',
-            href: '/finance/management',
-            icon: <CreditCard size={14} className="text-amber-500" />,
+          {
+            kind: 'module' as const,
+            id: 'assessments',
+            title: 'Assessments',
+            subtitle: 'Marks entry and assessment tools',
+            href: '/assessments',
+            icon: <FileText size={14} className="text-emerald-500" />,
           },
-          { 
-            kind: 'module' as const, 
-            id: 'finance-stats', 
-            title: 'Finance Analytics', 
-            subtitle: 'Reports & dashboard',
-            href: '/finance/stats',
-            icon: <Sparkles size={14} className="text-blue-500" />,
-          },
-        ].filter((m) => m.title.toLowerCase().includes(term.toLowerCase()) || m.subtitle.toLowerCase().includes(term.toLowerCase()));
+        ];
 
-        const merged = [...sItems, ...pItems, ...moduleLinks].slice(0, maxResults);
+        // Filter module links by search term
+        const moduleLinks = allModuleLinks.filter((module) => 
+          doesItemMatchSearch(module, trimmedQuery)
+        );
 
-        setItems(merged);
-        setActiveIndex(merged.length ? 0 : -1);
-      } catch (e: any) {
-        setSearchError(e?.message || 'Search failed');
-        setItems([]);
-        setActiveIndex(-1);
+        // Add finance module only if user has access and it matches search
+        const financeModule = getFinanceModuleLink(hasFinanceAccess);
+        if (financeModule && doesItemMatchSearch(financeModule, trimmedQuery)) {
+          moduleLinks.push(financeModule);
+        }
+
+        const mergedItems = [...studentItems, ...profileItems, ...moduleLinks].slice(0, maxResults);
+
+        setSearchItems(mergedItems);
+        setActiveItemIndex(mergedItems.length ? 0 : -1);
+      } catch (error: any) {
+        setSearchError(error?.message || 'Search failed');
+        setSearchItems([]);
+        setActiveItemIndex(-1);
       } finally {
         if (!cancelled) setSearchLoading(false);
       }
     }
 
-    run();
+    performSearch();
+
     return () => {
       cancelled = true;
     };
-  }, [term, canSearch, profile?.school_id]);
+  }, [trimmedQuery, canSearch, profile?.school_id, hasFinanceAccess, maxResults]);
 
-  const goHome = () => router.push('/');
-  const goToResultsPage = (query: string) => {
-    const clean = query.trim();
-    if (!clean) return;
-    router.push(`/search?q=${encodeURIComponent(clean)}`);
-    setSearchOpen(false);
+  // ==========================================================================
+  // Render Helpers
+  // ==========================================================================
+
+  const renderSearchResults = () => {
+    if (!isSearchOpen || searchQuery.trim().length === 0) return null;
+
+    return (
+      <div className="absolute left-0 right-0 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl z-50">
+        <div className="px-4 py-2.5 text-xs text-slate-500 border-b border-slate-100 bg-slate-50">
+          {canSearch ? (
+            <>
+              <span className="font-medium text-slate-700">Results in </span>
+              <span className="font-semibold text-blue-600">{schoolName}</span>
+              <span className="font-medium text-slate-700"> for </span>
+              <span className="font-semibold text-slate-900">"{searchQuery.trim()}"</span>
+            </>
+          ) : (
+            'Type at least 2 characters'
+          )}
+        </div>
+
+        {searchError && (
+          <div className="px-4 py-3 text-sm text-red-600 bg-red-50">
+            ⚠️ {searchError}
+          </div>
+        )}
+
+        {!searchError && canSearch && searchItems.length === 0 && !searchLoading && (
+          <div className="px-4 py-6 text-center">
+            <Search size={24} className="mx-auto text-slate-400 mb-2" />
+            <p className="text-sm text-slate-600 mb-1">No results in your school</p>
+            <p className="text-xs text-slate-500">
+              Press <span className="font-semibold">Enter</span> to search anyway
+            </p>
+          </div>
+        )}
+
+        {!searchError && searchItems.length > 0 && (
+          <div className="max-h-80 overflow-auto py-1">
+            {searchItems.map((item, idx) => (
+              <button
+                key={`${item.kind}-${item.id}`}
+                type="button"
+                onMouseEnter={() => setActiveItemIndex(idx)}
+                onClick={() => handleOpenSearchItem(item)}
+                className={cn(
+                  'w-full text-left px-4 py-3 hover:bg-blue-50 transition group',
+                  idx === activeItemIndex && 'bg-blue-50'
+                )}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="h-8 w-8 rounded-xl bg-slate-100 flex items-center justify-center">
+                    {item.icon || <Search size={14} className="text-slate-500" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-900 truncate">{item.title}</p>
+                    {item.subtitle && (
+                      <p className="text-xs text-slate-500 truncate mt-0.5">{item.subtitle}</p>
+                    )}
+                  </div>
+                  <span
+                    className={cn(
+                      'shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold',
+                      item.kind === 'student' && 'bg-blue-100 text-blue-700',
+                      item.kind === 'profile' && 'bg-emerald-100 text-emerald-700',
+                      item.kind === 'module' && 'bg-violet-100 text-violet-700'
+                    )}
+                  >
+                    {item.kind}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="border-t border-slate-100 px-4 py-3 flex items-center justify-between bg-slate-50">
+          <button
+            type="button"
+            onClick={() => handleGoToResultsPage(searchQuery)}
+            className="text-xs font-semibold text-blue-700 hover:text-blue-800 hover:underline"
+          >
+            View all results
+          </button>
+          <span className="text-[11px] text-slate-500">
+            ↑ ↓ navigate • ↵ open
+          </span>
+        </div>
+      </div>
+    );
   };
 
-  const openItem = (it: SearchItem) => {
-    router.push(it.href);
-    setSearchOpen(false);
-  };
-
-  const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!searchOpen) setSearchOpen(true);
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (!items.length) return;
-      setActiveIndex((i) => (i + 1) % items.length);
-    }
-
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (!items.length) return;
-      setActiveIndex((i) => (i - 1 + items.length) % items.length);
-    }
-
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if (activeIndex >= 0 && items[activeIndex]) {
-        openItem(items[activeIndex]);
-        return;
-      }
-      goToResultsPage(q);
-    }
-  };
+  // ==========================================================================
+  // Main Render
+  // ==========================================================================
 
   return (
     <>
-      {/* FIXED NAVBAR - FULL WIDTH */}
-      <header className="fixed top-0 left-0 right-0 z-50 border-b border-slate-200/70 bg-white/90 backdrop-blur-xl supports-[backdrop-filter]:bg-white/85 dark:border-slate-800/70 dark:bg-slate-950/90 supports-[backdrop-filter]:dark:bg-slate-950/85 transition-all duration-300 shadow-sm hover:shadow-md">
-        <div className="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-8 w-full">
-          {/* Left: Brand */}
-          <button
-            onClick={goHome}
-            className="group hidden md:flex items-center gap-3 rounded-2xl px-3 py-2 hover:bg-slate-100/80 dark:hover:bg-slate-900/80 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
-            title="Go to dashboard"
-          >
-            <div className="relative">
-              <div className={`h-11 w-11 rounded-2xl bg-gradient-to-br ${roleColor} flex items-center justify-center text-white font-bold shadow-lg group-hover:shadow-xl transition-all duration-300 group-hover:scale-105`}>
-                <span className="text-sm font-semibold">{schoolName.slice(0, 1).toUpperCase()}</span>
-              </div>
-              <div className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-white dark:bg-slate-900 border-2 border-white dark:border-slate-950 flex items-center justify-center">
-                <School size={10} className="text-slate-600 dark:text-slate-400" />
-              </div>
-            </div>
-            <div className="hidden lg:block text-left leading-tight">
-              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate max-w-[260px] group-hover:text-slate-700 dark:group-hover:text-slate-300 transition-colors">
-                {profileLoading ? 'Loading…' : schoolName}
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
-                {profileLoading ? 'Loading…' : `Welcome back, ${displayName.split(' ')[0] || 'User'} 👋`}
-              </p>
-            </div>
-          </button>
-
-          {/* Center: Search - FULL WIDTH FLEXIBLE */}
-          <div ref={searchWrapRef} className="relative flex-1 mx-4 lg:mx-8">
-            <div className="relative w-full">
-              <Search
-                size={18}
-                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 transition-colors"
-              />
-
-              <input
-                ref={searchInputRef}
-                value={q}
-                onChange={(e) => {
-                  setQ(e.target.value);
-                  setSearchOpen(true);
-                }}
-                onFocus={() => setSearchOpen(true)}
-                onKeyDown={onSearchKeyDown}
-                placeholder="Search students, staff, modules, lesson plans..."
-                className={cn(
-                  'w-full rounded-2xl border border-slate-200 bg-white/80 px-11 py-3 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition-all duration-300',
-                  'focus:border-blue-500 focus:bg-white focus:shadow-lg focus:shadow-blue-500/10',
-                  'dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-100 dark:placeholder:text-slate-500',
-                  'dark:focus:border-blue-400 dark:focus:bg-slate-900 dark:focus:shadow-blue-400/10',
-                  searchOpen && 'rounded-b-2xl rounded-t-2xl'
-                )}
-              />
-
-              {searchLoading ? (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-                  <Loader2 size={16} className="animate-spin" />
-                </div>
-              ) : q ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQ('');
-                    setItems([]);
-                    setActiveIndex(-1);
-                    setSearchOpen(false);
-                    searchInputRef.current?.focus();
-                  }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 h-6 w-6 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs text-slate-500 hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-all duration-200"
-                  aria-label="Clear search"
-                >
-                  ✕
-                </button>
-              ) : null}
-            </div>
-
-            {/* Suggestions dropdown */}
-            {searchOpen && q.trim().length > 0 && (
-              <div className="absolute left-0 right-0 mt-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950 z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="px-4 py-2.5 text-xs text-slate-500 border-b border-slate-100 dark:border-slate-900 bg-slate-50/50 dark:bg-slate-900/50">
-                  {canSearch ? (
-                    <>
-                      <span className="font-medium text-slate-700 dark:text-slate-300">Results in</span>{' '}
-                      <span className="font-semibold text-blue-600 dark:text-blue-400">{schoolName}</span>{' '}
-                      <span className="font-medium text-slate-700 dark:text-slate-300">for</span>{' '}
-                      <span className="font-semibold text-slate-900 dark:text-slate-100">"{q.trim()}"</span>
-                    </>
-                  ) : (
-                    <>Type at least 2 characters</>
-                  )}
-                </div>
-
-                {searchError && (
-                  <div className="px-4 py-3 text-sm text-red-600 bg-red-50/50 dark:bg-red-500/10 dark:text-red-400">
-                    ⚠️ {searchError}
-                  </div>
-                )}
-
-                {!searchError && canSearch && items.length === 0 && !searchLoading && (
-                  <div className="px-4 py-6 text-center">
-                    <Search size={24} className="mx-auto text-slate-400 dark:text-slate-600 mb-2" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 mb-1">No results in your school</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Press <span className="font-semibold">Enter</span> to search anyway
-                    </p>
-                  </div>
-                )}
-
-                {!searchError && items.length > 0 && (
-                  <div className="max-h-80 overflow-auto py-1">
-                    {items.map((it, idx) => (
-                      <button
-                        key={`${it.kind}-${it.id}`}
-                        type="button"
-                        onMouseEnter={() => setActiveIndex(idx)}
-                        onClick={() => openItem(it)}
-                        className={cn(
-                          'w-full text-left px-4 py-3 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-all duration-200 group',
-                          idx === activeIndex && 'bg-blue-50 dark:bg-blue-500/10'
-                        )}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="h-8 w-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
-                            {it.icon || <Search size={14} className="text-slate-500" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
-                              {it.title}
-                            </p>
-                            {it.subtitle && (
-                              <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{it.subtitle}</p>
-                            )}
-                          </div>
-                          <span className={cn(
-                            "shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors",
-                            it.kind === 'student' && "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300",
-                            it.kind === 'profile' && "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
-                            it.kind === 'module' && "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
-                          )}>
-                            {it.kind}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <div className="border-t border-slate-100 dark:border-slate-900 px-4 py-3 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
-                  <button
-                    type="button"
-                    onClick={() => goToResultsPage(q)}
-                    className="text-xs font-semibold text-blue-700 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200 hover:underline flex items-center gap-1 transition-all hover:gap-2"
-                  >
-                    View all results
-                    <ChevronDown size={12} className="rotate-270" />
-                  </button>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                    <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">↑</kbd>
-                    <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">↓</kbd>
-                    <span>navigate •</span>
-                    <kbd className="px-1.5 py-0.5 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">↵</kbd>
-                    <span>open</span>
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Right: Actions */}
-          <div className="flex items-center gap-2">
-            {/* Quick Links Dropdown */}
-            <div className="relative hidden md:block">
-              <button
-                className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white/80 px-4 text-sm font-medium text-slate-700 hover:bg-slate-100 transition-all duration-300 hover:scale-105 active:scale-95 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800"
-                onClick={() => {
-                  const dropdown = document.getElementById('quick-links-dropdown');
-                  if (dropdown) {
-                    dropdown.classList.toggle('hidden');
-                  }
-                }}
-              >
-                <Sparkles size={16} />
-                Quick Links
-                <ChevronDown size={14} />
-              </button>
-              <div
-                id="quick-links-dropdown"
-                className="absolute right-0 mt-2 w-64 hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-950 z-50 animate-in fade-in slide-in-from-top-2 duration-200"
-              >
-                <div className="p-2">
-                  <button
-                    onClick={() => router.push('/academics')}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition-all duration-200"
-                  >
-                    <BookOpen size={18} className="text-blue-500" />
-                    <div className="text-left">
-                      <p className="font-medium">Academics</p>
-                      <p className="text-xs text-slate-500">Manage grades, subjects & exams</p>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => router.push('/academics/plans')}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition-all duration-200"
-                  >
-                    <ClipboardList size={18} className="text-indigo-500" />
-                    <div className="text-left">
-                      <p className="font-medium">Lesson Plans</p>
-                      <p className="text-xs text-slate-500">Daily, weekly, termly & yearly plans</p>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => router.push('/students')}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition-all duration-200"
-                  >
-                    <Users size={18} className="text-emerald-500" />
-                    <div className="text-left">
-                      <p className="font-medium">Students</p>
-                      <p className="text-xs text-slate-500">Manage student records</p>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => router.push('/finance/management')}
-                    className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition-all duration-200"
-                  >
-                    <CreditCard size={18} className="text-amber-500" />
-                    <div className="text-left">
-                      <p className="font-medium">Finance</p>
-                      <p className="text-xs text-slate-500">Tuitions & transactions</p>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            </div>
-
+      <header className="fixed top-0 left-0 right-0 z-50 border-b border-slate-200/70 bg-white/95 backdrop-blur-xl shadow-sm">
+        <div className="flex flex-col">
+          {/* Top Bar */}
+          <div className="flex h-[72px] items-center gap-4 px-4 sm:px-6 lg:px-8">
+            {/* School Logo & Name */}
             <button
-              className="hidden md:inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white/80 text-slate-700 hover:bg-slate-100 transition-all duration-300 hover:scale-105 active:scale-95 dark:border-slate-800 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800 group"
-              title="Help & Support"
-              onClick={() => router.push('/help')}
+              onClick={() => router.push('/dashboard')}
+              className="hidden lg:flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-slate-100 transition"
+              title="Go to dashboard"
             >
-              <HelpCircle size={18} className="group-hover:rotate-12 transition-transform" />
+              <div className="relative">
+                <div className={`h-11 w-11 rounded-2xl bg-gradient-to-br ${roleColor} flex items-center justify-center text-white font-bold shadow-md`}>
+                  <span className="text-sm font-semibold">{schoolName.slice(0, 1).toUpperCase()}</span>
+                </div>
+                <div className="absolute -bottom-1 -right-1 h-5 w-5 rounded-full bg-white border-2 border-white flex items-center justify-center">
+                  <School size={10} className="text-slate-600" />
+                </div>
+              </div>
+              <div className="text-left">
+                <p className="text-sm font-semibold text-slate-900 max-w-[220px] truncate">
+                  {profileLoading ? 'Loading…' : schoolName}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {profileLoading ? 'Loading…' : `Welcome back, ${firstName}`}
+                </p>
+              </div>
             </button>
 
-            {/* User menu */}
-            <div className="relative" ref={userMenuRef}>
-              <button
-                onClick={() => setIsUserMenuOpen((v) => !v)}
-                className="group inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/80 px-3 py-2 hover:bg-slate-100 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] dark:border-slate-800 dark:bg-slate-900/80 dark:hover:bg-slate-800"
-                aria-expanded={isUserMenuOpen}
-              >
-                <div className="relative">
-                  <div className={`h-9 w-9 rounded-2xl bg-gradient-to-br ${roleColor} text-white flex items-center justify-center text-sm font-semibold shadow-lg group-hover:shadow-xl transition-all duration-300 group-hover:scale-105`}>
-                    {profileLoading ? '…' : userInitials}
-                  </div>
-                  <div className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-white dark:bg-slate-900 border-2 border-white dark:border-slate-950">
-                    <div className="h-full w-full rounded-full bg-green-500 animate-pulse" />
-                  </div>
-                </div>
-                <div className="hidden md:block text-left leading-tight">
-                  <p className="max-w-[160px] truncate text-sm font-semibold text-slate-900 dark:text-slate-100 group-hover:text-slate-700 dark:group-hover:text-slate-300 transition-colors">
-                    {profileLoading ? 'Loading…' : displayName}
-                  </p>
-                  <p className="max-w-[160px] truncate text-xs text-slate-500 dark:text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
-                    {displayEmail || '—'}
-                  </p>
-                </div>
-                <ChevronDown
-                  size={16}
-                  className={cn('text-slate-400 dark:text-slate-500 transition-transform duration-300', isUserMenuOpen && 'rotate-180')}
+            {/* Search Bar */}
+            <div ref={searchWrapRef} className="relative flex-1 min-w-0">
+              <div className="relative">
+                <Search
+                  size={18}
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
                 />
-              </button>
 
-              {isUserMenuOpen && (
-                <div className="absolute right-0 mt-2 w-72 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-950 animate-in fade-in slide-in-from-top-5 duration-200">
-                  <div className="px-4 py-4 border-b border-slate-100 dark:border-slate-900 bg-gradient-to-r from-slate-50 to-white dark:from-slate-900/50 dark:to-slate-950">
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className={`h-12 w-12 rounded-2xl bg-gradient-to-br ${roleColor} flex items-center justify-center text-white font-semibold shadow-lg`}>
-                        {userInitials}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{displayName}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{displayEmail || '—'}</p>
+                <input
+                  ref={searchInputRef}
+                  value={searchQuery}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setIsSearchOpen(true);
+                  }}
+                  onFocus={() => setIsSearchOpen(true)}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="Search students, staff, modules, lesson plans..."
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-11 py-3 text-sm text-slate-900 placeholder:text-slate-400 outline-none transition focus:border-blue-500 focus:shadow-lg focus:shadow-blue-500/10"
+                />
+
+                {searchLoading ? (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
+                    <Loader2 size={16} className="animate-spin" />
+                  </div>
+                ) : searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={handleClearSearch}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 h-6 w-6 rounded-full bg-slate-100 flex items-center justify-center text-xs text-slate-500 hover:bg-slate-200 hover:text-slate-700"
+                    aria-label="Clear search"
+                  >
+                    <X size={12} />
+                  </button>
+                ) : null}
+              </div>
+
+              {renderSearchResults()}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2">
+              {/* Quick Links Dropdown */}
+              {filteredQuickLinks.length > 0 && (
+                <div className="relative hidden md:block" ref={quickLinksRef}>
+                  <button
+                    className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-100 transition"
+                    onClick={() => setIsQuickLinksOpen((prev) => !prev)}
+                  >
+                    <Sparkles size={16} />
+                    Quick Links
+                    <ChevronDown
+                      size={14}
+                      className={cn('transition-transform', isQuickLinksOpen && 'rotate-180')}
+                    />
+                  </button>
+
+                  {isQuickLinksOpen && (
+                    <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-slate-200 bg-white shadow-xl z-50 overflow-hidden">
+                      <div className="p-2">
+                        {filteredQuickLinks.map((item) => {
+                          const Icon = item.icon;
+                          return (
+                            <button
+                              key={item.href}
+                              onClick={() => {
+                                setIsQuickLinksOpen(false);
+                                router.push(item.href);
+                              }}
+                              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm text-slate-700 hover:bg-slate-100 transition"
+                            >
+                              <div className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center">
+                                <Icon size={18} className="text-slate-600" />
+                              </div>
+                              <div className="text-left">
+                                <p className="font-medium">{item.label}</p>
+                                <p className="text-xs text-slate-500">Open {item.label.toLowerCase()}</p>
+                              </div>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
-                    <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 dark:bg-blue-500/10 px-3 py-1.5 text-xs font-semibold text-blue-700 dark:text-blue-300">
-                      <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                      {roleLabel}
-                    </div>
-                  </div>
-
-                  <div className="p-2">
-                    <button
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition-all duration-200 group"
-                      onClick={() => {
-                        setIsUserMenuOpen(false);
-                        router.push('/profile');
-                      }}
-                    >
-                      <div className="h-9 w-9 rounded-xl bg-blue-100 dark:bg-blue-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                        <UserCircle size={18} className="text-blue-600 dark:text-blue-400" />
-                      </div>
-                      <div className="text-left">
-                        <p className="font-medium">My Profile</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">View & edit your profile</p>
-                      </div>
-                    </button>
-
-                    <button
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900 transition-all duration-200 group"
-                      onClick={() => {
-                        setIsUserMenuOpen(false);
-                        router.push('/settings');
-                      }}
-                    >
-                      <div className="h-9 w-9 rounded-xl bg-emerald-100 dark:bg-emerald-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                        <Settings size={18} className="text-emerald-600 dark:text-emerald-400" />
-                      </div>
-                      <div className="text-left">
-                        <p className="font-medium">Settings</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">Preferences & security</p>
-                      </div>
-                    </button>
-                  </div>
-
-                  <div className="border-t border-slate-100 p-2 dark:border-slate-900 bg-gradient-to-r from-slate-50/50 to-transparent dark:from-slate-900/30">
-                    <button
-                      onClick={async () => {
-                        setIsUserMenuOpen(false);
-                        await supabase.auth.signOut();
-                        router.replace('/');
-                      }}
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-gradient-to-r hover:from-orange-50 hover:to-red-50 hover:text-orange-700 dark:text-slate-200 dark:hover:from-orange-500/10 dark:hover:to-red-500/10 dark:hover:text-orange-300 transition-all duration-200 group"
-                    >
-                      <div className="h-9 w-9 rounded-xl bg-orange-100 dark:bg-orange-500/10 flex items-center justify-center group-hover:scale-110 transition-transform">
-                        <LogOut size={18} className="text-orange-600 dark:text-orange-400" />
-                      </div>
-                      <div className="text-left">
-                        <p className="font-medium">Sign Out</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">End current session</p>
-                      </div>
-                    </button>
-                  </div>
+                  )}
                 </div>
               )}
+
+              {/* Help Button */}
+              <button
+                className="hidden md:inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 transition"
+                title="Help & Support"
+                onClick={() => router.push('/help')}
+              >
+                <HelpCircle size={18} />
+              </button>
+
+              {/* Notifications Button */}
+              <button
+                className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 transition"
+                title="Notifications"
+                onClick={() => setNotifications(0)}
+              >
+                <Bell size={18} />
+                {notifications > 0 && (
+                  <span className="absolute -top-1 -right-1 inline-flex h-5 min-w-[18px] items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-red-500 text-[10px] font-bold text-white shadow">
+                    {notifications}
+                  </span>
+                )}
+              </button>
+
+              {/* User Menu */}
+              <div className="relative" ref={userMenuRef}>
+                <button
+                  onClick={() => setIsUserMenuOpen((prev) => !prev)}
+                  className="group inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 hover:bg-slate-100 transition"
+                  aria-expanded={isUserMenuOpen}
+                >
+                  <div className="relative">
+                    <div className={`h-9 w-9 rounded-2xl bg-gradient-to-br ${roleColor} text-white flex items-center justify-center text-sm font-semibold shadow`}>
+                      {profileLoading ? '…' : userInitials}
+                    </div>
+                    <div className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-white border-2 border-white">
+                      <div className="h-full w-full rounded-full bg-green-500" />
+                    </div>
+                  </div>
+
+                  <div className="hidden md:block text-left leading-tight">
+                    <p className="max-w-[160px] truncate text-sm font-semibold text-slate-900">
+                      {profileLoading ? 'Loading…' : displayName}
+                    </p>
+                    <p className="max-w-[160px] truncate text-xs text-slate-500">
+                      {displayEmail || '—'}
+                    </p>
+                  </div>
+
+                  <ChevronDown
+                    size={16}
+                    className={cn('text-slate-400 transition-transform', isUserMenuOpen && 'rotate-180')}
+                  />
+                </button>
+
+                {isUserMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-72 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl z-50">
+                    <div className="px-4 py-4 border-b border-slate-100 bg-slate-50">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className={`h-12 w-12 rounded-2xl bg-gradient-to-br ${roleColor} flex items-center justify-center text-white font-semibold shadow`}>
+                          {userInitials}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 truncate">{displayName}</p>
+                          <p className="text-xs text-slate-500 truncate mt-0.5">{displayEmail || '—'}</p>
+                        </div>
+                      </div>
+
+                      <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700">
+                        <div className="h-2 w-2 rounded-full bg-green-500" />
+                        {roleLabel}
+                      </div>
+                    </div>
+
+                    <div className="p-2">
+                      <button
+                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 transition"
+                        onClick={() => {
+                          setIsUserMenuOpen(false);
+                          router.push(profileHref);
+                        }}
+                      >
+                        <div className="h-9 w-9 rounded-xl bg-blue-100 flex items-center justify-center">
+                          <UserCircle size={18} className="text-blue-600" />
+                        </div>
+                        <div className="text-left">
+                          <p className="font-medium">My Profile</p>
+                          <p className="text-xs text-slate-500">
+                            {userRole === 'TEACHER' ? 'Open teacher profile' : 'View your profile'}
+                          </p>
+                        </div>
+                      </button>
+
+                      <button
+                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-slate-100 transition"
+                        onClick={() => {
+                          setIsUserMenuOpen(false);
+                          router.push('/settings');
+                        }}
+                      >
+                        <div className="h-9 w-9 rounded-xl bg-emerald-100 flex items-center justify-center">
+                          <Settings size={18} className="text-emerald-600" />
+                        </div>
+                        <div className="text-left">
+                          <p className="font-medium">Settings</p>
+                          <p className="text-xs text-slate-500">Preferences & security</p>
+                        </div>
+                      </button>
+                    </div>
+
+                    <div className="border-t border-slate-100 p-2 bg-slate-50">
+                      <button
+                        onClick={handleSignOut}
+                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-700 hover:bg-orange-50 hover:text-orange-700 transition"
+                      >
+                        <div className="h-9 w-9 rounded-xl bg-orange-100 flex items-center justify-center">
+                          <LogOut size={18} className="text-orange-600" />
+                        </div>
+                        <div className="text-left">
+                          <p className="font-medium">Sign Out</p>
+                          <p className="text-xs text-slate-500">End current session</p>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
+
+          {/* Secondary Navigation Bar */}
+          {filteredPrimaryNav.length > 0 && (
+            <div className="hidden lg:flex items-center gap-2 px-4 sm:px-6 lg:px-8 pb-3">
+              {filteredPrimaryNav.map((item) => {
+                const Icon = item.icon;
+                const isActive = isActiveRoute(item.href);
+
+                return (
+                  <button
+                    key={item.href}
+                    onClick={() => router.push(item.href)}
+                    className={cn(
+                      'inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition',
+                      isActive
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                    )}
+                  >
+                    <Icon size={16} />
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </header>
 
-      {/* Spacer so content doesn't go under the fixed navbar */}
-      <div className="no-print" style={{ height: NAVBAR_HEIGHT_PX }} />
+      {/* Spacer for fixed header */}
+      <div style={{ height: NAVBAR_HEIGHT_PX + (filteredPrimaryNav.length > 0 ? 52 : 0) }} />
 
-      {/* Mobile bottom bar - FULL WIDTH */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-xl supports-[backdrop-filter]:bg-white/90 dark:border-slate-800 dark:bg-slate-950/95 supports-[backdrop-filter]:dark:bg-slate-950/90 shadow-2xl animate-in fade-in slide-in-from-bottom-5 duration-300">
-        <div className="flex items-center justify-between px-6 py-3 w-full">
-          <button 
-            onClick={goHome} 
-            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 transition-all duration-200 hover:scale-105 active:scale-95 group flex-1"
+      {/* Mobile Bottom Navigation */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur shadow-2xl">
+        <div className="flex items-center justify-between px-4 py-3">
+          <button
+            onClick={() => router.push('/dashboard')}
+            className="flex flex-col items-center gap-1 text-slate-600 hover:text-blue-600 transition flex-1"
           >
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 dark:from-blue-500/20 dark:to-blue-500/10 flex items-center justify-center group-hover:from-blue-200 group-hover:to-blue-100 dark:group-hover:from-blue-500/30 transition-all">
-              <Home size={20} className="text-blue-600 dark:text-blue-400" />
-            </div>
+            <Home size={20} />
             <span className="text-[11px] font-medium">Home</span>
           </button>
 
@@ -829,48 +992,45 @@ export default function Navbar() {
             onClick={() => {
               window.scrollTo({ top: 0, behavior: 'smooth' });
               setTimeout(() => searchInputRef.current?.focus(), 250);
-              setSearchOpen(true);
+              setIsSearchOpen(true);
             }}
-            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 transition-all duration-200 hover:scale-105 active:scale-95 group flex-1"
+            className="flex flex-col items-center gap-1 text-slate-600 hover:text-emerald-600 transition flex-1"
           >
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-emerald-100 to-emerald-50 dark:from-emerald-500/20 dark:to-emerald-500/10 flex items-center justify-center group-hover:from-emerald-200 group-hover:to-emerald-100 dark:group-hover:from-emerald-500/30 transition-all">
-              <Search size={20} className="text-emerald-600 dark:text-emerald-400" />
-            </div>
+            <Search size={20} />
             <span className="text-[11px] font-medium">Search</span>
           </button>
 
-          <button
-            onClick={() => router.push('/academics/plans')}
-            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 transition-all duration-200 hover:scale-105 active:scale-95 group flex-1"
-          >
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-50 dark:from-indigo-500/20 dark:to-indigo-500/10 flex items-center justify-center group-hover:from-indigo-200 group-hover:to-indigo-100 dark:group-hover:from-indigo-500/30 transition-all">
-              <ClipboardList size={20} className="text-indigo-600 dark:text-indigo-400" />
-            </div>
-            <span className="text-[11px] font-medium">Plans</span>
-          </button>
+          {filteredPrimaryNav.some(nav => nav.href === '/academics') && (
+            <button
+              onClick={() => router.push('/academics')}
+              className="flex flex-col items-center gap-1 text-slate-600 hover:text-indigo-600 transition flex-1"
+            >
+              <BookOpen size={20} />
+              <span className="text-[11px] font-medium">Academics</span>
+            </button>
+          )}
+
+          {filteredPrimaryNav.some(nav => nav.href === '/assessments') && (
+            <button
+              onClick={() => router.push('/assessments')}
+              className="flex flex-col items-center gap-1 text-slate-600 hover:text-violet-600 transition flex-1"
+            >
+              <FileText size={20} />
+              <span className="text-[11px] font-medium">Assess</span>
+            </button>
+          )}
 
           <button
-            onClick={() => setNotifications(0)}
-            className="relative flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-orange-600 dark:hover:text-orange-400 transition-all duration-200 hover:scale-105 active:scale-95 group flex-1"
+            onClick={() => {
+              if (userRole === 'TEACHER' && teacherProfileHref) {
+                router.push(teacherProfileHref);
+              } else {
+                setIsUserMenuOpen(true);
+              }
+            }}
+            className="flex flex-col items-center gap-1 text-slate-600 hover:text-orange-600 transition flex-1"
           >
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-orange-100 to-orange-50 dark:from-orange-500/20 dark:to-orange-500/10 flex items-center justify-center group-hover:from-orange-200 group-hover:to-orange-100 dark:group-hover:from-orange-500/30 transition-all">
-              <Bell size={20} className="text-orange-600 dark:text-orange-400" />
-            </div>
-            {notifications > 0 && (
-              <span className="absolute -top-1 -right-3 inline-flex h-5 min-w-[16px] items-center justify-center rounded-full bg-gradient-to-r from-orange-500 to-red-500 text-[10px] font-bold text-white shadow-lg animate-bounce">
-                {notifications}
-              </span>
-            )}
-            <span className="text-[11px] font-medium">Alerts</span>
-          </button>
-
-          <button
-            onClick={() => setIsUserMenuOpen(true)}
-            className="flex flex-col items-center gap-1.5 text-slate-600 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 transition-all duration-200 hover:scale-105 active:scale-95 group flex-1"
-          >
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-violet-100 to-violet-50 dark:from-violet-500/20 dark:to-violet-500/10 flex items-center justify-center group-hover:from-violet-200 group-hover:to-violet-100 dark:group-hover:from-violet-500/30 transition-all">
-              <UserCircle size={20} className="text-violet-600 dark:text-violet-400" />
-            </div>
+            <UserCircle size={20} />
             <span className="text-[11px] font-medium">Profile</span>
           </button>
         </div>

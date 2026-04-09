@@ -1,5 +1,5 @@
 // hooks/useToast.ts
-import { useState, useCallback } from 'react';
+import { useCallback, useState } from 'react';
 
 interface Toast {
   id: string;
@@ -11,32 +11,22 @@ interface Toast {
 export function useToast() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const toast = useCallback(({ title, description, variant = 'default' }: Omit<Toast, 'id'>) => {
-    const id = Math.random().toString(36);
-    setToasts(prev => [...prev, { id, title, description, variant }]);
+  const toast = useCallback((title: string, description?: string, variant: 'default' | 'destructive' | 'success' = 'default') => {
+    const id = Math.random().toString(36).substring(2, 9);
+    const newToast: Toast = { id, title, description, variant };
+    
+    setToasts(prev => [...prev, newToast]);
+    
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 5000);
+    
+    return id;
   }, []);
 
-  return { toast, toasts };
-}
+  const dismiss = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
 
-// hooks/useDebounce.ts
-import { useEffect, useState } from 'react';
-
-export function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value);
-    }, delay);
-
-    return () => {
-      clearTimeout(handler);
-    };
-  }, [value, delay]);
-
-  return debouncedValue;
+  return { toast, dismiss, toasts };
 }

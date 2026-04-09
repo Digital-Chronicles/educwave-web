@@ -1,0 +1,251 @@
+## Biggest improvements your system needs
+
+Your system is already strong in **UI structure** and **module coverage**, but the biggest improvements now are in **data consistency, relationships, and scalability**.
+
+### 1. Enforce `school_id` everywhere
+
+This is the most important fix.
+
+Several helpers and pages fetch shared tables without school scoping, like quiz dropdown data loading `class`, `subject`, `notes`, and `assessment_topics` globally. 
+Your academics components and types clearly expect school-based data models with `school_id`, including grades, curriculum, subjects, exams, terms, and sessions. 
+
+**Improve by:**
+
+* adding `.eq("school_id", schoolId)` to all school-owned tables
+* validating school ownership before inserts and updates
+* blocking cross-school relations in forms and APIs
+
+---
+
+### 2. Connect academics, notes, quizzes, and exams properly
+
+Right now the pieces exist, but they are not fully tied together.
+
+Your quiz form already captures `classId`, `subjectId`, `noteId`, and `topicId`, which is a good foundation. 
+Your academics module separately manages grades, subjects, curriculum, terms, sessions, and exams.
+
+**What is needed:**
+
+* quizzes should optionally link to a **term/session**
+* notes should always belong to a **subject** and ideally a **grade**
+* topics should belong to a **note or subject**
+* exams and quizzes should be alignable for reporting
+
+A cleaner flow is:
+
+`School → Grade → Subject → Note → Topic → Quiz → Attempt → Result`
+
+---
+
+### 3. Normalize the quiz backend
+
+Your UI for quizzes is good, but it needs a stronger database design behind it.
+
+The question builder supports MCQ, true/false, and short answer, with marks, explanations, and answer choices. 
+That means your backend should not treat questions as loose frontend-only objects.
+
+**Needed improvements:**
+
+* separate `quiz`
+* separate `quiz_question`
+* separate `quiz_option`
+* separate `quiz_attempt`
+* separate `quiz_answer`
+
+This will make:
+
+* auto marking easier
+* analytics possible
+* per-question review possible
+* reuse of questions possible
+
+---
+
+### 4. Add real quiz result logic and analytics
+
+You already have UI for attempts and result summaries.
+What is still needed is the full scoring engine.
+
+**Improve by adding:**
+
+* auto marking for MCQ and true/false
+* partial/manual marking flow for short answers
+* attempt status rules: `in_progress`, `submitted`, `timed_out`
+* score, total, percentage, correct, wrong storage
+* analytics by student, subject, grade, term, and topic
+
+---
+
+### 5. Make forms smarter
+
+Some forms allow combinations that should be constrained.
+
+For example, the quiz form lets users choose class, subject, note, and topic independently. 
+The exam modal also lets subject and grade be chosen separately. 
+
+**Improvements:**
+
+* when class changes, filter subjects for that class
+* when subject changes, filter notes for that subject
+* when note changes, filter topics for that note
+* auto-fill grade from subject where possible
+* prevent invalid class-subject combinations
+
+---
+
+### 6. Move more filtering to the database
+
+A lot of components filter big arrays in the frontend.
+
+Examples:
+
+* curriculum tab filters in memory 
+* grades tab filters in memory and derives counts from full subject/exam arrays 
+* subjects and exams tabs also filter locally after loading full datasets
+
+This is fine at small scale, but will slow down later.
+
+**Improve by:**
+
+* querying per tab with search params
+* paginating long lists
+* loading summaries/counts from the backend
+* using lighter select statements where possible
+
+---
+
+### 7. Fix naming consistency
+
+This is a structural cleanup issue.
+
+You use “grade”, “class”, and `grade_id` in ways that can easily confuse future code. The academics types define `GradeRow` from the `class` table, and subject/exam rows expose nested `grade` info. 
+
+**Improve by standardizing:**
+
+* use one concept in code: either `grade` or `class`
+* keep database aliasing consistent
+* avoid mixing `class`, `grade`, and `grade_id` inconsistently in UI and queries
+
+---
+
+### 8. Strengthen security on admin routes
+
+Your teacher creation APIs use service-role backed routes, which is good.
+But they still need stronger checks.
+
+**Needed improvements:**
+
+* verify caller identity from bearer token server-side
+* confirm caller is ADMIN
+* confirm caller belongs to the same school
+* reject spoofed `school_id` in request body if it does not match the admin’s school
+* log admin actions
+
+---
+
+### 9. Add reusable shared data hooks/services
+
+You are repeating a lot of fetching patterns.
+
+For example:
+
+* profile + school loading
+* grades loading
+* subject dropdown loading
+* school-scoped search logic in navbar 
+* quiz dropdown helper in `lib/quizzes.ts` 
+
+**Improve by introducing:**
+
+* `useSchoolContext`
+* `useAcademicsData`
+* `useQuizDropdowns`
+* shared query helpers for school-scoped tables
+
+This will reduce bugs and duplicated logic.
+
+---
+
+### 10. Improve global UI consistency
+
+Your components look good, but style patterns still vary a bit between modules.
+
+You already have reusable UI like `ActionButton`, `StatCard`, `AcademicsHeader`, `AppShell`, and `Navbar`.
+
+**Improvements:**
+
+* unify modal design across all modules
+* standardize empty states, loading states, and table/card spacing
+* create shared form field components
+* create shared status chips
+* make action icons actually functional where they are currently placeholders
+
+---
+
+### 11. Improve report-card correctness
+
+Your student report page is powerful, but it needs careful validation in ranking and teacher-assignment logic.
+
+The report page already calculates subject percentages, grades, aggregates, and divisions. 
+But there are signs of unfinished joins and debug/test fetching around subject teacher assignments in that page. 
+
+**Needed improvements:**
+
+* compute positions using each student’s own totals, not reused selected-student data
+* complete subject-teacher join logic
+* persist comments properly in DB instead of only local storage if they are official records
+* validate grading assumptions against your actual school policy
+
+---
+
+### 12. Add audit logs and role-based action controls
+
+As the system grows, this becomes essential.
+
+**Add logs for:**
+
+* teacher creation and updates
+* student edits
+* grade/subject changes
+* fee updates
+* quiz creation and edits
+* result publication
+
+Also make sure:
+
+* only allowed roles can perform each action
+* UI hides actions the user cannot perform
+* backend enforces the same rules
+
+---
+
+## Priority order
+
+### Do these first
+
+1. Enforce `school_id` everywhere
+2. Properly connect quizzes, notes, topics, and academics
+3. Normalize quiz backend tables and submission logic
+4. Make forms dependency-aware
+5. Move heavy filtering/searching to the backend
+
+### Do these next
+
+6. Standardize naming
+7. Strengthen admin API security
+8. Build shared data hooks/services
+9. Add audit logs
+10. Refine analytics and reporting
+
+## Bottom line
+
+Your system does **not** mainly need prettier UI anymore. It needs:
+
+* stronger data architecture
+* stricter school isolation
+* cleaner relationships
+* real backend logic for quizzes, exams, and reporting
+
+That is what will make it reliable and scalable.
+
+I can turn this into a concrete **improvement roadmap by module** if you want.

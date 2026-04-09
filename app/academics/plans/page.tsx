@@ -1,4 +1,3 @@
-// app/academics/plans/page.tsx
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -41,7 +40,8 @@ import {
   Copy,
   MoreVertical,
   ArrowUpDown,
-  FilterX
+  FilterX,
+  Target
 } from 'lucide-react';
 import supabase from '@/lib/supabaseClient';
 import Navbar from '@/components/Navbar';
@@ -202,7 +202,7 @@ interface Profile {
 }
 
 // ==================== UTILITIES ====================
-const getStatusColor = (status: PlanStatus | LessonPlanStatus) => {
+const getStatusColor = (status: PlanStatus | LessonPlanStatus): string => {
   switch (status) {
     case 'DRAFT': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
     case 'SUBMITTED': return 'bg-blue-100 text-blue-800 border-blue-200';
@@ -238,16 +238,6 @@ const formatDateTime = (dateString?: string | null): string => {
   } catch {
     return dateString;
   }
-};
-
-// ==================== CUSTOM HOOKS ====================
-const useDebounce = <T,>(value: T, delay: number): T => {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
-  useEffect(() => {
-    const handler = setTimeout(() => setDebouncedValue(value), delay);
-    return () => clearTimeout(handler);
-  }, [value, delay]);
-  return debouncedValue;
 };
 
 // ==================== UI COMPONENTS ====================
@@ -314,7 +304,7 @@ const CardFooter: React.FC<{ children: React.ReactNode; className?: string }> = 
   <div className={`p-6 border-t border-gray-200 ${className}`}>{children}</div>
 );
 
-const Input: React.FC<{
+const Input = React.forwardRef<HTMLInputElement, {
   type?: string;
   placeholder?: string;
   value?: string | number;
@@ -323,10 +313,11 @@ const Input: React.FC<{
   disabled?: boolean;
   required?: boolean;
   icon?: React.ReactNode;
-}> = ({ type = 'text', placeholder, value, onChange, className = '', disabled = false, required = false, icon }) => (
+}>(({ type = 'text', placeholder, value, onChange, className = '', disabled = false, required = false, icon }, ref) => (
   <div className="relative">
     {icon && <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">{icon}</div>}
     <input
+      ref={ref}
       type={type}
       placeholder={placeholder}
       value={value}
@@ -336,7 +327,9 @@ const Input: React.FC<{
       className={`w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-50 disabled:cursor-not-allowed ${icon ? 'pl-10' : ''} ${className}`}
     />
   </div>
-);
+));
+
+Input.displayName = 'Input';
 
 const Label: React.FC<{ children: React.ReactNode; required?: boolean }> = ({ children, required = false }) => (
   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -351,13 +344,15 @@ const Textarea: React.FC<{
   onChange?: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
   rows?: number;
   disabled?: boolean;
-}> = ({ placeholder, value, onChange, rows = 3, disabled = false }) => (
+  required?: boolean;
+}> = ({ placeholder, value, onChange, rows = 3, disabled = false, required = false }) => (
   <textarea
     placeholder={placeholder}
     value={value}
     onChange={onChange}
     rows={rows}
     disabled={disabled}
+    required={required}
     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-y disabled:bg-gray-50 disabled:cursor-not-allowed"
   />
 );
@@ -454,6 +449,35 @@ const StatCard: React.FC<{
   </Card>
 );
 
+// ==================== CREATE PLAN MODAL INTERFACE ====================
+interface CreatePlanFormData {
+  class_id?: string;
+  subject_id?: string;
+  topic_id?: string;
+  term_id?: string;
+  academic_year?: number;
+  lesson_topic?: string;
+  theme?: string;
+  sub_theme?: string;
+  lesson_date?: string;
+  lesson_duration?: string;
+  cognitive_objective?: string;
+  psychomotor_objective?: string;
+  affective_objective?: string;
+  competencies?: string;
+  life_skills_values?: string;
+  instructional_materials?: string;
+  evaluation_method?: string;
+  evaluation_task?: string;
+  general_objectives?: string;
+  reference_materials?: string;
+  overview?: string;
+  resources?: string;
+  assessment_strategy?: string;
+  status?: string;
+  [key: string]: any;
+}
+
 // ==================== MAIN COMPONENT ====================
 export default function TeacherAcademicPlans() {
   // Tab State
@@ -500,6 +524,16 @@ export default function TeacherAcademicPlans() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
+  // ==================== CUSTOM HOOK ====================
+  function useDebounce<T>(value: T, delay: number): T {
+    const [debouncedValue, setDebouncedValue] = useState<T>(value);
+    useEffect(() => {
+      const handler = setTimeout(() => setDebouncedValue(value), delay);
+      return () => clearTimeout(handler);
+    }, [value, delay]);
+    return debouncedValue;
+  }
+
   // ==================== FETCH PROFILE ====================
   useEffect(() => {
     const fetchProfile = async () => {
@@ -539,7 +573,7 @@ export default function TeacherAcademicPlans() {
         supabase.from('assessment_topics').select('*, subject:subject(name), grade:class(grade_name)').eq('school_id', profile.school_id).order('name'),
         supabase.from('term_exam_session').select('*').eq('school_id', profile.school_id).order('year', { ascending: false }),
         supabase.from('teacher_lesson_plans').select('*, class:class(grade_name), subject:subject(name, code), term:term_exam_session(term_name, year)').eq('school_id', profile.school_id).order('created_at', { ascending: false }),
-        supabase.from('teacher_term_plans').select('*, class:class(grade_name), subject:subject(name), term:term_exam_session(term_name, year)').eq('school_id', profile.school_id),
+        supabase.from('teacher_term_plans').select('*, class:class(grade_name), subject:subject(name), term:term_exam_session(term_name, year), weeks:teacher_term_plan_weeks(*)').eq('school_id', profile.school_id),
         supabase.from('teacher_year_plans').select('*, class:class(grade_name), subject:subject(name)').eq('school_id', profile.school_id),
         supabase.from('general_information').select('id, school_name').eq('id', profile.school_id)
       ]);
@@ -570,27 +604,22 @@ export default function TeacherAcademicPlans() {
   const filteredLessonPlans = useMemo(() => {
     let filtered = [...lessonPlans];
     
-    // Status filter
     if (filterStatus !== 'ALL') {
       filtered = filtered.filter(plan => plan.status === filterStatus);
     }
     
-    // Class filter
     if (filterClass !== 'ALL') {
       filtered = filtered.filter(plan => plan.class_id === parseInt(filterClass));
     }
     
-    // Subject filter
     if (filterSubject !== 'ALL') {
       filtered = filtered.filter(plan => plan.subject_id === parseInt(filterSubject));
     }
     
-    // Term filter
     if (filterTerm !== 'ALL') {
       filtered = filtered.filter(plan => plan.term_id === parseInt(filterTerm));
     }
     
-    // Search filter
     if (debouncedSearch) {
       const searchLower = debouncedSearch.toLowerCase();
       filtered = filtered.filter(plan => 
@@ -601,7 +630,6 @@ export default function TeacherAcademicPlans() {
       );
     }
     
-    // Sorting
     filtered.sort((a, b) => {
       let aVal: any, bVal: any;
       switch (sortField) {
@@ -715,29 +743,35 @@ export default function TeacherAcademicPlans() {
           teacher_user_id: user.id,
           class_id: parseInt(data.class_id),
           subject_id: parseInt(data.subject_id),
-          overview: data.overview,
-          resources: data.resources,
-          assessment_strategy: data.assessment_strategy,
+          overview: data.overview || null,
+          resources: data.resources || null,
+          assessment_strategy: data.assessment_strategy || null,
           status: 'DRAFT'
         });
         if (error) throw error;
         setSuccess('Yearly plan created successfully');
       } 
       else if (modalType === 'termly') {
+        if (!data.term_id) {
+          throw new Error('Term is required for termly plans');
+        }
         const { error } = await supabase.from('teacher_term_plans').insert({
           school_id: profile?.school_id,
           term_id: parseInt(data.term_id),
           teacher_user_id: user.id,
           class_id: parseInt(data.class_id),
           subject_id: parseInt(data.subject_id),
-          general_objectives: data.general_objectives,
-          reference_materials: data.reference_materials,
+          general_objectives: data.general_objectives || null,
+          reference_materials: data.reference_materials || null,
           status: 'DRAFT'
         });
         if (error) throw error;
         setSuccess('Termly plan created successfully');
       }
       else if (modalType === 'weekly') {
+        if (!data.term_id) {
+          throw new Error('Term is required for weekly plans');
+        }
         const { data: termPlan, error: termPlanError } = await supabase
           .from('teacher_term_plans')
           .insert({
@@ -746,8 +780,8 @@ export default function TeacherAcademicPlans() {
             teacher_user_id: user.id,
             class_id: parseInt(data.class_id),
             subject_id: parseInt(data.subject_id),
-            general_objectives: data.general_objectives,
-            reference_materials: data.reference_materials,
+            general_objectives: data.general_objectives || null,
+            reference_materials: data.reference_materials || null,
             status: 'DRAFT'
           })
           .select()
@@ -757,8 +791,18 @@ export default function TeacherAcademicPlans() {
 
         if (data.weeks && data.weeks.length > 0) {
           const weeksWithPlanId = data.weeks.map((week: any) => ({
-            ...week,
-            term_plan_id: termPlan.id
+            term_plan_id: termPlan.id,
+            week_no: week.week_no,
+            week_start: week.week_start || null,
+            week_end: week.week_end || null,
+            topic: week.topic || null,
+            subtopics: week.subtopics || null,
+            learning_outcomes: week.learning_outcomes || null,
+            teaching_methods: week.teaching_methods || null,
+            learning_activities: week.learning_activities || null,
+            resources: week.resources || null,
+            assessment: week.assessment || null,
+            remarks: week.remarks || null
           }));
           const { error: weeksError } = await supabase
             .from('teacher_term_plan_weeks')
@@ -768,6 +812,16 @@ export default function TeacherAcademicPlans() {
         setSuccess('Weekly plan created successfully');
       }
       else if (modalType === 'daily') {
+        if (!data.term_id) {
+          throw new Error('Term is required for daily lesson plans');
+        }
+        if (!data.lesson_date) {
+          throw new Error('Lesson date is required');
+        }
+        if (!data.lesson_topic) {
+          throw new Error('Lesson topic is required');
+        }
+        
         const { error: lessonPlanError } = await supabase
           .from('teacher_lesson_plans')
           .insert({
@@ -775,29 +829,32 @@ export default function TeacherAcademicPlans() {
             teacher_user_id: user.id,
             class_id: parseInt(data.class_id),
             subject_id: parseInt(data.subject_id),
-            term_id: data.term_id ? parseInt(data.term_id) : null,
+            term_id: parseInt(data.term_id),
             lesson_date: data.lesson_date,
-            lesson_duration: data.lesson_duration,
+            lesson_duration: data.lesson_duration || null,
             lesson_topic: data.lesson_topic,
-            sub_theme: data.sub_theme,
-            cognitive_objective: data.cognitive_objective,
-            psychomotor_objective: data.psychomotor_objective,
-            affective_objective: data.affective_objective,
-            competencies: data.competencies,
-            life_skills_values: data.life_skills_values,
-            instructional_materials: data.instructional_materials,
-            evaluation_method: data.evaluation_method,
-            evaluation_task: data.evaluation_task,
+            theme: data.theme || null,
+            sub_theme: data.sub_theme || null,
+            cognitive_objective: data.cognitive_objective || null,
+            psychomotor_objective: data.psychomotor_objective || null,
+            affective_objective: data.affective_objective || null,
+            competencies: data.competencies || null,
+            life_skills_values: data.life_skills_values || null,
+            instructional_materials: data.instructional_materials || null,
+            evaluation_method: data.evaluation_method || null,
+            evaluation_task: data.evaluation_task || null,
             status: 'DRAFT'
           });
-        if (lessonPlanError) throw lessonPlanError;
+        if (lessonPlanError) {
+          console.error('Supabase error details:', lessonPlanError);
+          throw lessonPlanError;
+        }
         setSuccess('Daily lesson plan created successfully');
       }
 
       await fetchData();
       setShowCreateModal(false);
       
-      // Auto-clear success message
       setTimeout(() => setSuccess(null), 3000);
       
     } catch (err: any) {
@@ -923,6 +980,63 @@ export default function TeacherAcademicPlans() {
   const viewPlan = (plan: any) => {
     setSelectedPlan(plan);
     setShowViewModal(true);
+  };
+
+  const exportToExcel = (lessonPlan: any, steps: any[]) => {
+    const workbook = XLSX.utils.book_new();
+    
+    const mainSheetData = [
+      ['PRIMARY SCHOOL LESSON PLAN'],
+      [],
+      [`School: ${lessonPlan.school_name || ''}`],
+      [`Teacher: ${lessonPlan.teacher_name || ''}`],
+      [`Class: ${lessonPlan.class?.grade_name || ''}`],
+      [`Subject: ${lessonPlan.subject?.name || ''}`],
+      [`Date: ${formatDate(lessonPlan.lesson_date)}`],
+      [`Duration: ${lessonPlan.lesson_duration || ''}`],
+      [`Topic: ${lessonPlan.lesson_topic || ''}`],
+      [`Sub-Theme: ${lessonPlan.sub_theme || ''}`],
+      [],
+      ['LESSON OBJECTIVES'],
+      [`Cognitive: ${lessonPlan.cognitive_objective || ''}`],
+      [`Psychomotor: ${lessonPlan.psychomotor_objective || ''}`],
+      [`Affective: ${lessonPlan.affective_objective || ''}`],
+      [],
+      ['COMPETENCIES & LIFE SKILLS'],
+      [`Competencies: ${lessonPlan.competencies || ''}`],
+      [`Life Skills & Values: ${lessonPlan.life_skills_values || ''}`],
+      [],
+      ['INSTRUCTIONAL MATERIALS'],
+      [lessonPlan.instructional_materials || ''],
+      [],
+      ['LESSON DELIVERY'],
+      ['Step', 'Step Name', 'Duration', 'Teacher Activity', 'Learner Activity'],
+      ...steps.map((step, idx) => [
+        idx + 1,
+        step.step_name,
+        step.duration,
+        step.teacher_activity,
+        step.learner_activity
+      ]),
+      [],
+      ['EVALUATION'],
+      [`Method: ${lessonPlan.evaluation_method || ''}`],
+      [`Task: ${lessonPlan.evaluation_task || ''}`],
+      [],
+      ['TEACHER\'S SELF EVALUATION'],
+      [`What went well?: ${lessonPlan.self_eval_what_went_well || ''}`],
+      [`Learners achieved objective: ${lessonPlan.self_eval_achieved_count || 0}`],
+      [`Improvements needed: ${lessonPlan.self_eval_improvements || ''}`],
+    ];
+    
+    const mainSheet = XLSX.utils.aoa_to_sheet(mainSheetData);
+    XLSX.utils.book_append_sheet(workbook, mainSheet, 'Lesson Plan');
+    
+    mainSheet['!cols'] = [
+      { wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 30 }, { wch: 30 }
+    ];
+    
+    XLSX.writeFile(workbook, `lesson_plan_${lessonPlan.lesson_topic || 'untitled'}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
   };
 
   // ==================== RENDER FUNCTIONS ====================
@@ -1073,6 +1187,293 @@ export default function TeacherAcademicPlans() {
     );
   };
 
+  const renderWeeklyPlans = () => {
+    if (filteredTermPlans.length === 0) {
+      return (
+        <Card>
+          <CardContent className="p-12 text-center">
+            <CalendarDays className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+            <h4 className="text-lg font-semibold text-gray-700">No weekly plans found</h4>
+            <p className="text-gray-500 mt-2">
+              {searchQuery || filterStatus !== 'ALL' 
+                ? 'Try adjusting your filters' 
+                : 'Create your first weekly plan to get started'}
+            </p>
+            {(searchQuery || filterStatus !== 'ALL') && (
+              <Button variant="outline" onClick={clearFilters} className="mt-4">
+                <FilterX size={16} className="mr-2" />
+                Clear Filters
+              </Button>
+            )}
+            {!searchQuery && filterStatus === 'ALL' && (
+              <Button onClick={() => openCreateModal('weekly')} className="mt-4">
+                <Plus size={16} className="mr-2" />
+                Create Weekly Plan
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
+        {filteredTermPlans.map((plan) => (
+          <Card key={plan.id} hover>
+            <CardHeader>
+              <div className="flex justify-between items-start flex-wrap gap-4">
+                <div>
+                  <Badge variant={plan.status === 'APPROVED' ? 'success' : plan.status === 'DRAFT' ? 'warning' : plan.status === 'SUBMITTED' ? 'info' : 'danger'}>
+                    {plan.status}
+                  </Badge>
+                  <CardTitle className="mt-2">
+                    {plan.class?.grade_name} - {plan.subject?.name}
+                  </CardTitle>
+                  <CardDescription>
+                    {plan.term ? `${plan.term.term_name?.replace('_', ' ')} ${plan.term.year}` : 'Term not set'}
+                  </CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => exportWeeklyPlan(plan)}>
+                    <Download size={16} />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => viewPlan(plan)}>
+                    <Eye size={16} />
+                  </Button>
+                  {plan.status === 'DRAFT' && (
+                    <Button variant="ghost" size="sm" onClick={() => handleDeletePlan(plan.id, 'weekly')}>
+                      <Trash2 size={16} className="text-red-500" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="text-gray-700 mb-4">{plan.general_objectives || 'No general objectives set'}</p>
+              {plan.weeks && plan.weeks.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="font-semibold mb-3 text-sm">Weekly Schedule</h4>
+                  <div className="space-y-3">
+                    {plan.weeks.map((week) => (
+                      <div key={week.id} className="border-l-4 border-indigo-200 pl-4 py-2">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium text-indigo-700">Week {week.week_no}</span>
+                          {week.week_start && week.week_end && (
+                            <span className="text-xs text-gray-500">
+                              {formatDate(week.week_start)} - {formatDate(week.week_end)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm font-medium text-gray-800">{week.topic || 'No topic set'}</p>
+                        {week.subtopics && (
+                          <p className="text-xs text-gray-600 mt-1">{week.subtopics}</p>
+                        )}
+                        {week.learning_outcomes && (
+                          <p className="text-xs text-gray-500 mt-1">📚 {week.learning_outcomes}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+            <CardFooter>
+              <div className="flex justify-between items-center w-full">
+                <p className="text-xs text-gray-500">Created: {formatDateTime(plan.created_at)}</p>
+                {plan.status === 'DRAFT' && (
+                  <Button size="sm" onClick={() => handleUpdateStatus(plan.id, 'weekly', 'SUBMITTED')}>
+                    <Send size={14} className="mr-2" />
+                    Submit for Review
+                  </Button>
+                )}
+              </div>
+            </CardFooter>
+          </Card>
+        ))}
+      </div>
+    );
+  };
+
+  const renderTermlyPlans = () => {
+    if (filteredTermPlans.length === 0) {
+      return (
+        <Card>
+          <CardContent className="p-12 text-center">
+            <BookMarked className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+            <h4 className="text-lg font-semibold text-gray-700">No termly plans found</h4>
+            <p className="text-gray-500 mt-2">
+              {searchQuery || filterStatus !== 'ALL' 
+                ? 'Try adjusting your filters' 
+                : 'Create your first termly plan to get started'}
+            </p>
+            {(searchQuery || filterStatus !== 'ALL') && (
+              <Button variant="outline" onClick={clearFilters} className="mt-4">
+                <FilterX size={16} className="mr-2" />
+                Clear Filters
+              </Button>
+            )}
+            {!searchQuery && filterStatus === 'ALL' && (
+              <Button onClick={() => openCreateModal('termly')} className="mt-4">
+                <Plus size={16} className="mr-2" />
+                Create Termly Plan
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredTermPlans.map((plan) => (
+          <Card key={plan.id} hover>
+            <CardHeader>
+              <Badge variant={plan.status === 'APPROVED' ? 'success' : plan.status === 'DRAFT' ? 'warning' : plan.status === 'SUBMITTED' ? 'info' : 'danger'}>
+                {plan.status}
+              </Badge>
+              <CardTitle className="mt-2 line-clamp-1">
+                {plan.class?.grade_name} - {plan.subject?.name}
+              </CardTitle>
+              <CardDescription>
+                {plan.term ? `${plan.term.term_name?.replace('_', ' ')} ${plan.term.year}` : 'Term not set'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 line-clamp-3">{plan.general_objectives}</p>
+              {plan.reference_materials && (
+                <p className="text-xs text-gray-500 mt-2">
+                  📚 {plan.reference_materials.substring(0, 100)}...
+                </p>
+              )}
+            </CardContent>
+            <CardFooter className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => viewPlan(plan)}>
+                <Eye size={16} className="mr-2" />
+                View
+              </Button>
+              {plan.status === 'DRAFT' && (
+                <Button className="flex-1" onClick={() => handleUpdateStatus(plan.id, 'termly', 'SUBMITTED')}>
+                  <Send size={16} className="mr-2" />
+                  Submit
+                </Button>
+              )}
+            </CardFooter>
+          </Card>
+        ))}
+      </div>
+    );
+  };
+
+  const renderYearlyPlans = () => {
+    if (filteredYearPlans.length === 0) {
+      return (
+        <Card>
+          <CardContent className="p-12 text-center">
+            <Calendar className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+            <h4 className="text-lg font-semibold text-gray-700">No yearly plans found</h4>
+            <p className="text-gray-500 mt-2">
+              {searchQuery || filterStatus !== 'ALL' 
+                ? 'Try adjusting your filters' 
+                : 'Create your first yearly plan to get started'}
+            </p>
+            {(searchQuery || filterStatus !== 'ALL') && (
+              <Button variant="outline" onClick={clearFilters} className="mt-4">
+                <FilterX size={16} className="mr-2" />
+                Clear Filters
+              </Button>
+            )}
+            {!searchQuery && filterStatus === 'ALL' && (
+              <Button onClick={() => openCreateModal('yearly')} className="mt-4">
+                <Plus size={16} className="mr-2" />
+                Create Yearly Plan
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {filteredYearPlans.map((plan) => (
+          <Card key={plan.id} hover>
+            <CardHeader>
+              <Badge variant={plan.status === 'APPROVED' ? 'success' : plan.status === 'DRAFT' ? 'warning' : plan.status === 'SUBMITTED' ? 'info' : 'danger'}>
+                {plan.status}
+              </Badge>
+              <CardTitle className="mt-2">Year {plan.academic_year}</CardTitle>
+              <CardDescription>
+                {plan.class?.grade_name} • {plan.subject?.name}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-600 line-clamp-3">{plan.overview}</p>
+              {plan.resources && (
+                <p className="text-xs text-gray-500 mt-2">
+                  📚 Resources: {plan.resources.substring(0, 100)}...
+                </p>
+              )}
+              {plan.assessment_strategy && (
+                <p className="text-xs text-gray-500 mt-1">
+                  📝 Assessment: {plan.assessment_strategy.substring(0, 100)}...
+                </p>
+              )}
+            </CardContent>
+            <CardFooter className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => viewPlan(plan)}>
+                <Eye size={16} className="mr-2" />
+                View
+              </Button>
+              {plan.status === 'DRAFT' && (
+                <Button className="flex-1" onClick={() => handleUpdateStatus(plan.id, 'yearly', 'SUBMITTED')}>
+                  <Send size={16} className="mr-2" />
+                  Submit
+                </Button>
+              )}
+            </CardFooter>
+          </Card>
+        ))}
+      </div>
+    );
+  };
+
+  const exportWeeklyPlan = (plan: TeacherTermPlan) => {
+    const workbook = XLSX.utils.book_new();
+    
+    const sheetData = [
+      ['WEEKLY LESSON PLAN'],
+      [],
+      [`School: ${schools[0]?.school_name || ''}`],
+      [`Teacher: ${profile?.full_name || ''}`],
+      [`Class: ${plan.class?.grade_name || ''}`],
+      [`Subject: ${plan.subject?.name || ''}`],
+      [`Term: ${plan.term?.term_name?.replace('_', ' ') || ''} ${plan.term?.year || ''}`],
+      [],
+      ['GENERAL OBJECTIVES'],
+      [plan.general_objectives || ''],
+      [],
+      ['REFERENCE MATERIALS'],
+      [plan.reference_materials || ''],
+      [],
+      ['WEEKLY BREAKDOWN'],
+      ['Week', 'Topic', 'Subtopics', 'Learning Outcomes', 'Teaching Methods', 'Resources', 'Assessment', 'Remarks'],
+      ...(plan.weeks?.map(week => [
+        week.week_no,
+        week.topic || '',
+        week.subtopics || '',
+        week.learning_outcomes || '',
+        week.teaching_methods || '',
+        week.resources || '',
+        week.assessment || '',
+        week.remarks || ''
+      ]) || [])
+    ];
+    
+    const sheet = XLSX.utils.aoa_to_sheet(sheetData);
+    XLSX.utils.book_append_sheet(workbook, sheet, 'Weekly Plan');
+    XLSX.writeFile(workbook, `weekly_plan_${plan.class?.grade_name}_${plan.subject?.name}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+  };
+
   // ==================== MAIN RENDER ====================
   if (loading) {
     return (
@@ -1203,7 +1604,7 @@ export default function TeacherAcademicPlans() {
               <div className="relative w-full lg:w-80">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
                 <Input
-                  ref={searchInputRef as any}
+                  ref={searchInputRef}
                   placeholder="Search by topic, subject, or grade..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -1245,6 +1646,20 @@ export default function TeacherAcademicPlans() {
                   ))}
                 </Select>
               )}
+              {(activeTab === 'daily' || activeTab === 'weekly' || activeTab === 'termly') && terms.length > 0 && (
+                <Select
+                  value={filterTerm}
+                  onChange={(e) => setFilterTerm(e.target.value)}
+                  className="w-48"
+                >
+                  <option value="ALL">All Terms</option>
+                  {terms.map(term => (
+                    <option key={term.id} value={term.id}>
+                      {term.term_name.replace('_', ' ')} {term.year}
+                    </option>
+                  ))}
+                </Select>
+              )}
               {(filterStatus !== 'ALL' || filterClass !== 'ALL' || filterSubject !== 'ALL' || filterTerm !== 'ALL' || searchQuery) && (
                 <Button variant="ghost" size="sm" onClick={clearFilters}>
                   <FilterX size={16} className="mr-1" />
@@ -1253,236 +1668,69 @@ export default function TeacherAcademicPlans() {
               )}
             </div>
             <div className="flex gap-2">
-              <div className="flex gap-1 border rounded-lg p-1">
-                <Button
-                  variant={viewMode === 'grid' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setViewMode('grid')}
-                  className="px-3"
-                >
-                  <Grid size={16} />
-                </Button>
-                <Button
-                  variant={viewMode === 'list' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setViewMode('list')}
-                  className="px-3"
-                >
-                  <List size={16} />
-                </Button>
-              </div>
-              <div className="flex gap-1 border rounded-lg p-1">
-                <Button
-                  variant={sortField === 'date' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => {
-                    if (sortField === 'date') {
-                      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                    } else {
-                      setSortField('date');
-                      setSortOrder('desc');
-                    }
-                  }}
-                  className="px-3"
-                >
-                  <ArrowUpDown size={14} className="mr-1" />
-                  Date
-                </Button>
-                <Button
-                  variant={sortField === 'topic' ? 'primary' : 'ghost'}
-                  size="sm"
-                  onClick={() => {
-                    if (sortField === 'topic') {
-                      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                    } else {
-                      setSortField('topic');
-                      setSortOrder('asc');
-                    }
-                  }}
-                  className="px-3"
-                >
-                  Topic
-                </Button>
-              </div>
+              {(activeTab === 'daily') && (
+                <div className="flex gap-1 border rounded-lg p-1">
+                  <Button
+                    variant={viewMode === 'grid' ? 'primary' : 'ghost'}
+                    size="sm"
+                    onClick={() => setViewMode('grid')}
+                    className="px-3"
+                  >
+                    <Grid size={16} />
+                  </Button>
+                  <Button
+                    variant={viewMode === 'list' ? 'primary' : 'ghost'}
+                    size="sm"
+                    onClick={() => setViewMode('list')}
+                    className="px-3"
+                  >
+                    <List size={16} />
+                  </Button>
+                </div>
+              )}
+              {(activeTab === 'daily') && (
+                <div className="flex gap-1 border rounded-lg p-1">
+                  <Button
+                    variant={sortField === 'date' ? 'primary' : 'ghost'}
+                    size="sm"
+                    onClick={() => {
+                      if (sortField === 'date') {
+                        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                      } else {
+                        setSortField('date');
+                        setSortOrder('desc');
+                      }
+                    }}
+                    className="px-3"
+                  >
+                    <ArrowUpDown size={14} className="mr-1" />
+                    Date
+                  </Button>
+                  <Button
+                    variant={sortField === 'topic' ? 'primary' : 'ghost'}
+                    size="sm"
+                    onClick={() => {
+                      if (sortField === 'topic') {
+                        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                      } else {
+                        setSortField('topic');
+                        setSortOrder('asc');
+                      }
+                    }}
+                    className="px-3"
+                  >
+                    Topic
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Content */}
           {activeTab === 'daily' && renderDailyPlans()}
-          
-          {activeTab === 'weekly' && (
-            <div className="space-y-6">
-              {filteredTermPlans.length === 0 ? (
-                <Card>
-                  <CardContent className="p-12 text-center">
-                    <CalendarDays className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-                    <h4 className="text-lg font-semibold text-gray-700">No weekly plans found</h4>
-                    <p className="text-gray-500 mt-2">
-                      {searchQuery || filterStatus !== 'ALL' ? 'Try adjusting your filters' : 'Create your first weekly plan to get started'}
-                    </p>
-                    <Button onClick={() => openCreateModal('weekly')} className="mt-4">
-                      <Plus size={16} className="mr-2" />
-                      Create Weekly Plan
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                filteredTermPlans.map((plan) => (
-                  <Card key={plan.id} hover>
-                    <CardHeader>
-                      <div className="flex justify-between items-start flex-wrap gap-4">
-                        <div>
-                          <Badge variant={plan.status === 'APPROVED' ? 'success' : plan.status === 'DRAFT' ? 'warning' : plan.status === 'SUBMITTED' ? 'info' : 'danger'}>
-                            {plan.status}
-                          </Badge>
-                          <CardTitle className="mt-2">
-                            {plan.class?.grade_name} - {plan.subject?.name}
-                          </CardTitle>
-                          <CardDescription>
-                            {plan.term ? `${plan.term.term_name?.replace('_', ' ')} ${plan.term.year}` : 'Term not set'}
-                          </CardDescription>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button variant="ghost" size="sm" onClick={() => viewPlan(plan)}>
-                            <Eye size={16} />
-                          </Button>
-                          {plan.status === 'DRAFT' && (
-                            <Button variant="ghost" size="sm" onClick={() => handleDeletePlan(plan.id, 'weekly')}>
-                              <Trash2 size={16} className="text-red-500" />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-gray-700 mb-4 line-clamp-2">{plan.general_objectives}</p>
-                      {plan.weeks && plan.weeks.length > 0 && (
-                        <div className="mt-4">
-                          <h4 className="font-semibold mb-2 text-sm">Weekly Breakdown</h4>
-                          <div className="space-y-2">
-                            {plan.weeks.slice(0, 3).map((week) => (
-                              <div key={week.id} className="flex items-center gap-2 text-sm text-gray-600">
-                                <ChevronRight size={14} />
-                                <span>Week {week.week_no}: {week.topic || 'No topic set'}</span>
-                              </div>
-                            ))}
-                            {plan.weeks.length > 3 && (
-                              <p className="text-sm text-indigo-600">+{plan.weeks.length - 3} more weeks</p>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </CardContent>
-                    <CardFooter>
-                      <div className="flex justify-between items-center w-full">
-                        <p className="text-xs text-gray-500">Created: {formatDateTime(plan.created_at)}</p>
-                        {plan.status === 'DRAFT' && (
-                          <Button size="sm" onClick={() => handleUpdateStatus(plan.id, 'weekly', 'SUBMITTED')}>
-                            <Send size={14} className="mr-2" />
-                            Submit for Review
-                          </Button>
-                        )}
-                      </div>
-                    </CardFooter>
-                  </Card>
-                ))
-              )}
-            </div>
-          )}
-
-          {activeTab === 'termly' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredTermPlans.length === 0 ? (
-                <Card className="col-span-full">
-                  <CardContent className="p-12 text-center">
-                    <BookMarked className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-                    <h4 className="text-lg font-semibold text-gray-700">No termly plans found</h4>
-                    <Button onClick={() => openCreateModal('termly')} className="mt-4">
-                      <Plus size={16} className="mr-2" />
-                      Create Termly Plan
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                filteredTermPlans.map((plan) => (
-                  <Card key={plan.id} hover>
-                    <CardHeader>
-                      <Badge variant={plan.status === 'APPROVED' ? 'success' : plan.status === 'DRAFT' ? 'warning' : plan.status === 'SUBMITTED' ? 'info' : 'danger'}>
-                        {plan.status}
-                      </Badge>
-                      <CardTitle className="mt-2 line-clamp-1">
-                        {plan.class?.grade_name} - {plan.subject?.name}
-                      </CardTitle>
-                      <CardDescription>
-                        {plan.term ? `${plan.term.term_name?.replace('_', ' ')} ${plan.term.year}` : 'Term not set'}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-sm text-gray-600 line-clamp-3">{plan.general_objectives}</p>
-                    </CardContent>
-                    <CardFooter className="flex gap-2">
-                      <Button variant="outline" className="flex-1" onClick={() => viewPlan(plan)}>
-                        <Eye size={16} className="mr-2" />
-                        View
-                      </Button>
-                      {plan.status === 'DRAFT' && (
-                        <Button className="flex-1" onClick={() => handleUpdateStatus(plan.id, 'termly', 'SUBMITTED')}>
-                          <Send size={16} className="mr-2" />
-                          Submit
-                        </Button>
-                      )}
-                    </CardFooter>
-                  </Card>
-                ))
-              )}
-            </div>
-          )}
-
-          {activeTab === 'yearly' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredYearPlans.length === 0 ? (
-                <Card className="col-span-full">
-                  <CardContent className="p-12 text-center">
-                    <Calendar className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-                    <h4 className="text-lg font-semibold text-gray-700">No yearly plans found</h4>
-                    <Button onClick={() => openCreateModal('yearly')} className="mt-4">
-                      <Plus size={16} className="mr-2" />
-                      Create Yearly Plan
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                filteredYearPlans.map((plan) => (
-                  <Card key={plan.id} hover>
-                    <CardHeader>
-                      <Badge variant={plan.status === 'APPROVED' ? 'success' : plan.status === 'DRAFT' ? 'warning' : plan.status === 'SUBMITTED' ? 'info' : 'danger'}>
-                        {plan.status}
-                      </Badge>
-                      <CardTitle className="mt-2">Year {plan.academic_year}</CardTitle>
-                      <CardDescription>
-                        {plan.class?.grade_name} • {plan.subject?.name}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-sm text-gray-600 line-clamp-3">{plan.overview}</p>
-                    </CardContent>
-                    <CardFooter className="flex gap-2">
-                      <Button variant="outline" className="flex-1" onClick={() => viewPlan(plan)}>
-                        <Eye size={16} className="mr-2" />
-                        View
-                      </Button>
-                      {plan.status === 'DRAFT' && (
-                        <Button className="flex-1" onClick={() => handleUpdateStatus(plan.id, 'yearly', 'SUBMITTED')}>
-                          <Send size={16} className="mr-2" />
-                          Submit
-                        </Button>
-                      )}
-                    </CardFooter>
-                  </Card>
-                ))
-              )}
-            </div>
-          )}
+          {activeTab === 'weekly' && renderWeeklyPlans()}
+          {activeTab === 'termly' && renderTermlyPlans()}
+          {activeTab === 'yearly' && renderYearlyPlans()}
         </main>
       </div>
 
@@ -1506,74 +1754,21 @@ export default function TeacherAcademicPlans() {
           plan={selectedPlan}
           type={activeTab}
           onClose={() => setShowViewModal(false)}
-          onStatusUpdate={(status) => handleUpdateStatus(selectedPlan.id, activeTab, status)}
-          onExport={() => exportToExcel(selectedPlan, selectedPlan.lesson_steps || [])}
+          onStatusUpdate={(status) => handleUpdateStatus(selectedPlan.id, activeTab, status as PlanStatus)}
+          onExport={() => {
+            if (activeTab === 'daily') {
+              exportToExcel(selectedPlan, selectedPlan.lesson_steps || []);
+            } else if (activeTab === 'weekly') {
+              exportWeeklyPlan(selectedPlan);
+            }
+          }}
         />
       )}
     </div>
   );
 }
 
-// Export function (needs to be defined before usage)
-const exportToExcel = (lessonPlan: any, steps: any[]) => {
-  const workbook = XLSX.utils.book_new();
-  
-  const mainSheetData = [
-    ['PRIMARY SCHOOL LESSON PLAN'],
-    [],
-    [`School: ${lessonPlan.school_name || ''}`],
-    [`Teacher: ${lessonPlan.teacher_name || ''}`],
-    [`Class: ${lessonPlan.class?.grade_name || ''}`],
-    [`Subject: ${lessonPlan.subject?.name || ''}`],
-    [`Date: ${formatDate(lessonPlan.lesson_date)}`],
-    [`Duration: ${lessonPlan.lesson_duration || ''}`],
-    [`Topic: ${lessonPlan.lesson_topic || ''}`],
-    [`Sub-Theme: ${lessonPlan.sub_theme || ''}`],
-    [],
-    ['LESSON OBJECTIVES'],
-    [`Cognitive: ${lessonPlan.cognitive_objective || ''}`],
-    [`Psychomotor: ${lessonPlan.psychomotor_objective || ''}`],
-    [`Affective: ${lessonPlan.affective_objective || ''}`],
-    [],
-    ['COMPETENCIES & LIFE SKILLS'],
-    [`Competencies: ${lessonPlan.competencies || ''}`],
-    [`Life Skills & Values: ${lessonPlan.life_skills_values || ''}`],
-    [],
-    ['INSTRUCTIONAL MATERIALS'],
-    [lessonPlan.instructional_materials || ''],
-    [],
-    ['LESSON DELIVERY'],
-    ['Step', 'Step Name', 'Duration', 'Teacher Activity', 'Learner Activity'],
-    ...steps.map((step, idx) => [
-      idx + 1,
-      step.step_name,
-      step.duration,
-      step.teacher_activity,
-      step.learner_activity
-    ]),
-    [],
-    ['EVALUATION'],
-    [`Method: ${lessonPlan.evaluation_method || ''}`],
-    [`Task: ${lessonPlan.evaluation_task || ''}`],
-    [],
-    ['TEACHER\'S SELF EVALUATION'],
-    [`What went well?: ${lessonPlan.self_eval_what_went_well || ''}`],
-    [`Learners achieved objective: ${lessonPlan.self_eval_achieved_count || 0}`],
-    [`Improvements needed: ${lessonPlan.self_eval_improvements || ''}`],
-  ];
-  
-  const mainSheet = XLSX.utils.aoa_to_sheet(mainSheetData);
-  XLSX.utils.book_append_sheet(workbook, mainSheet, 'Lesson Plan');
-  
-  // Set column widths
-  mainSheet['!cols'] = [
-    { wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 30 }, { wch: 30 }
-  ];
-  
-  XLSX.writeFile(workbook, `lesson_plan_${lessonPlan.lesson_topic || 'untitled'}_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
-};
-
-// CreatePlanModal Component (simplified version - you can keep your existing implementation)
+// ==================== CREATE PLAN MODAL ====================
 const CreatePlanModal: React.FC<{
   type: 'daily' | 'weekly' | 'termly' | 'yearly';
   subjects: Subject[];
@@ -1584,16 +1779,31 @@ const CreatePlanModal: React.FC<{
   onSubmit: (data: any) => void;
   saving: boolean;
 }> = ({ type, subjects, classes, topics, terms, onClose, onSubmit, saving }) => {
-  const [formData, setFormData] = useState<any>({ status: 'DRAFT' });
+  const [formData, setFormData] = useState<CreatePlanFormData>({
+    status: 'DRAFT',
+    academic_year: new Date().getFullYear()
+  });
   const [filteredSubjects, setFilteredSubjects] = useState<Subject[]>([]);
   const [filteredTopics, setFilteredTopics] = useState<Topic[]>([]);
-  const [weeks, setWeeks] = useState<any[]>([{ week_no: 1, topic: '', subtopics: '', learning_outcomes: '', teaching_methods: '', learning_activities: '', resources: '', assessment: '', remarks: '' }]);
+  const [weeks, setWeeks] = useState<any[]>([{ 
+    week_no: 1, 
+    week_start: '',
+    week_end: '',
+    topic: '', 
+    subtopics: '', 
+    learning_outcomes: '', 
+    teaching_methods: '', 
+    learning_activities: '', 
+    resources: '', 
+    assessment: '', 
+    remarks: '' 
+  }]);
 
   useEffect(() => {
     if (formData.class_id) {
-      const filtered = subjects.filter(s => s.grade_id === parseInt(formData.class_id));
+      const filtered = subjects.filter(s => s.grade_id === parseInt(formData.class_id as string));
       setFilteredSubjects(filtered);
-      setFormData(prev => ({ ...prev, subject_id: '', topic_id: '' }));
+      setFormData((prev: CreatePlanFormData) => ({ ...prev, subject_id: '', topic_id: '' }));
       setFilteredTopics([]);
     } else {
       setFilteredSubjects([]);
@@ -1602,7 +1812,10 @@ const CreatePlanModal: React.FC<{
 
   useEffect(() => {
     if (formData.subject_id && formData.class_id) {
-      const filtered = topics.filter(t => t.subject_id === parseInt(formData.subject_id) && t.grade_id === parseInt(formData.class_id));
+      const filtered = topics.filter(t => 
+        t.subject_id === parseInt(formData.subject_id as string) && 
+        t.grade_id === parseInt(formData.class_id as string)
+      );
       setFilteredTopics(filtered);
     } else {
       setFilteredTopics([]);
@@ -1610,7 +1823,19 @@ const CreatePlanModal: React.FC<{
   }, [formData.subject_id, formData.class_id, topics]);
 
   const handleAddWeek = () => {
-    setWeeks([...weeks, { week_no: weeks.length + 1, topic: '', subtopics: '', learning_outcomes: '', teaching_methods: '', learning_activities: '', resources: '', assessment: '', remarks: '' }]);
+    setWeeks([...weeks, { 
+      week_no: weeks.length + 1,
+      week_start: '',
+      week_end: '',
+      topic: '', 
+      subtopics: '', 
+      learning_outcomes: '', 
+      teaching_methods: '', 
+      learning_activities: '', 
+      resources: '', 
+      assessment: '', 
+      remarks: '' 
+    }]);
   };
 
   const handleRemoveWeek = (index: number) => {
@@ -1640,7 +1865,7 @@ const CreatePlanModal: React.FC<{
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50 overflow-y-auto">
       <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200 sticky top-0 bg-white">
+        <div className="p-6 border-b border-gray-200 sticky top-0 bg-white z-10">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-bold text-gray-900">{getTitle()}</h2>
             <Button variant="ghost" onClick={onClose} disabled={saving}>
@@ -1650,7 +1875,8 @@ const CreatePlanModal: React.FC<{
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Basic Information */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <Label required>Grade / Class</Label>
               <Select
@@ -1680,23 +1906,367 @@ const CreatePlanModal: React.FC<{
                 ))}
               </Select>
             </div>
-            
+          </div>
+
+          {/* Term Selection - Required for daily, weekly, termly */}
+          {(type === 'daily' || type === 'weekly' || type === 'termly') && (
             <div>
-              <Label>Topic</Label>
+              <Label required>Term</Label>
               <Select
-                value={formData.topic_id?.toString() || ''}
-                onChange={(e) => setFormData({ ...formData, topic_id: e.target.value })}
-                disabled={!formData.subject_id || saving}
+                value={formData.term_id?.toString() || ''}
+                onChange={(e) => setFormData({ ...formData, term_id: e.target.value })}
+                required
+                disabled={saving}
               >
-                <option value="">{!formData.subject_id ? 'Select subject first' : 'Select topic (optional)'}</option>
-                {filteredTopics.map(topic => (
-                  <option key={topic.id} value={topic.id}>{topic.name}</option>
+                <option value="">Select Term</option>
+                {terms.map(term => (
+                  <option key={term.id} value={term.id}>
+                    {term.term_name.replace('_', ' ')} {term.year} ({formatDate(term.start_date)} - {formatDate(term.end_date)})
+                  </option>
                 ))}
               </Select>
             </div>
-          </div>
+          )}
 
-          {/* Add other form fields based on type - similar to your existing implementation */}
+          {/* Year Selection for Yearly Plans */}
+          {type === 'yearly' && (
+            <div>
+              <Label required>Academic Year</Label>
+              <Input
+                type="number"
+                value={formData.academic_year}
+                onChange={(e) => setFormData({ ...formData, academic_year: parseInt(e.target.value) })}
+                required
+                disabled={saving}
+              />
+            </div>
+          )}
+
+          {/* Daily Plan Fields */}
+          {type === 'daily' && (
+            <>
+              <div>
+                <Label required>Lesson Topic</Label>
+                <Input
+                  placeholder="Enter lesson topic"
+                  value={formData.lesson_topic || ''}
+                  onChange={(e) => setFormData({ ...formData, lesson_topic: e.target.value })}
+                  required
+                  disabled={saving}
+                />
+              </div>
+
+              <div>
+                <Label>Theme</Label>
+                <Input
+                  placeholder="Enter theme"
+                  value={formData.theme || ''}
+                  onChange={(e) => setFormData({ ...formData, theme: e.target.value })}
+                  disabled={saving}
+                />
+              </div>
+
+              <div>
+                <Label>Sub-Theme</Label>
+                <Input
+                  placeholder="Enter sub-theme"
+                  value={formData.sub_theme || ''}
+                  onChange={(e) => setFormData({ ...formData, sub_theme: e.target.value })}
+                  disabled={saving}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <Label required>Lesson Date</Label>
+                  <Input
+                    type="date"
+                    value={formData.lesson_date || ''}
+                    onChange={(e) => setFormData({ ...formData, lesson_date: e.target.value })}
+                    required
+                    disabled={saving}
+                  />
+                </div>
+                <div>
+                  <Label>Duration</Label>
+                  <Input
+                    placeholder="e.g., 60 minutes"
+                    value={formData.lesson_duration || ''}
+                    onChange={(e) => setFormData({ ...formData, lesson_duration: e.target.value })}
+                    disabled={saving}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label>Cognitive Objective</Label>
+                <Textarea
+                  placeholder="Enter cognitive objective"
+                  value={formData.cognitive_objective || ''}
+                  onChange={(e) => setFormData({ ...formData, cognitive_objective: e.target.value })}
+                  rows={2}
+                  disabled={saving}
+                />
+              </div>
+
+              <div>
+                <Label>Psychomotor Objective</Label>
+                <Textarea
+                  placeholder="Enter psychomotor objective"
+                  value={formData.psychomotor_objective || ''}
+                  onChange={(e) => setFormData({ ...formData, psychomotor_objective: e.target.value })}
+                  rows={2}
+                  disabled={saving}
+                />
+              </div>
+
+              <div>
+                <Label>Affective Objective</Label>
+                <Textarea
+                  placeholder="Enter affective objective"
+                  value={formData.affective_objective || ''}
+                  onChange={(e) => setFormData({ ...formData, affective_objective: e.target.value })}
+                  rows={2}
+                  disabled={saving}
+                />
+              </div>
+
+              <div>
+                <Label>Competencies</Label>
+                <Textarea
+                  placeholder="Enter competencies"
+                  value={formData.competencies || ''}
+                  onChange={(e) => setFormData({ ...formData, competencies: e.target.value })}
+                  rows={2}
+                  disabled={saving}
+                />
+              </div>
+
+              <div>
+                <Label>Life Skills & Values</Label>
+                <Textarea
+                  placeholder="Enter life skills and values"
+                  value={formData.life_skills_values || ''}
+                  onChange={(e) => setFormData({ ...formData, life_skills_values: e.target.value })}
+                  rows={2}
+                  disabled={saving}
+                />
+              </div>
+
+              <div>
+                <Label>Instructional Materials</Label>
+                <Textarea
+                  placeholder="List instructional materials needed"
+                  value={formData.instructional_materials || ''}
+                  onChange={(e) => setFormData({ ...formData, instructional_materials: e.target.value })}
+                  rows={2}
+                  disabled={saving}
+                />
+              </div>
+
+              <div>
+                <Label>Evaluation Method</Label>
+                <Input
+                  placeholder="e.g., Oral questions, written test, observation"
+                  value={formData.evaluation_method || ''}
+                  onChange={(e) => setFormData({ ...formData, evaluation_method: e.target.value })}
+                  disabled={saving}
+                />
+              </div>
+
+              <div>
+                <Label>Evaluation Task</Label>
+                <Textarea
+                  placeholder="Describe the evaluation task"
+                  value={formData.evaluation_task || ''}
+                  onChange={(e) => setFormData({ ...formData, evaluation_task: e.target.value })}
+                  rows={2}
+                  disabled={saving}
+                />
+              </div>
+            </>
+          )}
+
+          {/* Weekly Plan Weeks */}
+          {type === 'weekly' && (
+            <div className="space-y-4">
+              <div>
+                <Label required>General Objectives</Label>
+                <Textarea
+                  placeholder="Enter general objectives for the term"
+                  value={formData.general_objectives || ''}
+                  onChange={(e) => setFormData({ ...formData, general_objectives: e.target.value })}
+                  rows={3}
+                  required
+                  disabled={saving}
+                />
+              </div>
+
+              <div>
+                <Label>Reference Materials</Label>
+                <Textarea
+                  placeholder="List reference materials"
+                  value={formData.reference_materials || ''}
+                  onChange={(e) => setFormData({ ...formData, reference_materials: e.target.value })}
+                  rows={2}
+                  disabled={saving}
+                />
+              </div>
+
+              <div className="flex justify-between items-center">
+                <Label required>Weekly Breakdown</Label>
+                <Button type="button" variant="outline" size="sm" onClick={handleAddWeek}>
+                  <Plus size={16} className="mr-1" />
+                  Add Week
+                </Button>
+              </div>
+              {weeks.map((week, idx) => (
+                <Card key={idx} className="p-4">
+                  <div className="flex justify-between items-center mb-3">
+                    <h4 className="font-semibold">Week {week.week_no}</h4>
+                    {weeks.length > 1 && (
+                      <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveWeek(idx)}>
+                        <Trash2 size={16} className="text-red-500" />
+                      </Button>
+                    )}
+                  </div>
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input
+                        type="date"
+                        placeholder="Week Start Date"
+                        value={week.week_start}
+                        onChange={(e) => handleWeekChange(idx, 'week_start', e.target.value)}
+                        disabled={saving}
+                      />
+                      <Input
+                        type="date"
+                        placeholder="Week End Date"
+                        value={week.week_end}
+                        onChange={(e) => handleWeekChange(idx, 'week_end', e.target.value)}
+                        disabled={saving}
+                      />
+                    </div>
+                    <Input
+                      placeholder="Topic"
+                      value={week.topic}
+                      onChange={(e) => handleWeekChange(idx, 'topic', e.target.value)}
+                      disabled={saving}
+                    />
+                    <Input
+                      placeholder="Subtopics"
+                      value={week.subtopics}
+                      onChange={(e) => handleWeekChange(idx, 'subtopics', e.target.value)}
+                      disabled={saving}
+                    />
+                    <Textarea
+                      placeholder="Learning Outcomes"
+                      value={week.learning_outcomes}
+                      onChange={(e) => handleWeekChange(idx, 'learning_outcomes', e.target.value)}
+                      rows={2}
+                      disabled={saving}
+                    />
+                    <Input
+                      placeholder="Teaching Methods"
+                      value={week.teaching_methods}
+                      onChange={(e) => handleWeekChange(idx, 'teaching_methods', e.target.value)}
+                      disabled={saving}
+                    />
+                    <Input
+                      placeholder="Learning Activities"
+                      value={week.learning_activities}
+                      onChange={(e) => handleWeekChange(idx, 'learning_activities', e.target.value)}
+                      disabled={saving}
+                    />
+                    <Input
+                      placeholder="Resources"
+                      value={week.resources}
+                      onChange={(e) => handleWeekChange(idx, 'resources', e.target.value)}
+                      disabled={saving}
+                    />
+                    <Input
+                      placeholder="Assessment"
+                      value={week.assessment}
+                      onChange={(e) => handleWeekChange(idx, 'assessment', e.target.value)}
+                      disabled={saving}
+                    />
+                    <Input
+                      placeholder="Remarks"
+                      value={week.remarks}
+                      onChange={(e) => handleWeekChange(idx, 'remarks', e.target.value)}
+                      disabled={saving}
+                    />
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* Termly Plan Fields */}
+          {type === 'termly' && (
+            <>
+              <div>
+                <Label required>General Objectives</Label>
+                <Textarea
+                  placeholder="Enter general objectives for the term"
+                  value={formData.general_objectives || ''}
+                  onChange={(e) => setFormData({ ...formData, general_objectives: e.target.value })}
+                  rows={4}
+                  required
+                  disabled={saving}
+                />
+              </div>
+              <div>
+                <Label>Reference Materials</Label>
+                <Textarea
+                  placeholder="List reference materials (textbooks, resources, etc.)"
+                  value={formData.reference_materials || ''}
+                  onChange={(e) => setFormData({ ...formData, reference_materials: e.target.value })}
+                  rows={3}
+                  disabled={saving}
+                />
+              </div>
+            </>
+          )}
+
+          {/* Yearly Plan Fields */}
+          {type === 'yearly' && (
+            <>
+              <div>
+                <Label required>Course Overview</Label>
+                <Textarea
+                  placeholder="Provide an overview of the yearly plan"
+                  value={formData.overview || ''}
+                  onChange={(e) => setFormData({ ...formData, overview: e.target.value })}
+                  rows={4}
+                  required
+                  disabled={saving}
+                />
+              </div>
+              <div>
+                <Label>Resources</Label>
+                <Textarea
+                  placeholder="List resources needed for the year (textbooks, materials, equipment)"
+                  value={formData.resources || ''}
+                  onChange={(e) => setFormData({ ...formData, resources: e.target.value })}
+                  rows={3}
+                  disabled={saving}
+                />
+              </div>
+              <div>
+                <Label>Assessment Strategy</Label>
+                <Textarea
+                  placeholder="Describe assessment strategy for the year (exams, projects, continuous assessment)"
+                  value={formData.assessment_strategy || ''}
+                  onChange={(e) => setFormData({ ...formData, assessment_strategy: e.target.value })}
+                  rows={3}
+                  disabled={saving}
+                />
+              </div>
+            </>
+          )}
+
+          {/* Form Actions */}
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
             <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
               Cancel
@@ -1712,7 +2282,7 @@ const CreatePlanModal: React.FC<{
   );
 };
 
-// ViewPlanModal Component
+// ==================== VIEW PLAN MODAL ====================
 const ViewPlanModal: React.FC<{
   plan: any;
   type: string;
@@ -1722,13 +2292,31 @@ const ViewPlanModal: React.FC<{
 }> = ({ plan, type, onClose, onStatusUpdate, onExport }) => {
   const [activeSection, setActiveSection] = useState('overview');
 
-  const sections = [
-    { id: 'overview', label: 'Overview', icon: FileText },
-    { id: 'objectives', label: 'Objectives', icon: Target },
-    { id: 'content', label: 'Content', icon: BookOpen },
-    { id: 'assessment', label: 'Assessment', icon: Award },
-    { id: 'evaluation', label: 'Evaluation', icon: BarChart },
-  ];
+  const getSections = () => {
+    if (type === 'daily') {
+      return [
+        { id: 'overview', label: 'Overview', icon: FileText },
+        { id: 'objectives', label: 'Objectives', icon: Target },
+        { id: 'content', label: 'Content', icon: BookOpen },
+        { id: 'assessment', label: 'Assessment', icon: Award },
+        { id: 'evaluation', label: 'Evaluation', icon: BarChart },
+      ];
+    } else if (type === 'weekly') {
+      return [
+        { id: 'overview', label: 'Overview', icon: FileText },
+        { id: 'weeks', label: 'Weekly Schedule', icon: CalendarDays },
+        { id: 'resources', label: 'Resources', icon: BookOpen },
+      ];
+    } else {
+      return [
+        { id: 'overview', label: 'Overview', icon: FileText },
+        { id: 'details', label: 'Details', icon: BookOpen },
+        { id: 'assessment', label: 'Assessment', icon: Award },
+      ];
+    }
+  };
+
+  const sections = getSections();
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -1736,9 +2324,17 @@ const ViewPlanModal: React.FC<{
         <div className="p-6 border-b border-gray-200 sticky top-0 bg-white z-10">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">{plan.lesson_topic || 'Lesson Plan'}</h2>
+              <h2 className="text-2xl font-bold text-gray-900">
+                {type === 'daily' && (plan.lesson_topic || 'Lesson Plan')}
+                {type === 'weekly' && `Weekly Plan - ${plan.class?.grade_name} ${plan.subject?.name}`}
+                {type === 'termly' && `Termly Plan - ${plan.class?.grade_name} ${plan.subject?.name}`}
+                {type === 'yearly' && `Yearly Plan - ${plan.class?.grade_name} ${plan.subject?.name}`}
+              </h2>
               <p className="text-gray-600 mt-1">
-                {plan.class?.grade_name} • {plan.subject?.name} • {formatDate(plan.lesson_date)}
+                {type === 'daily' && `${plan.class?.grade_name} • ${plan.subject?.name} • ${formatDate(plan.lesson_date)}`}
+                {type === 'weekly' && plan.term && `${plan.term.term_name?.replace('_', ' ')} ${plan.term.year}`}
+                {type === 'termly' && plan.term && `${plan.term.term_name?.replace('_', ' ')} ${plan.term.year}`}
+                {type === 'yearly' && `Year ${plan.academic_year}`}
               </p>
             </div>
             <div className="flex gap-2">
@@ -1771,120 +2367,258 @@ const ViewPlanModal: React.FC<{
         </div>
 
         <div className="p-6 space-y-6">
-          {activeSection === 'overview' && (
+          {/* Daily Plan Views */}
+          {type === 'daily' && (
             <>
-              <div>
-                <h3 className="font-semibold text-gray-900 mb-2">Lesson Details</h3>
-                <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
-                  <div><span className="text-sm text-gray-500">Date:</span> <span className="font-medium">{formatDate(plan.lesson_date)}</span></div>
-                  <div><span className="text-sm text-gray-500">Duration:</span> <span className="font-medium">{plan.lesson_duration}</span></div>
-                  <div><span className="text-sm text-gray-500">Theme:</span> <span className="font-medium">{plan.theme || '—'}</span></div>
-                  <div><span className="text-sm text-gray-500">Sub-theme:</span> <span className="font-medium">{plan.sub_theme || '—'}</span></div>
+              {activeSection === 'overview' && (
+                <>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Lesson Details</h3>
+                    <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
+                      <div><span className="text-sm text-gray-500">Date:</span> <span className="font-medium">{formatDate(plan.lesson_date)}</span></div>
+                      <div><span className="text-sm text-gray-500">Duration:</span> <span className="font-medium">{plan.lesson_duration}</span></div>
+                      <div><span className="text-sm text-gray-500">Theme:</span> <span className="font-medium">{plan.theme || '—'}</span></div>
+                      <div><span className="text-sm text-gray-500">Sub-theme:</span> <span className="font-medium">{plan.sub_theme || '—'}</span></div>
+                      {plan.term && (
+                        <div><span className="text-sm text-gray-500">Term:</span> <span className="font-medium">{plan.term.term_name?.replace('_', ' ')} {plan.term.year}</span></div>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Status</h3>
+                    <div className="flex items-center gap-3">
+                      <Badge variant={plan.status === 'APPROVED' ? 'success' : plan.status === 'DRAFT' ? 'warning' : plan.status === 'SUBMITTED' ? 'info' : 'danger'}>
+                        {plan.status}
+                      </Badge>
+                      {plan.status === 'DRAFT' && (
+                        <Button size="sm" onClick={() => onStatusUpdate('SUBMITTED')}>
+                          <Send size={14} className="mr-2" />
+                          Submit for Review
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {activeSection === 'objectives' && (
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Cognitive Objective</h3>
+                    <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.cognitive_objective || 'Not specified'}</p>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Psychomotor Objective</h3>
+                    <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.psychomotor_objective || 'Not specified'}</p>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Affective Objective</h3>
+                    <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.affective_objective || 'Not specified'}</p>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Competencies</h3>
+                    <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.competencies || 'Not specified'}</p>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Life Skills & Values</h3>
+                    <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.life_skills_values || 'Not specified'}</p>
+                  </div>
                 </div>
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900 mb-2">Status</h3>
-                <div className="flex items-center gap-3">
-                  <Badge variant={plan.status === 'APPROVED' ? 'success' : plan.status === 'DRAFT' ? 'warning' : plan.status === 'SUBMITTED' ? 'info' : 'danger'}>
-                    {plan.status}
-                  </Badge>
-                  {plan.status === 'DRAFT' && (
-                    <Button size="sm" onClick={() => onStatusUpdate('SUBMITTED')}>
-                      <Send size={14} className="mr-2" />
-                      Submit for Review
-                    </Button>
+              )}
+
+              {activeSection === 'content' && (
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Instructional Materials</h3>
+                    <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.instructional_materials || 'Not specified'}</p>
+                  </div>
+                  {plan.lesson_steps && plan.lesson_steps.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold text-gray-900 mb-2">Lesson Steps</h3>
+                      <div className="space-y-3">
+                        {plan.lesson_steps.map((step: any, idx: number) => (
+                          <div key={step.id} className="p-4 border rounded-lg">
+                            <div className="flex justify-between mb-2">
+                              <span className="font-medium">Step {idx + 1}: {step.step_name}</span>
+                              <span className="text-sm text-gray-500">{step.duration}</span>
+                            </div>
+                            <div className="grid md:grid-cols-2 gap-4 text-sm">
+                              <div><span className="text-gray-500">Teacher Activity:</span> {step.teacher_activity}</div>
+                              <div><span className="text-gray-500">Learner Activity:</span> {step.learner_activity}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
-              </div>
+              )}
+
+              {activeSection === 'assessment' && (
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Evaluation Method</h3>
+                    <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.evaluation_method || 'Not specified'}</p>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Evaluation Task</h3>
+                    <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.evaluation_task || 'Not specified'}</p>
+                  </div>
+                </div>
+              )}
+
+              {activeSection === 'evaluation' && (
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Self Evaluation</h3>
+                    <div className="space-y-3">
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <span className="font-medium">What went well?</span>
+                        <p className="mt-1">{plan.self_eval_what_went_well || 'Not evaluated yet'}</p>
+                      </div>
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <span className="font-medium">Learners achieved objective</span>
+                        <p className="mt-1">{plan.self_eval_achieved_count || 0} out of {plan.class?.student_count || 'N/A'}</p>
+                      </div>
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <span className="font-medium">What needs to be improved?</span>
+                        <p className="mt-1">{plan.self_eval_improvements || 'Not evaluated yet'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           )}
 
-          {activeSection === 'objectives' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="font-semibold text-gray-900 mb-2">Cognitive Objective</h3>
-                <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.cognitive_objective || 'Not specified'}</p>
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900 mb-2">Psychomotor Objective</h3>
-                <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.psychomotor_objective || 'Not specified'}</p>
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900 mb-2">Affective Objective</h3>
-                <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.affective_objective || 'Not specified'}</p>
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900 mb-2">Competencies</h3>
-                <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.competencies || 'Not specified'}</p>
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900 mb-2">Life Skills & Values</h3>
-                <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.life_skills_values || 'Not specified'}</p>
-              </div>
-            </div>
-          )}
+          {/* Weekly/Termly Plan Views */}
+          {(type === 'weekly' || type === 'termly') && (
+            <>
+              {activeSection === 'overview' && (
+                <>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Plan Details</h3>
+                    <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
+                      <div><span className="text-sm text-gray-500">Class:</span> <span className="font-medium">{plan.class?.grade_name}</span></div>
+                      <div><span className="text-sm text-gray-500">Subject:</span> <span className="font-medium">{plan.subject?.name}</span></div>
+                      {plan.term && (
+                        <div><span className="text-sm text-gray-500">Term:</span> <span className="font-medium">{plan.term.term_name?.replace('_', ' ')} {plan.term.year}</span></div>
+                      )}
+                      <div><span className="text-sm text-gray-500">Status:</span> <Badge variant={plan.status === 'APPROVED' ? 'success' : plan.status === 'DRAFT' ? 'warning' : 'info'}>{plan.status}</Badge></div>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">General Objectives</h3>
+                    <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.general_objectives || 'Not specified'}</p>
+                  </div>
+                  {plan.status === 'DRAFT' && (
+                    <div className="flex justify-end">
+                      <Button onClick={() => onStatusUpdate('SUBMITTED')}>
+                        <Send size={14} className="mr-2" />
+                        Submit for Review
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
 
-          {activeSection === 'content' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="font-semibold text-gray-900 mb-2">Instructional Materials</h3>
-                <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.instructional_materials || 'Not specified'}</p>
-              </div>
-              {plan.lesson_steps && plan.lesson_steps.length > 0 && (
+              {activeSection === 'weeks' && type === 'weekly' && plan.weeks && (
                 <div>
-                  <h3 className="font-semibold text-gray-900 mb-2">Lesson Steps</h3>
-                  <div className="space-y-3">
-                    {plan.lesson_steps.map((step: any, idx: number) => (
-                      <div key={step.id} className="p-4 border rounded-lg">
-                        <div className="flex justify-between mb-2">
-                          <span className="font-medium">Step {idx + 1}: {step.step_name}</span>
-                          <span className="text-sm text-gray-500">{step.duration}</span>
+                  <h3 className="font-semibold text-gray-900 mb-4">Weekly Schedule</h3>
+                  <div className="space-y-4">
+                    {plan.weeks.map((week: any) => (
+                      <Card key={week.id} className="p-4">
+                        <div className="flex justify-between items-start mb-3">
+                          <h4 className="font-semibold text-indigo-700">Week {week.week_no}</h4>
+                          {week.week_start && week.week_end && (
+                            <span className="text-xs text-gray-500">
+                              {formatDate(week.week_start)} - {formatDate(week.week_end)}
+                            </span>
+                          )}
                         </div>
-                        <div className="grid md:grid-cols-2 gap-4 text-sm">
-                          <div><span className="text-gray-500">Teacher Activity:</span> {step.teacher_activity}</div>
-                          <div><span className="text-gray-500">Learner Activity:</span> {step.learner_activity}</div>
+                        <div className="space-y-2">
+                          <p><span className="font-medium">Topic:</span> {week.topic || '—'}</p>
+                          <p><span className="font-medium">Subtopics:</span> {week.subtopics || '—'}</p>
+                          <p><span className="font-medium">Learning Outcomes:</span> {week.learning_outcomes || '—'}</p>
+                          <p><span className="font-medium">Teaching Methods:</span> {week.teaching_methods || '—'}</p>
+                          <p><span className="font-medium">Resources:</span> {week.resources || '—'}</p>
+                          <p><span className="font-medium">Assessment:</span> {week.assessment || '—'}</p>
+                          {week.remarks && <p><span className="font-medium">Remarks:</span> {week.remarks}</p>}
                         </div>
-                      </div>
+                      </Card>
                     ))}
                   </div>
                 </div>
               )}
-            </div>
+
+              {activeSection === 'resources' && type === 'weekly' && (
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-2">Reference Materials</h3>
+                  <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.reference_materials || 'Not specified'}</p>
+                </div>
+              )}
+
+              {activeSection === 'details' && type === 'termly' && (
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-2">Reference Materials</h3>
+                  <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.reference_materials || 'Not specified'}</p>
+                </div>
+              )}
+
+              {activeSection === 'assessment' && type === 'termly' && (
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-2">Assessment Information</h3>
+                  <p className="text-gray-700">Assessment details will be added in weekly breakdowns</p>
+                </div>
+              )}
+            </>
           )}
 
-          {activeSection === 'assessment' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="font-semibold text-gray-900 mb-2">Evaluation Method</h3>
-                <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.evaluation_method || 'Not specified'}</p>
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900 mb-2">Evaluation Task</h3>
-                <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.evaluation_task || 'Not specified'}</p>
-              </div>
-            </div>
-          )}
+          {/* Yearly Plan Views */}
+          {type === 'yearly' && (
+            <>
+              {activeSection === 'overview' && (
+                <>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Plan Details</h3>
+                    <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
+                      <div><span className="text-sm text-gray-500">Academic Year:</span> <span className="font-medium">{plan.academic_year}</span></div>
+                      <div><span className="text-sm text-gray-500">Class:</span> <span className="font-medium">{plan.class?.grade_name}</span></div>
+                      <div><span className="text-sm text-gray-500">Subject:</span> <span className="font-medium">{plan.subject?.name}</span></div>
+                      <div><span className="text-sm text-gray-500">Status:</span> <Badge variant={plan.status === 'APPROVED' ? 'success' : plan.status === 'DRAFT' ? 'warning' : 'info'}>{plan.status}</Badge></div>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Course Overview</h3>
+                    <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.overview || 'Not specified'}</p>
+                  </div>
+                  {plan.status === 'DRAFT' && (
+                    <div className="flex justify-end">
+                      <Button onClick={() => onStatusUpdate('SUBMITTED')}>
+                        <Send size={14} className="mr-2" />
+                        Submit for Review
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
 
-          {activeSection === 'evaluation' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="font-semibold text-gray-900 mb-2">Self Evaluation</h3>
-                <div className="space-y-3">
-                  <div className="p-3 bg-gray-50 rounded-lg">
-                    <span className="font-medium">What went well?</span>
-                    <p className="mt-1">{plan.self_eval_what_went_well || 'Not evaluated yet'}</p>
-                  </div>
-                  <div className="p-3 bg-gray-50 rounded-lg">
-                    <span className="font-medium">Learners achieved objective</span>
-                    <p className="mt-1">{plan.self_eval_achieved_count || 0} out of {plan.class?.student_count || 'N/A'}</p>
-                  </div>
-                  <div className="p-3 bg-gray-50 rounded-lg">
-                    <span className="font-medium">What needs to be improved?</span>
-                    <p className="mt-1">{plan.self_eval_improvements || 'Not evaluated yet'}</p>
+              {activeSection === 'details' && (
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="font-semibold text-gray-900 mb-2">Resources</h3>
+                    <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.resources || 'Not specified'}</p>
                   </div>
                 </div>
-              </div>
-            </div>
+              )}
+
+              {activeSection === 'assessment' && (
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-2">Assessment Strategy</h3>
+                  <p className="text-gray-700 p-3 bg-gray-50 rounded-lg">{plan.assessment_strategy || 'Not specified'}</p>
+                </div>
+              )}
+            </>
           )}
         </div>
 

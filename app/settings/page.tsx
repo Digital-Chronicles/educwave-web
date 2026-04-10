@@ -812,7 +812,7 @@ export default function SettingsPage() {
                 </form>
 
                 <div className="mt-3 text-[11px] text-slate-400">
-                  If school loading fails, it&apos;s usually an RLS issue on <b>general_information</b>. Ensure the logged-in user can read their linked school.
+                  If school loading fails, it’s usually an RLS issue on <b>general_information</b>. Ensure the logged-in user can read their linked school.
                 </div>
               </div>
             </section>

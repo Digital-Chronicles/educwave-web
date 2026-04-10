@@ -18,6 +18,7 @@ import {
   X,
   ClipboardList,
   BarChart3,
+  Lock,
 } from 'lucide-react';
 
 type AppRole = 'ADMIN' | 'ACADEMIC' | 'FINANCE' | 'STUDENT' | 'PARENT';
@@ -178,6 +179,9 @@ function supaErrText(err: any) {
   return parts.join(' • ');
 }
 
+// Define which roles have access to finance
+const FINANCE_ACCESS_ROLES: AppRole[] = ['ADMIN', 'FINANCE'];
+
 export default function FinancePage() {
   const router = useRouter();
 
@@ -185,6 +189,7 @@ export default function FinancePage() {
   const [authChecking, setAuthChecking] = useState(true);
   const [loading, setLoading] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [accessDenied, setAccessDenied] = useState(false);
 
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [school, setSchool] = useState<SchoolRow | null>(null);
@@ -226,6 +231,11 @@ export default function FinancePage() {
   const [savingOtherFee, setSavingOtherFee] = useState(false);
 
   const schoolId = school?.id ?? null;
+
+  // Check if user has finance access
+  const hasFinanceAccess = useMemo(() => {
+    return profile && FINANCE_ACCESS_ROLES.includes(profile.role);
+  }, [profile]);
 
   // ----------------------------------------------------
   // Derived totals (✅ correct Outstanding)
@@ -327,7 +337,7 @@ export default function FinancePage() {
   }, [router]);
 
   // ----------------------------------------------------
-  // Load (school scoped)
+  // Load (school scoped) - only for users with finance access
   // ----------------------------------------------------
   useEffect(() => {
     if (authChecking) return;
@@ -356,6 +366,13 @@ export default function FinancePage() {
         if (!p) throw new Error('Profile not found.');
         const prof = p as ProfileRow;
         setProfile(prof);
+
+        // Check if user has finance access
+        if (!FINANCE_ACCESS_ROLES.includes(prof.role)) {
+          setAccessDenied(true);
+          setLoading(false);
+          return;
+        }
 
         if (!prof.school_id) {
           setSchool(null);
@@ -574,6 +591,10 @@ export default function FinancePage() {
   const handleSaveSchoolFee = async (e: FormEvent) => {
     e.preventDefault();
     if (!profile || !schoolId) return;
+    if (!hasFinanceAccess) {
+      setErrorMsg('You do not have permission to modify school fees.');
+      return;
+    }
 
     setSavingSchoolFee(true);
     setErrorMsg(null);
@@ -618,6 +639,10 @@ export default function FinancePage() {
   const handleSaveOtherFee = async (e: FormEvent) => {
     e.preventDefault();
     if (!profile || !schoolId) return;
+    if (!hasFinanceAccess) {
+      setErrorMsg('You do not have permission to modify other fees.');
+      return;
+    }
 
     setSavingOtherFee(true);
     setErrorMsg(null);
@@ -712,24 +737,59 @@ export default function FinancePage() {
         </button>
       </div>
 
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => router.push('/finance/management')}
-          className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
-        >
-          <ClipboardList className="w-4 h-4" />
-          Finance Management
-          <ArrowRight className="w-4 h-4" />
-        </button>
+      {hasFinanceAccess && (
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push('/finance/management')}
+            className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <ClipboardList className="w-4 h-4" />
+            Finance Management
+            <ArrowRight className="w-4 h-4" />
+          </button>
 
-        <button
-          onClick={() => router.push('/finance/stats')}
-          className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-        >
-          <TrendingUp className="w-4 h-4" />
-          Finance Stats
-          <ArrowRight className="w-4 h-4" />
-        </button>
+          <button
+            onClick={() => router.push('/finance/stats')}
+            className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+          >
+            <TrendingUp className="w-4 h-4" />
+            Finance Stats
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  // Access Denied Component
+  const AccessDenied = () => (
+    <div className="min-h-screen bg-gray-50">
+      <Navbar />
+      <div className="flex">
+        <AppShell />
+        <main className="flex-1 p-6">
+          <div className="max-w-3xl mx-auto bg-white rounded-xl shadow-sm border border-gray-200 p-8 text-center">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Lock className="w-8 h-8 text-red-600" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Access Denied</h3>
+            <p className="text-gray-600 mb-4">
+              You do not have permission to access the Finance module.
+            </p>
+            <p className="text-sm text-gray-500 mb-6">
+              This area is restricted to {FINANCE_ACCESS_ROLES.join(' and ')} roles only.
+            </p>
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Return to Dashboard
+            </button>
+            <p className="mt-4 text-xs text-gray-500">
+              Signed in as <span className="font-medium">{userEmail ?? '—'}</span> ({profile?.role ?? 'Unknown'})
+            </p>
+          </div>
+        </main>
       </div>
     </div>
   );
@@ -738,8 +798,8 @@ export default function FinancePage() {
   // Guards
   // ----------------------------------------------------
   const showLoading = authChecking || loading;
-  const showNoSchool = !showLoading && !!profile && !profile.school_id;
-  const canRenderApp = !showLoading && !!profile?.school_id && !!school;
+  const showNoSchool = !showLoading && !!profile && !profile.school_id && hasFinanceAccess;
+  const canRenderApp = !showLoading && !!profile?.school_id && !!school && hasFinanceAccess;
 
   if (showLoading) {
     return (
@@ -750,6 +810,10 @@ export default function FinancePage() {
         </div>
       </div>
     );
+  }
+
+  if (accessDenied) {
+    return <AccessDenied />;
   }
 
   if (showNoSchool) {
@@ -829,25 +893,27 @@ export default function FinancePage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => router.push('/finance/management')}
-                className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-xl hover:bg-gray-50"
-              >
-                <ClipboardList className="w-4 h-4" />
-                Manage
-                <ArrowRight className="w-4 h-4" />
-              </button>
+            {hasFinanceAccess && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => router.push('/finance/management')}
+                  className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-800 rounded-xl hover:bg-gray-50"
+                >
+                  <ClipboardList className="w-4 h-4" />
+                  Manage
+                  <ArrowRight className="w-4 h-4" />
+                </button>
 
-              <button
-                onClick={() => router.push('/finance/stats')}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700"
-              >
-                <BarChart3 className="w-4 h-4" />
-                Stats
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </div>
+                <button
+                  onClick={() => router.push('/finance/stats')}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700"
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  Stats
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="mt-5">
@@ -964,13 +1030,15 @@ export default function FinancePage() {
           <h3 className="text-lg font-semibold text-gray-900">School Fees (Per Grade)</h3>
           <p className="text-sm text-gray-500">Set tuition/hostel/breakfast/lunch fees for each class.</p>
         </div>
-        <button
-          onClick={() => setShowSchoolFeeModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700"
-        >
-          <Plus className="w-4 h-4" />
-          Add / Update Fees
-        </button>
+        {hasFinanceAccess && (
+          <button
+            onClick={() => setShowSchoolFeeModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700"
+          >
+            <Plus className="w-4 h-4" />
+            Add / Update Fees
+          </button>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -1022,13 +1090,15 @@ export default function FinancePage() {
           <h3 className="text-lg font-semibold text-gray-900">Other Fees (Per Grade)</h3>
           <p className="text-sm text-gray-500">Additional charges per class (unique by grade + type).</p>
         </div>
-        <button
-          onClick={() => setShowOtherFeeModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700"
-        >
-          <Plus className="w-4 h-4" />
-          Add / Update Other Fee
-        </button>
+        {hasFinanceAccess && (
+          <button
+            onClick={() => setShowOtherFeeModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700"
+          >
+            <Plus className="w-4 h-4" />
+            Add / Update Other Fee
+          </button>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
@@ -1225,41 +1295,43 @@ export default function FinancePage() {
                   <p className="text-gray-600">Fees setup and transactions for {school?.school_name}</p>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => router.push('/finance/management')}
-                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-xl hover:bg-gray-50"
-                  >
-                    <ClipboardList className="w-4 h-4" />
-                    Finance Management
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
+                {hasFinanceAccess && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => router.push('/finance/management')}
+                      className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-xl hover:bg-gray-50"
+                    >
+                      <ClipboardList className="w-4 h-4" />
+                      Finance Management
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
 
-                  <button
-                    onClick={() => router.push('/finance/stats')}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700"
-                  >
-                    <TrendingUp className="w-4 h-4" />
-                    Finance Stats
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
+                    <button
+                      onClick={() => router.push('/finance/stats')}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700"
+                    >
+                      <TrendingUp className="w-4 h-4" />
+                      Finance Stats
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
 
-                  <button
-                    onClick={() => setShowSchoolFeeModal(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-xl hover:bg-gray-50"
-                  >
-                    <Plus className="w-4 h-4" />
-                    School Fees
-                  </button>
+                    <button
+                      onClick={() => setShowSchoolFeeModal(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-xl hover:bg-gray-50"
+                    >
+                      <Plus className="w-4 h-4" />
+                      School Fees
+                    </button>
 
-                  <button
-                    onClick={() => setShowOtherFeeModal(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Other Fees
-                  </button>
-                </div>
+                    <button
+                      onClick={() => setShowOtherFeeModal(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm rounded-xl hover:bg-green-700"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Other Fees
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-1 border-b border-gray-200">
@@ -1287,7 +1359,7 @@ export default function FinancePage() {
       </div>
 
       {/* School Fee Modal */}
-      {showSchoolFeeModal && (
+      {showSchoolFeeModal && hasFinanceAccess && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-2xl w-full max-w-lg p-6 m-4">
             <div className="flex items-center justify-between mb-5">
@@ -1393,7 +1465,7 @@ export default function FinancePage() {
       )}
 
       {/* Other Fee Modal */}
-      {showOtherFeeModal && (
+      {showOtherFeeModal && hasFinanceAccess && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-2xl w-full max-w-lg p-6 m-4">
             <div className="flex items-center justify-between mb-5">

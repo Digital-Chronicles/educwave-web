@@ -1387,7 +1387,7 @@ export default function StudentsPage() {
             <Users className="h-7 w-7 text-white" />
           </div>
           <p className="mt-4 text-sm font-semibold text-slate-600 animate-pulse">Loading student registry…</p>
-          <p className="mt-2 text-xs text-slate-500">Fetching your school's student records</p>
+          <p className="mt-2 text-xs text-slate-500">Fetching your school&apos;s student records</p>
         </div>
       </div>
     );

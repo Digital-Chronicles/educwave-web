@@ -1863,6 +1863,15 @@ export default function AssessmentsPage() {
                 </div>
                 <div className="flex flex-wrap gap-3">
                   <Link
+                    href="/assessments/mark-sheet"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm rounded-xl hover:bg-gray-50 transition-all"
+                  >
+                    <FileText className="h-4 w-4" />
+                    Mark Sheet
+                  </Link>
+
+
+                  <Link
                     href="/assessments/marks/new"
                     className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm rounded-xl hover:bg-gray-50 transition-all"
                   >

@@ -1722,9 +1722,9 @@ export default function StudentReportPage() {
                           <p className="text-sm font-bold text-gray-900 mt-1">
                             {termLabel(selectedTerm)}
                           </p>
-                          <p className="text-xs text-gray-600">
+                          {/* <p className="text-xs text-gray-600">
                             {new Date().toLocaleDateString("en-GB")}
-                          </p>
+                          </p> */}
                         </div>
                         <div>
                           {selectedStudent.profile_picture_url ? (
@@ -1993,7 +1993,7 @@ export default function StudentReportPage() {
                       {/* Comments Section */}
                       <div className="space-y-4">
                         {/* Class Teacher */}
-                        <div className="border border-gray-200 rounded-lg p-2 pl-4 mb-10">
+                        <div className="border border-gray-200 rounded-lg p-2 pl-4 mb-0">
                           <div className="flex items-center justify-between mb-1">
                             <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
                               Class Teacher
@@ -2021,7 +2021,7 @@ export default function StudentReportPage() {
 
                         {/* Head Teacher */}
                         <div className="border border-gray-200 rounded-lg pl-4 p-2 bg-gray-50">
-                          <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center justify-between mb-0">
                             <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
                               Head Teacher
                             </p>
@@ -2044,33 +2044,36 @@ export default function StudentReportPage() {
                               Signature: ________________
                             </p>
                           </div>
+                           <p className="text-sm font-semibold text-green-800 text-center">
+                              Next Term Begins on {nextTermStartDate}
+                            </p>
                         </div>
 
                         {/* Next Term Begins */}
-                        {nextTermStartDate && (
+                        {/* {nextTermStartDate && (
                           <div className="border border-gray-200 rounded-lg p-3 bg-green-50">
                             <p className="text-sm font-semibold text-green-800 text-center">
                               Next Term Begins on {nextTermStartDate}
                             </p>
                           </div>
-                        )}
+                        )} */}
                       </div>
 
                       {/* Footer */}
                       <div className="pt-1 mt-1 border-t border-gray-200">
                         <div className="flex items-center justify-between text-xs text-gray-500">
                           <div>
-                            <span>
+                            {/* <span>
                               {school.website ||
                                 school.email ||
                                 "Official Report"}
-                            </span>
+                            </span> */}
                           </div>
                           <div className="text-right">
-                            <p>
+                            {/* <p>
                               Generated on{" "}
                               {new Date().toLocaleDateString("en-GB")}
-                            </p>
+                            </p> */}
                           </div>
                         </div>
                       </div>
@@ -2100,7 +2103,7 @@ function PrintCSS() {
       }
 
       .print-inner {
-        padding: 15mm 15mm 10mm 15mm;
+        padding: 5mm 12mm 8mm 12mm;
         box-sizing: border-box;
       }
 

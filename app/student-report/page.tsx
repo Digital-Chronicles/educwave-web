@@ -56,7 +56,6 @@ interface SchoolRow {
   school_badge?: string | null;
 }
 
-
 interface GradeRow {
   id: number;
   grade_name: string;
@@ -115,6 +114,7 @@ interface TeacherJoinRow {
   first_name: string | null;
   last_name: string | null;
 }
+
 interface TeacherInfo {
   registration_id: string;
   first_name: string | null;
@@ -184,7 +184,20 @@ function examTypeLabel(t: "BOT" | "MOT" | "EOT") {
   return t;
 }
 
-// UPDATED UNEB Grading System
+// Check if class is lower primary
+function isLowerPrimary(gradeName: string): boolean {
+  const lowerPrimaryGrades = [
+    'baby', 'baby class', 'top class', 'middle', 'middle class',
+    'p1', 'p.1', 'primary 1', 
+    'p2', 'p.2', 'primary 2',
+    'p3', 'p.3', 'primary 3'
+  ];
+  
+  const normalizedName = gradeName.toLowerCase().trim();
+  return lowerPrimaryGrades.some(grade => normalizedName.includes(grade));
+}
+
+// UNEB Grading System
 function unebSubjectGrade(pct: number): number {
   if (pct >= 95) return 1;
   if (pct >= 80) return 2;
@@ -209,15 +222,40 @@ function unebGradeText(g: number) {
   return "F9";
 }
 
-// UPDATED Division calculation
-function unebDivisionFromAggregate(agg: number, hasF9: boolean) {
-  if (hasF9) return "U";
-  if (agg >= 4 && agg <= 12) return "Division 1";
-  if (agg >= 13 && agg <= 24) return "Division 2";
-  if (agg >= 25 && agg <= 28) return "Division 3";
-  if (agg >= 29 && agg <= 32) return "Division 4";
-  if (agg >= 33 && agg <= 36) return "U";
-  return "U";
+// Division calculation with F9 demotion logic
+function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
+  // First determine the base division based on aggregate
+  let baseDivision = "";
+  
+  if (agg >= 4 && agg <= 12) {
+    baseDivision = "Division 1";
+  } else if (agg >= 13 && agg <= 24) {
+    baseDivision = "Division 2";
+  } else if (agg >= 25 && agg <= 28) {
+    baseDivision = "Division 3";
+  } else if (agg >= 29 && agg <= 32) {
+    baseDivision = "Division 4";
+  } else if (agg >= 33 && agg <= 36) {
+    baseDivision = "U";
+  } else {
+    baseDivision = "U";
+  }
+  
+  // Apply F9 demotion logic
+  if (hasF9) {
+    if (baseDivision === "Division 1") {
+      return "Division 2";
+    } else if (baseDivision === "Division 2") {
+      return "Division 3";
+    } else if (baseDivision === "Division 3") {
+      return "Division 4";
+    } else {
+      // Division 4 and U remain unchanged
+      return baseDivision;
+    }
+  }
+  
+  return baseDivision;
 }
 
 function gradePillClass(txt: string) {
@@ -790,94 +828,89 @@ export default function StudentReportPage() {
         : null,
     [students, selectedStudentId],
   );
-  // Replace the subject teacher loading useEffect with this simplified version:
 
-// Load subject teachers - Using the direct teacher_id field from subject table
-// Join approach with proper typing
-useEffect(() => {
-  if (!school?.id || !selectedGradeId) return;
+  // Load subject teachers - Using the direct teacher_id field from subject table
+  useEffect(() => {
+    if (!school?.id || !selectedGradeId) return;
 
-  (async () => {
-    try {
-      // Get all subjects for this grade with their teacher information
-      const { data, error } = await supabase
-        .from("subject")
-        .select(`
-          id,
-          name,
-          teacher_id,
-          teacher:teachers (
-            registration_id,
-            first_name,
-            last_name,
-            initials
-          )
-        `)
-        .eq("school_id", school.id)
-        .eq("grade_id", Number(selectedGradeId));
+    (async () => {
+      try {
+        // Get all subjects for this grade with their teacher information
+        const { data, error } = await supabase
+          .from("subject")
+          .select(`
+            id,
+            name,
+            teacher_id,
+            teacher:teachers (
+              registration_id,
+              first_name,
+              last_name,
+              initials
+            )
+          `)
+          .eq("school_id", school.id)
+          .eq("grade_id", Number(selectedGradeId));
 
-      if (error) {
-        console.error("Error loading subject teachers:", error);
-        return;
-      }
+        if (error) {
+          console.error("Error loading subject teachers:", error);
+          return;
+        }
 
-      console.log("Subjects with teachers:", data);
+        const map: Record<string, string> = {};
 
-      const map: Record<string, string> = {};
-
-      for (const subject of data || []) {
-        if (subject.teacher_id && subject.teacher) {
-          // Handle case where teacher might be an array or a single object
-          let teacherData: TeacherInfo | null = null;
-          
-          if (Array.isArray(subject.teacher) && subject.teacher.length > 0) {
-            const teacher = subject.teacher[0] as any;
-            teacherData = {
-              registration_id: teacher.registration_id,
-              first_name: teacher.first_name,
-              last_name: teacher.last_name,
-              initials: teacher.initials
-            };
-          } else if (subject.teacher && typeof subject.teacher === 'object') {
-            const teacher = subject.teacher as any;
-            teacherData = {
-              registration_id: teacher.registration_id,
-              first_name: teacher.first_name,
-              last_name: teacher.last_name,
-              initials: teacher.initials
-            };
-          }
-          
-          if (teacherData) {
-            // Build display name - prioritize initials, then first+last name
-            let displayName = "";
-            if (teacherData.initials && teacherData.initials.trim()) {
-              displayName = teacherData.initials.trim();
-            } else if (teacherData.first_name || teacherData.last_name) {
-              // Generate initials from first and last name if not available
-              const firstInitial = teacherData.first_name ? teacherData.first_name.charAt(0).toUpperCase() : "";
-              const lastInitial = teacherData.last_name ? teacherData.last_name.charAt(0).toUpperCase() : "";
-              displayName = `${firstInitial}${lastInitial}`;
-            } else {
-              displayName = "—";
+        for (const subject of data || []) {
+          if (subject.teacher_id && subject.teacher) {
+            // Handle case where teacher might be an array or a single object
+            let teacherData: TeacherInfo | null = null;
+            
+            if (Array.isArray(subject.teacher) && subject.teacher.length > 0) {
+              const teacher = subject.teacher[0] as any;
+              teacherData = {
+                registration_id: teacher.registration_id,
+                first_name: teacher.first_name,
+                last_name: teacher.last_name,
+                initials: teacher.initials
+              };
+            } else if (subject.teacher && typeof subject.teacher === 'object') {
+              const teacher = subject.teacher as any;
+              teacherData = {
+                registration_id: teacher.registration_id,
+                first_name: teacher.first_name,
+                last_name: teacher.last_name,
+                initials: teacher.initials
+              };
             }
             
-            map[subject.id] = displayName;
+            if (teacherData) {
+              // Build display name - prioritize initials, then first+last name
+              let displayName = "";
+              if (teacherData.initials && teacherData.initials.trim()) {
+                displayName = teacherData.initials.trim();
+              } else if (teacherData.first_name || teacherData.last_name) {
+                // Generate initials from first and last name if not available
+                const firstInitial = teacherData.first_name ? teacherData.first_name.charAt(0).toUpperCase() : "";
+                const lastInitial = teacherData.last_name ? teacherData.last_name.charAt(0).toUpperCase() : "";
+                displayName = `${firstInitial}${lastInitial}`;
+              } else {
+                displayName = "—";
+              }
+              
+              map[subject.id] = displayName;
+            } else {
+              map[subject.id] = "—";
+            }
           } else {
             map[subject.id] = "—";
           }
-        } else {
-          map[subject.id] = "—";
         }
+        
+        setSubjectTeacherById(map);
+      } catch (err) {
+        console.error("Error in subject teacher loading:", err);
       }
-      
-      setSubjectTeacherById(map);
-      console.log("Subject teacher initials map:", map);
-    } catch (err) {
-      console.error("Error in subject teacher loading:", err);
-    }
-  })();
-}, [school?.id, selectedGradeId]);
+    })();
+  }, [school?.id, selectedGradeId]);
 
   // Calculate possible scores by session and subject
   const possibleBySessionSubject = useMemo(() => {
@@ -950,7 +983,6 @@ useEffect(() => {
           pct,
         };
       });
-      console.log("subjectTeacherById", subjectTeacherById);
 
       const valid = perSession.filter((x) => x.possible > 0);
       const totalAll = valid.reduce((a, x) => a + x.total, 0);
@@ -991,7 +1023,7 @@ useEffect(() => {
     return { pct };
   }, [selectedStudent, subjectRowsForStudent]);
 
-  // Calculate aggregate and division - Updated to check for F9
+  // Calculate aggregate and division - Updated with F9 demotion logic
   const aggregateAndDivision = useMemo(() => {
     if (!selectedStudent)
       return {
@@ -1031,7 +1063,6 @@ useEffect(() => {
     return role === "ADMIN" || role === "TEACHER" || role === "ACADEMIC";
   }, [profile?.role]);
 
-  //Totals for marks, agg, positions
   // Calculate total marks for the selected student
   const totalMarks = useMemo(() => {
     if (!selectedStudent) return 0;
@@ -1153,7 +1184,6 @@ useEffect(() => {
   }, [selectedStudentId, subjectRowsForStudent]);
 
   // Auto-generate class and head teacher comments
-
   useEffect(() => {
     if (!selectedStudent) return;
 
@@ -1162,7 +1192,6 @@ useEffect(() => {
     const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
 
     setClassTeacherComment(getClassTeacherComment(pct, div, studentName));
-
     setHeadTeacherComment(getHeadTeacherComment(pct, div));
   }, [selectedStudentId, overall.pct, aggregateAndDivision.division]);
 
@@ -1263,10 +1292,6 @@ useEffect(() => {
     }
   };
 
-  const overallRemark = selectedStudent
-    ? getOverallRemark(overall.pct, aggregateAndDivision.division)
-    : "";
-
   // ============ RENDER STATES ============
   if (authChecking || loading) {
     return (
@@ -1309,8 +1334,6 @@ useEffect(() => {
     );
   }
 
-  // The rest of the render function remains the same...
-  // (keeping the existing JSX return statement)
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
@@ -1326,7 +1349,7 @@ useEffect(() => {
                     Student Report Card
                   </h1>
                   <p className="text-gray-600 mt-1">
-                    Academic performance report with UNEB aggregates
+                    Academic performance report
                   </p>
                 </div>
 
@@ -1559,17 +1582,25 @@ useEffect(() => {
                     </div>
                   </div>
 
-                  {/* Division */}
+                  {/* Division / Average Mark */}
                   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm text-gray-500">Division</p>
+                        <p className="text-sm text-gray-500">
+                          {selectedGrade && isLowerPrimary(selectedGrade.grade_name) ? 'Average Mark' : 'Division'}
+                        </p>
                         <div className="flex items-center gap-2 mt-1">
-                          <span
-                            className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold text-white ${aggregateAndDivision.pill}`}
-                          >
-                            {aggregateAndDivision.division}
-                          </span>
+                          {selectedGrade && isLowerPrimary(selectedGrade.grade_name) ? (
+                            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-blue-100 text-blue-700">
+                              {overall.pct.toFixed(1)}%
+                            </span>
+                          ) : (
+                            <span
+                              className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold text-white ${aggregateAndDivision.pill}`}
+                            >
+                              {aggregateAndDivision.division}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="p-2 bg-emerald-50 rounded-lg">
@@ -1578,26 +1609,28 @@ useEffect(() => {
                     </div>
                   </div>
 
-                  {/* Total Aggregates */}
-                  <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-gray-500">Aggregates</p>
-                        <div className="flex items-end gap-2 mt-1">
-                          <p className="text-2xl font-bold text-gray-900">
-                            {aggregateAndDivision.aggregate}
+                  {/* Total Aggregates - Only show for upper primary */}
+                  {(!selectedGrade || !isLowerPrimary(selectedGrade.grade_name)) && (
+                    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-gray-500">Aggregates</p>
+                          <div className="flex items-end gap-2 mt-1">
+                            <p className="text-2xl font-bold text-gray-900">
+                              {aggregateAndDivision.aggregate}
+                            </p>
+                            <p className="text-xs text-gray-600 mb-1">Total</p>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Best 4: {aggregateAndDivision.best4Grades.join(", ")}
                           </p>
-                          <p className="text-xs text-gray-600 mb-1">Total</p>
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Best 4: {aggregateAndDivision.best4Grades.join(", ")}
-                        </p>
-                      </div>
-                      <div className="p-2 bg-purple-50 rounded-lg">
-                        <Hash className="h-6 w-6 text-purple-600" />
+                        <div className="p-2 bg-purple-50 rounded-lg">
+                          <Hash className="h-6 w-6 text-purple-600" />
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Best Subject */}
                   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
@@ -1651,7 +1684,7 @@ useEffect(() => {
                 <div className="bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
                   <div className="print-page">
                     <div className="print-inner">
-                      {/* Header - Increased logo and photo sizes */}
+                      {/* Header */}
                       <div className="flex items-center justify-between mb-2 pb-4 border-b">
                         <div className="flex items-center gap-4">
                           {school.school_badge ? (
@@ -1709,12 +1742,11 @@ useEffect(() => {
                           )}
                         </div>
                       </div>
-                      {/* Student Info & Aggregates - Compact Row */}
+
+                      {/* Student Info */}
                       <div className="mb-0 border border-gray-200 rounded-lg bg-white">
                         <div className="flex items-center justify-between p-3 gap-4">
-                          {/* Student Info - Left Section */}
                           <div className="flex items-center gap-3 flex-1">
-                            {/* Student Details */}
                             <div className="flex items-center gap-4 flex-wrap">
                               <p className="text-sm font-bold text-gray-900">
                                 {fmtName(selectedStudent)}
@@ -1732,16 +1764,6 @@ useEffect(() => {
                                     {selectedStudent.lin_id || "—"}
                                   </span>
                                 </span>
-                                {/* {selectedStudent.date_of_birth && (
-                                  <span>
-                                    DOB:{" "}
-                                    <span className="font-semibold">
-                                      {formatDate(
-                                        selectedStudent.date_of_birth,
-                                      )}
-                                    </span>
-                                  </span>
-                                )} */}
                                 {selectedStudent.gender && (
                                   <span>
                                     Gender:{" "}
@@ -1756,7 +1778,6 @@ useEffect(() => {
                                     {selectedGrade?.grade_name || "—"}
                                   </span>
                                 </span>
-                               
                               </div>
                             </div>
                           </div>
@@ -1844,7 +1865,7 @@ useEffect(() => {
                               <table className="w-full text-xs border-collapse">
                                 <thead className="bg-gray-50 p-1 mt-1 ">
                                   <tr className="mt-0  pl-4">
-                                    <th className="border p-1   text-left">
+                                    <th className="border p-1 text-left">
                                       Subject
                                     </th>
                                     <th className="border p-1 text-center">
@@ -1898,23 +1919,18 @@ useEffect(() => {
                                         <td className="border p-1 font-medium">
                                           {r.subject_name}
                                         </td>
-
                                         <td className="border p-1 text-center">
                                           {full}
                                         </td>
-
                                         <td className="border p-1 text-center">
                                           {mark}
                                         </td>
-
                                         <td className="border p-1 text-center font-semibold">
                                           {gradeText}
                                         </td>
-
                                         <td className="border p-1 text-center font-semibold">
                                           {agg}
                                         </td>
-
                                         <td className="border p-1">
                                           <textarea
                                             value={
@@ -1935,7 +1951,6 @@ useEffect(() => {
                                             rows={1}
                                           />
                                         </td>
-
                                         <td className="border p-1 text-center">
                                           {subjectTeacherById[r.subject_id] ||
                                             "—"}
@@ -1950,23 +1965,22 @@ useEffect(() => {
                                     <td className="text-left p-2 font-semi-bold">
                                       Total
                                     </td>
-
                                     <td className="text-center">
                                       {subjectRowsForStudent.length * 100}
                                     </td>
-
                                     <td className="text-center">
                                       {totalMarks}
                                     </td>
-
                                     <td className="text-center">—</td>
-
                                     <td className="text-center">{totalAgg}</td>
-
                                     <td colSpan={2} className="text-right pr-4">
                                       Position: {rank} /{outOf}
-                                      &nbsp;&nbsp;|&nbsp;&nbsp; DIV:{" "}
-                                      {aggregateAndDivision.division}
+                                      &nbsp;&nbsp;|&nbsp;&nbsp;
+                                      {selectedGrade && isLowerPrimary(selectedGrade.grade_name) ? (
+                                        <>AVG: {overall.pct.toFixed(1)}%</>
+                                      ) : (
+                                        <>DIV: {aggregateAndDivision.division}</>
+                                      )}
                                     </td>
                                   </tr>
                                 </tfoot>
@@ -1975,9 +1989,10 @@ useEffect(() => {
                           );
                         })}
                       </div>
-                      {/* Comments Section - Class Teacher first, then Head Teacher */}
+
+                      {/* Comments Section */}
                       <div className="space-y-4">
-                        {/* Class Teacher - Now first */}
+                        {/* Class Teacher */}
                         <div className="border border-gray-200 rounded-lg p-2 pl-4 mb-10">
                           <div className="flex items-center justify-between mb-1">
                             <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
@@ -1997,7 +2012,6 @@ useEffect(() => {
                             placeholder="Class teacher's performance comment..."
                             rows={2}
                           />
-
                           <div className="mt-0 pt-0">
                             <p className="text-xs text-gray-500">
                               Signature: ________________
@@ -2005,7 +2019,7 @@ useEffect(() => {
                           </div>
                         </div>
 
-                        {/* Head Teacher - Now second */}
+                        {/* Head Teacher */}
                         <div className="border border-gray-200 rounded-lg pl-4 p-2 bg-gray-50">
                           <div className="flex items-center justify-between mb-2">
                             <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
@@ -2032,7 +2046,7 @@ useEffect(() => {
                           </div>
                         </div>
 
-                        {/* Next Term Begins - Automated from database */}
+                        {/* Next Term Begins */}
                         {nextTermStartDate && (
                           <div className="border border-gray-200 rounded-lg p-3 bg-green-50">
                             <p className="text-sm font-semibold text-green-800 text-center">
@@ -2042,7 +2056,7 @@ useEffect(() => {
                         )}
                       </div>
 
-                      {/* Footer - Removed "UNEB Grading System Applied" */}
+                      {/* Footer */}
                       <div className="pt-1 mt-1 border-t border-gray-200">
                         <div className="flex items-center justify-between text-xs text-gray-500">
                           <div>

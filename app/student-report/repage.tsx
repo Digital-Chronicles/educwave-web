@@ -9,6 +9,7 @@ import {
   Award,
   BookOpen,
   Download,
+  FileText,
   Printer,
   School,
   User,
@@ -147,6 +148,8 @@ interface PerformanceAnalysis {
   subjectsAboveAverage: number;
   subjectsBelowAverage: number;
 }
+// Create a lookup
+// Example, after fetching teachers and subjects
 
 // ============ HELPER FUNCTIONS ============
 const fmtName = (s: StudentRow) =>
@@ -176,7 +179,7 @@ function examTypeLabel(t: "BOT" | "MOT" | "EOT") {
   return t;
 }
 
-// UPDATED UNEB Grading System
+// UNEB Grading System
 function unebSubjectGrade(pct: number): number {
   if (pct >= 95) return 1;
   if (pct >= 80) return 2;
@@ -196,19 +199,16 @@ function unebGradeText(g: number) {
   if (g === 4) return "C4";
   if (g === 5) return "C5";
   if (g === 6) return "C6";
-  if (g === 7) return "P7";
-  if (g === 8) return "P8";
+  if (g === 7) return "F7";
+  if (g === 8) return "F8";
   return "F9";
 }
 
-// UPDATED Division calculation
-function unebDivisionFromAggregate(agg: number, hasF9: boolean) {
-  if (hasF9) return "U";
+function unebDivisionFromAggregate(agg: number) {
   if (agg >= 4 && agg <= 12) return "Division 1";
-  if (agg >= 13 && agg <= 24) return "Division 2";
-  if (agg >= 25 && agg <= 28) return "Division 3";
-  if (agg >= 29 && agg <= 32) return "Division 4";
-  if (agg >= 33 && agg <= 36) return "U";
+  if (agg >= 13 && agg <= 23) return "Division 2";
+  if (agg >= 24 && agg <= 29) return "Division 3";
+  if (agg >= 30 && agg <= 34) return "Division 4";
   return "U";
 }
 
@@ -271,15 +271,23 @@ function getSubjectComment(gradeText: string, pct: number): string {
     C3: ["Good effort.", "Satisfactory work.", "Average performance."],
     C4: ["Needs improvement.", "Can do better.", "Below average."],
     C5: ["Poor performance.", "Needs help.", "Very weak."],
-    C6: [
+   C6: [
       "Failed to meet expectations.",
       "Critical improvement needed.",
       "Poor.",
     ],
-    P7: ["More Effort Needed.", "No understanding shown.", "Very poor."],
-    P8: ["Complete failure.", "Zero grasp of concepts.", "Failed."],
+    F7: ["More Effort Needed.", "No understanding shown.", "Very poor."],
+    F8: ["Complete failure.", "Zero grasp of concepts.", "Failed."],
     F9: ["Aim higher.", "Wake Up.", "Try harder."],
   };
+
+  const gradeKey = gradeText.startsWith("D")
+    ? "D1"
+    : gradeText.startsWith("C")
+      ? "C3"
+      : gradeText.startsWith("P")
+        ? "C5"
+        : "F7";
 
   const comments =
     shortComments[gradeText as keyof typeof shortComments] || shortComments.C3;
@@ -368,12 +376,12 @@ function getOverallRemark(pct: number, division: string): string {
 
   const remarks: Record<string, string[]> = {
     excellent: [
-      `Excellent! ${division} with ${roundPct}% average.`,
+      `Excellent! Division ${division} with ${roundPct}% average.`,
       `Outstanding performance! ${division}.`,
       `Top performer! Excellent results across all subjects.`,
     ],
     very_good: [
-      `Very good! ${division} with ${roundPct}% average.`,
+      `Very good! ${division} division with ${roundPct}% average.`,
       `Strong performance! ${division}.`,
       `Well done! Good academic achievement.`,
     ],
@@ -461,44 +469,6 @@ function analyzePerformance(
   };
 }
 
-// Helper function to get next term date
-function getNextTermDate(currentTerm: TermExamRow | null, allTerms: TermExamRow[]): string | null {
-  if (!currentTerm || allTerms.length === 0) return null;
-  
-  const termOrder = { TERM_1: 1, TERM_2: 2, TERM_3: 3 };
-  const currentTermNumber = termOrder[currentTerm.term_name];
-  const currentYear = currentTerm.year;
-  
-  // Find next term
-  let nextTerm = null;
-  
-  // First check if there's a next term in the same year
-  if (currentTermNumber < 3) {
-    nextTerm = allTerms.find(
-      t => t.year === currentYear && termOrder[t.term_name] === currentTermNumber + 1
-    );
-  }
-  
-  // If not found, look for Term 1 of next year
-  if (!nextTerm) {
-    nextTerm = allTerms.find(
-      t => t.year === currentYear + 1 && t.term_name === "TERM_1"
-    );
-  }
-  
-  // If still not found, look for the earliest upcoming term
-  if (!nextTerm) {
-    const currentDate = new Date();
-    const futureTerms = allTerms.filter(t => new Date(t.start_date) > currentDate);
-    if (futureTerms.length > 0) {
-      futureTerms.sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime());
-      nextTerm = futureTerms[0];
-    }
-  }
-  
-  return nextTerm ? formatDate(nextTerm.start_date) : null;
-}
-
 // ============ MAIN COMPONENT ============
 export default function StudentReportPage() {
   const router = useRouter();
@@ -532,58 +502,6 @@ export default function StudentReportPage() {
   const [teachers, setTeachers] = useState<
     Array<{ id: string; first_name: string; last_name: string }>
   >([]);
-  const [nextTermStartDate, setNextTermStartDate] = useState<string | null>(null);
-
-  // Derived values - MUST be defined before any useEffect that uses them
-  const selectedTerm = useMemo(
-    () =>
-      selectedTermId
-        ? (terms.find((t) => t.id === Number(selectedTermId)) ?? null)
-        : null,
-    [terms, selectedTermId],
-  );
-
-  const selectedGrade = useMemo(
-    () =>
-      selectedGradeId
-        ? (grades.find((g) => g.id === Number(selectedGradeId)) ?? null)
-        : null,
-    [grades, selectedGradeId],
-  );
-
-  const subjectsForGrade = useMemo(() => {
-    if (!selectedGradeId) return [];
-    return subjects.filter((s) => s.grade_id === Number(selectedGradeId));
-  }, [subjects, selectedGradeId]);
-
-  const examSessionsForTerm = useMemo(() => {
-    if (!selectedTermId) return [];
-    return examSessions
-      .filter((es) => es.term_id === Number(selectedTermId))
-      .sort((a, b) => {
-        const ord = (x: ExamSessionRow["exam_type"]) =>
-          x === "BOT" ? 1 : x === "MOT" ? 2 : 3;
-        return ord(a.exam_type) - ord(b.exam_type);
-      });
-  }, [examSessions, selectedTermId]);
-
-  const canLoad = useMemo(
-    () => Boolean(school?.id && selectedGradeId && selectedTermId),
-    [school?.id, selectedGradeId, selectedTermId],
-  );
-
-  const sessions = examSessionsForTerm;
-  const noSessions = canLoad && sessions.length === 0;
-
-  // Calculate next term date when selected term changes - Now after selectedTerm is defined
-  useEffect(() => {
-    if (selectedTerm && terms.length > 0) {
-      const nextDate = getNextTermDate(selectedTerm, terms);
-      setNextTermStartDate(nextDate);
-    } else {
-      setNextTermStartDate(null);
-    }
-  }, [selectedTerm, terms]);
 
   // ============ EFFECTS ============
   // Auth check
@@ -679,6 +597,47 @@ export default function StudentReportPage() {
       }
     })();
   }, [authChecking]);
+
+  // Derived values
+  const selectedTerm = useMemo(
+    () =>
+      selectedTermId
+        ? (terms.find((t) => t.id === Number(selectedTermId)) ?? null)
+        : null,
+    [terms, selectedTermId],
+  );
+
+  const selectedGrade = useMemo(
+    () =>
+      selectedGradeId
+        ? (grades.find((g) => g.id === Number(selectedGradeId)) ?? null)
+        : null,
+    [grades, selectedGradeId],
+  );
+
+  const subjectsForGrade = useMemo(() => {
+    if (!selectedGradeId) return [];
+    return subjects.filter((s) => s.grade_id === Number(selectedGradeId));
+  }, [subjects, selectedGradeId]);
+
+  const examSessionsForTerm = useMemo(() => {
+    if (!selectedTermId) return [];
+    return examSessions
+      .filter((es) => es.term_id === Number(selectedTermId))
+      .sort((a, b) => {
+        const ord = (x: ExamSessionRow["exam_type"]) =>
+          x === "BOT" ? 1 : x === "MOT" ? 2 : 3;
+        return ord(a.exam_type) - ord(b.exam_type);
+      });
+  }, [examSessions, selectedTermId]);
+
+  const canLoad = useMemo(
+    () => Boolean(school?.id && selectedGradeId && selectedTermId),
+    [school?.id, selectedGradeId, selectedTermId],
+  );
+
+  const sessions = examSessionsForTerm;
+  const noSessions = canLoad && sessions.length === 0;
 
   // Load students, questions, results
   useEffect(() => {
@@ -782,108 +741,51 @@ export default function StudentReportPage() {
         : null,
     [students, selectedStudentId],
   );
-  // Replace the subject teacher loading useEffect with this simplified version:
 
-// Load subject teachers - Using the direct teacher_id field from subject table
-useEffect(() => {
-  if (!school?.id || !selectedGradeId) return;
+  // Load subject teachers
+  useEffect(() => {
+    if (!school?.id || !selectedGradeId) return;
 
-  (async () => {
-    try {
-      // Get all subjects for this grade with their teacher information
-      const { data, error } = await supabase
-        .from("subject")
-        .select(`
-          id,
-          name,
-          teacher_id,
-          teacher:teachers (
-            registration_id,
-            first_name,
-            last_name,
-            initials
-          )
-        `)
-        .eq("school_id", school.id)
-        .eq("grade_id", Number(selectedGradeId));
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("subject_teacher_assignments")
+          .select("*")
+          .limit(5);
 
-      if (error) {
-        console.error("Error loading subject teachers:", error);
-        return;
-      }
+        console.log("test assignments", data, error);
+        // const { data, error } = await supabase
+        //   .from("subject_teacher_assignments")
+        //   .select(
+        //     "subject_id, teacher_user_id, teachers:teacher_user_id ( initials, first_name, last_name )",
+        // //   )
+        //   .eq("school_id", school.id)
+        //   .eq("grade_id", Number(selectedGradeId));
 
-      console.log("Subjects with teachers:", data);
+        if (error) return;
 
-      const map: Record<string, string> = {};
+        const rows = (data ?? []) as SubjectTeacherAssignmentRow[];
+        console.log("assignments rows", rows);
 
-      for (const subject of data || []) {
-        if (subject.teacher && subject.teacher_id) {
-          const teacher = subject.teacher;
-          
-          // Build display name - prioritize initials, then first+last name
-          let displayName = "";
-          if (teacher.initials && teacher.initials.trim()) {
-            displayName = teacher.initials.trim();
-          } else if (teacher.first_name || teacher.last_name) {
-            // Generate initials from first and last name if not available
-            const firstInitial = teacher.first_name ? teacher.first_name.charAt(0).toUpperCase() : "";
-            const lastInitial = teacher.last_name ? teacher.last_name.charAt(0).toUpperCase() : "";
-            displayName = `${firstInitial}${lastInitial}`;
-          } else {
-            displayName = "—";
+        const map: Record<string, string> = {};
+
+        for (const r of rows) {
+          const teacher = Array.isArray(r.teachers)
+            ? r.teachers[0]
+            : r.teachers;
+
+          if (teacher) {
+            map[r.subject_id] = teacherDisplayName(teacher);
           }
-          
-          map[subject.id] = displayName;
-        } else {
-          map[subject.id] = "—";
         }
+        setSubjectTeacherById(map);
+      } catch {
+        // ignore
       }
-      
-      setSubjectTeacherById(map);
-      console.log("Subject teacher initials map:", map);
-    } catch (err) {
-      console.error("Error in subject teacher loading:", err);
-    }
-  })();
-}, [school?.id, selectedGradeId]);
+    })();
+  }, [school?.id, selectedGradeId]);
 
-//   // Load subject teachers
-//   useEffect(() => {
-//     if (!school?.id || !selectedGradeId) return;
-
-//     (async () => {
-//       try {
-//         const { data, error } = await supabase
-//           .from("subject_teacher_assignments")
-//           .select("*")
-//           .limit(5);
-
-//         console.log("test assignments", data, error);
-
-//         if (error) return;
-
-//         const rows = (data ?? []) as SubjectTeacherAssignmentRow[];
-//         console.log("assignments rows", rows);
-
-//         const map: Record<string, string> = {};
-
-//         for (const r of rows) {
-//           const teacher = Array.isArray(r.teachers)
-//             ? r.teachers[0]
-//             : r.teachers;
-
-//           if (teacher) {
-//             map[r.subject_id] = teacherDisplayName(teacher);
-//           }
-//         }
-//         setSubjectTeacherById(map);
-//       } catch {
-//         // ignore
-//       }
-//     })();
-//   }, [school?.id, selectedGradeId]);
-
-//   console.log("subjectTeacherById", subjectTeacherById);
+  console.log("subjectTeacherById", subjectTeacherById);
 
   // Calculate possible scores by session and subject
   const possibleBySessionSubject = useMemo(() => {
@@ -997,7 +899,7 @@ useEffect(() => {
     return { pct };
   }, [selectedStudent, subjectRowsForStudent]);
 
-  // Calculate aggregate and division - Updated to check for F9
+  // Calculate aggregate and division
   const aggregateAndDivision = useMemo(() => {
     if (!selectedStudent)
       return {
@@ -1013,10 +915,9 @@ useEffect(() => {
       .map((s) => s.unebGrade)
       .sort((a, b) => a - b);
 
-    const hasF9 = gradesArr.includes(9);
     const best4 = gradesArr.slice(0, 4);
     const aggregate = best4.reduce((a, g) => a + g, 0);
-    const division = unebDivisionFromAggregate(aggregate, hasF9);
+    const division = unebDivisionFromAggregate(aggregate);
 
     return {
       aggregate,
@@ -1315,13 +1216,12 @@ useEffect(() => {
     );
   }
 
-  // The rest of the render function remains the same...
-  // (keeping the existing JSX return statement)
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
       <div className="flex">
         <AppShell />
+
         <main className="flex-1 p-4 md:p-6">
           <div className="max-w-7xl mx-auto">
             {/* Header */}
@@ -1657,24 +1557,24 @@ useEffect(() => {
                 <div className="bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
                   <div className="print-page">
                     <div className="print-inner">
-                      {/* Header - Increased logo and photo sizes */}
+                      {/* Header */}
                       <div className="flex items-center justify-between mb-2 pb-4 border-b">
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-3">
                           {school.school_badge ? (
                             <img
                               src={school.school_badge}
                               alt="School"
-                              width={80}
-                              height={80}
+                              width={48}
+                              height={48}
                               className="object-contain"
                             />
                           ) : (
-                            <div className="h-20 w-20 rounded-lg bg-blue-100 flex items-center justify-center">
-                              <School className="h-10 w-10 text-blue-600" />
+                            <div className="h-12 w-12 rounded-lg bg-blue-100 flex items-center justify-center">
+                              <School className="h-6 w-6 text-blue-600" />
                             </div>
                           )}
                           <div>
-                            <h2 className="text-xl font-bold text-gray-900">
+                            <h2 className="text-lg font-bold text-gray-900">
                               {school.school_name}
                             </h2>
                             <p className="text-xs text-gray-600">
@@ -1701,7 +1601,7 @@ useEffect(() => {
                         </div>
                         <div>
                           {selectedStudent.profile_picture_url ? (
-                            <div className="w-20 h-20 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0">
+                            <div className="w-10 h-10 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0">
                               <img
                                 src={selectedStudent.profile_picture_url}
                                 alt="Student"
@@ -1709,8 +1609,8 @@ useEffect(() => {
                               />
                             </div>
                           ) : (
-                            <div className="w-20 h-20 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center flex-shrink-0">
-                              <User className="h-10 w-10 text-gray-400" />
+                            <div className="w-10 h-10 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center flex-shrink-0">
+                              <User className="h-5 w-5 text-gray-400" />
                             </div>
                           )}
                         </div>
@@ -1720,6 +1620,8 @@ useEffect(() => {
                         <div className="flex items-center justify-between p-3 gap-4">
                           {/* Student Info - Left Section */}
                           <div className="flex items-center gap-3 flex-1">
+                            {/* Avatar */}
+
                             {/* Student Details */}
                             <div className="flex items-center gap-4 flex-wrap">
                               <p className="text-sm font-bold text-gray-900">
@@ -1766,13 +1668,45 @@ useEffect(() => {
                               </div>
                             </div>
                           </div>
+
+                          {/* Divider */}
+                          {/* <div className="w-px h-8 bg-gray-200"></div> */}
+
+                          {/* Academic Summary - Right Section */}
+                          {/* <div className="flex items-center gap-6">
+                            {/* Overall Percentage */}
+                            {/* <div className="text-center">
+                              <p className="text-xs text-gray-500">Overall %</p>
+                              <p className="text-lg font-bold text-gray-900">
+                                {overall.pct.toFixed(1)}%
+                              </p>
+                            </div> */}
+
+                            {/* Division */}
+                            {/* <div className="text-center">
+                              <p className="text-xs text-gray-500">Division</p>
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold text-white ${aggregateAndDivision.pill}`}
+                              >
+                                {aggregateAndDivision.division}
+                              </span>
+                            </div> */}
+
+                            {/* Total Aggregate */}
+                            {/* <div className="text-center">
+                              <p className="text-xs text-gray-500">Aggregate</p>
+                              <p className="text-lg font-bold text-gray-900">
+                                {aggregateAndDivision.aggregate}
+                              </p>
+                            </div>
+                          </div> */} 
                         </div>
                       </div>
 
                       {/* Subjects Table */}
                       <div className="mb-2 space-y-1">
                         {sessions.map((sess) => {
-                          // TOTAL AGG PER SESSION
+                          // ✅ TOTAL AGG PER SESSION
                           const totalAgg = subjectRowsForStudent.reduce(
                             (acc, r) => {
                               const ps = r.perSession.find(
@@ -1787,7 +1721,7 @@ useEffect(() => {
                             0,
                           );
 
-                          // TOTAL MARKS PER SESSION
+                          // ✅ TOTAL MARKS PER SESSION
                           const totalMarks = subjectRowsForStudent.reduce(
                             (acc, r) => {
                               const ps = r.perSession.find(
@@ -1981,9 +1915,36 @@ useEffect(() => {
                           );
                         })}
                       </div>
-                      {/* Comments Section - Class Teacher first, then Head Teacher */}
+                      {/* Comments Section */}
                       <div className="space-y-4">
-                        {/* Class Teacher - Now first */}
+                        {/* Head Teacher */}
+                        <div className="border border-gray-200 rounded-lg pl-4 p-2 bg-gray-50">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                              Head Teacher
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              Official Comment
+                            </p>
+                          </div>
+                          <textarea
+                            value={headTeacherComment}
+                            onChange={(e) =>
+                              setHeadTeacherComment(e.target.value)
+                            }
+                            disabled={!isEditing}
+                            className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
+                            placeholder="Head teacher's official comment..."
+                            rows={2}
+                          />
+                          <div className="mt-2">
+                            <p className="text-xs text-gray-500">
+                              Signature: ________________
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Class Teacher */}
                         <div className="border border-gray-200 rounded-lg p-2 pl-4 mb-10">
                           <div className="flex items-center justify-between mb-1">
                             <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
@@ -2011,44 +1972,25 @@ useEffect(() => {
                           </div>
                         </div>
 
-                        {/* Head Teacher - Now second */}
-                        <div className="border border-gray-200 rounded-lg pl-4 p-2 bg-gray-50">
-                          <div className="flex items-center justify-between mb-2">
-                            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                              Head Teacher
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              Official Comment
-                            </p>
+                        {/* General Remarks
+                        <div className="border border-gray-200 rounded-lg p-2  bg-blue-50">
+                          <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-0">
+                            Overall Remarks
+                          </p>
+                          <p className="text-sm font-medium text-gray-800">
+                            {overallRemark}
+                          </p>
+                          <div className="mt-3 flex items-center justify-between text-xs text-gray-600">
+                            <span>
+                              Aggregate: {aggregateAndDivision.aggregate} |
+                               : {aggregateAndDivision.division}
+                            </span>
+                            <span>Average: {overall.pct.toFixed(1)}%</span>
                           </div>
-                          <textarea
-                            value={headTeacherComment}
-                            onChange={(e) =>
-                              setHeadTeacherComment(e.target.value)
-                            }
-                            disabled={!isEditing}
-                            className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
-                            placeholder="Head teacher's official comment..."
-                            rows={2}
-                          />
-                          <div className="mt-2">
-                            <p className="text-xs text-gray-500">
-                              Signature: ________________
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Next Term Begins - Automated from database */}
-                        {nextTermStartDate && (
-                          <div className="border border-gray-200 rounded-lg p-3 bg-green-50">
-                            <p className="text-sm font-semibold text-green-800 text-center">
-                              Next Term Begins on {nextTermStartDate}
-                            </p>
-                          </div>
-                        )}
+                        </div> */}
                       </div>
 
-                      {/* Footer - Removed "UNEB Grading System Applied" */}
+                      {/* Footer */}
                       <div className="pt-1 mt-1 border-t border-gray-200">
                         <div className="flex items-center justify-between text-xs text-gray-500">
                           <div>
@@ -2063,6 +2005,7 @@ useEffect(() => {
                               Generated on{" "}
                               {new Date().toLocaleDateString("en-GB")}
                             </p>
+                            <p className="mt-1">UNEB Grading System Applied</p>
                           </div>
                         </div>
                       </div>

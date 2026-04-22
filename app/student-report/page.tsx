@@ -1738,7 +1738,7 @@ useEffect(() => {
                                     {selectedStudent.lin_id || "—"}
                                   </span>
                                 </span>
-                                {selectedStudent.date_of_birth && (
+                                {/* {selectedStudent.date_of_birth && (
                                   <span>
                                     DOB:{" "}
                                     <span className="font-semibold">
@@ -1747,7 +1747,7 @@ useEffect(() => {
                                       )}
                                     </span>
                                   </span>
-                                )}
+                                )} */}
                                 {selectedStudent.gender && (
                                   <span>
                                     Gender:{" "}

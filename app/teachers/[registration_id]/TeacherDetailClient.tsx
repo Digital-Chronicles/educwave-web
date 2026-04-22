@@ -67,6 +67,7 @@ interface TeacherRow {
   created_at?: string | null;
   email?: string | null;
 }
+// Add this to your types section (around line 50-70)
 
 // Raw type from Supabase (arrays for relations)
 interface SubjectRowRaw {

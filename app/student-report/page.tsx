@@ -26,6 +26,7 @@ import {
   AlertCircle,
   CheckCircle,
   XCircle,
+  FileText,
 } from "lucide-react";
 
 // ============ TYPES ============
@@ -54,6 +55,7 @@ interface SchoolRow {
   website?: string | null;
   school_badge?: string | null;
 }
+
 
 interface GradeRow {
   id: number;
@@ -112,6 +114,12 @@ interface TeacherJoinRow {
   initials: string | null;
   first_name: string | null;
   last_name: string | null;
+}
+interface TeacherInfo {
+  registration_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  initials: string | null;
 }
 
 interface SubjectTeacherAssignmentRow {
@@ -785,6 +793,7 @@ export default function StudentReportPage() {
   // Replace the subject teacher loading useEffect with this simplified version:
 
 // Load subject teachers - Using the direct teacher_id field from subject table
+// Join approach with proper typing
 useEffect(() => {
   if (!school?.id || !selectedGradeId) return;
 
@@ -817,23 +826,46 @@ useEffect(() => {
       const map: Record<string, string> = {};
 
       for (const subject of data || []) {
-        if (subject.teacher && subject.teacher_id) {
-          const teacher = subject.teacher;
+        if (subject.teacher_id && subject.teacher) {
+          // Handle case where teacher might be an array or a single object
+          let teacherData: TeacherInfo | null = null;
           
-          // Build display name - prioritize initials, then first+last name
-          let displayName = "";
-          if (teacher.initials && teacher.initials.trim()) {
-            displayName = teacher.initials.trim();
-          } else if (teacher.first_name || teacher.last_name) {
-            // Generate initials from first and last name if not available
-            const firstInitial = teacher.first_name ? teacher.first_name.charAt(0).toUpperCase() : "";
-            const lastInitial = teacher.last_name ? teacher.last_name.charAt(0).toUpperCase() : "";
-            displayName = `${firstInitial}${lastInitial}`;
-          } else {
-            displayName = "—";
+          if (Array.isArray(subject.teacher) && subject.teacher.length > 0) {
+            const teacher = subject.teacher[0] as any;
+            teacherData = {
+              registration_id: teacher.registration_id,
+              first_name: teacher.first_name,
+              last_name: teacher.last_name,
+              initials: teacher.initials
+            };
+          } else if (subject.teacher && typeof subject.teacher === 'object') {
+            const teacher = subject.teacher as any;
+            teacherData = {
+              registration_id: teacher.registration_id,
+              first_name: teacher.first_name,
+              last_name: teacher.last_name,
+              initials: teacher.initials
+            };
           }
           
-          map[subject.id] = displayName;
+          if (teacherData) {
+            // Build display name - prioritize initials, then first+last name
+            let displayName = "";
+            if (teacherData.initials && teacherData.initials.trim()) {
+              displayName = teacherData.initials.trim();
+            } else if (teacherData.first_name || teacherData.last_name) {
+              // Generate initials from first and last name if not available
+              const firstInitial = teacherData.first_name ? teacherData.first_name.charAt(0).toUpperCase() : "";
+              const lastInitial = teacherData.last_name ? teacherData.last_name.charAt(0).toUpperCase() : "";
+              displayName = `${firstInitial}${lastInitial}`;
+            } else {
+              displayName = "—";
+            }
+            
+            map[subject.id] = displayName;
+          } else {
+            map[subject.id] = "—";
+          }
         } else {
           map[subject.id] = "—";
         }
@@ -846,44 +878,6 @@ useEffect(() => {
     }
   })();
 }, [school?.id, selectedGradeId]);
-
-//   // Load subject teachers
-//   useEffect(() => {
-//     if (!school?.id || !selectedGradeId) return;
-
-//     (async () => {
-//       try {
-//         const { data, error } = await supabase
-//           .from("subject_teacher_assignments")
-//           .select("*")
-//           .limit(5);
-
-//         console.log("test assignments", data, error);
-
-//         if (error) return;
-
-//         const rows = (data ?? []) as SubjectTeacherAssignmentRow[];
-//         console.log("assignments rows", rows);
-
-//         const map: Record<string, string> = {};
-
-//         for (const r of rows) {
-//           const teacher = Array.isArray(r.teachers)
-//             ? r.teachers[0]
-//             : r.teachers;
-
-//           if (teacher) {
-//             map[r.subject_id] = teacherDisplayName(teacher);
-//           }
-//         }
-//         setSubjectTeacherById(map);
-//       } catch {
-//         // ignore
-//       }
-//     })();
-//   }, [school?.id, selectedGradeId]);
-
-//   console.log("subjectTeacherById", subjectTeacherById);
 
   // Calculate possible scores by session and subject
   const possibleBySessionSubject = useMemo(() => {

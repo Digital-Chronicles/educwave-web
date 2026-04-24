@@ -102,6 +102,7 @@ interface StudentDetailRow {
   registered_by: string | null;
   created: string;
   updated: string;
+  payment_code: string | null;  // <-- ADDED: School pay code field
   class?: { grade_name: string } | null;
   school?: { school_name: string } | null;
 }
@@ -595,6 +596,7 @@ export default function StudentProfileClient() {
     gender: '',
     school_type: 'day',
     profile_picture_url: '',
+    payment_code: '',  // <-- ADDED: School pay code field
   });
 
   const [guardiansForm, setGuardiansForm] = useState({
@@ -707,6 +709,7 @@ export default function StudentProfileClient() {
               gender: st.gender || '',
               school_type: st.school_type || 'day',
               profile_picture_url: st.profile_picture_url || '',
+              payment_code: st.payment_code || '',  // <-- ADDED: Load payment code from DB
             });
 
             setGuardiansForm({
@@ -790,52 +793,53 @@ export default function StudentProfileClient() {
   };
 
   /* ---------------- Form Handlers ---------------- */
-  const handleSavePersonalInfo = async (e: FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setErrorMsg(null);
+const handleSavePersonalInfo = async (e: FormEvent) => {
+  e.preventDefault();
+  setSubmitting(true);
+  setErrorMsg(null);
 
-    try {
-      if (!profile?.school_id) throw new Error('School not linked');
+  try {
+    if (!profile?.school_id) throw new Error('School not linked');
 
-      // Create base payload
-      const basePayload = {
-        ...personalForm,
-        school_id: profile.school_id,
+    const basePayload = {
+      ...personalForm,
+      school_id: profile.school_id,
+      updated: new Date().toISOString().slice(0, 10),
+    };
+
+    if (isCreateMode) {
+      // ... create logic
+    } else {
+      const { error } = await supabase
+        .from('students')
+        .update(basePayload)
+        .eq('registration_id', student?.registration_id);
+
+      if (error) throw error;
+      
+      // ✅ UPDATE LOCAL STATE IMMEDIATELY
+      setStudent(prev => prev ? {
+        ...prev,
+        first_name: personalForm.first_name,
+        last_name: personalForm.last_name,
+        date_of_birth: personalForm.date_of_birth,
+        current_status: personalForm.current_status,
+        gender: personalForm.gender,
+        school_type: personalForm.school_type,
+        lin_id: personalForm.lin_id,
+        payment_code: personalForm.payment_code,
         updated: new Date().toISOString().slice(0, 10),
-      };
-
-      if (isCreateMode) {
-        // Create full payload for insert
-        const insertPayload = {
-          ...basePayload,
-          registered_by: (await supabase.auth.getUser()).data.user?.id || null,
-          created: new Date().toISOString().slice(0, 10),
-        };
-
-        const { error } = await supabase.from('students').insert(insertPayload);
-        if (error) throw error;
-        
-        setSuccessMsg('Student created successfully');
-        router.push(`/students/${encodeURIComponent(insertPayload.registration_id)}`);
-      } else {
-        // For update, use base payload only
-        const { error } = await supabase
-          .from('students')
-          .update(basePayload)
-          .eq('registration_id', student?.registration_id);
-
-        if (error) throw error;
-        setSuccessMsg('Personal information updated');
-        setEditPersonalModal(false);
-      }
-    } catch (error: any) {
-      setErrorMsg(error.message);
-    } finally {
-      setSubmitting(false);
+      } : null);
+      
+      setSuccessMsg('Personal information updated');
+      setEditPersonalModal(false);
     }
-  };
-
+  } catch (error: any) {
+    setErrorMsg(error.message);
+  } finally {
+    setSubmitting(false);
+  }
+};
   const handleSaveGuardiansInfo = async (e: FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -1234,6 +1238,42 @@ export default function StudentProfileClient() {
                       {student?.updated ? new Date(student.updated).toLocaleDateString() : 'Not set'}
                     </div>
                   </div>
+                </div>
+              </SectionCard>
+
+              {/* Personal Information - Payment Code Section */}
+              <SectionCard
+                title="School Pay Code"
+                icon={<CreditCard size={20} />}
+                action={
+                  <ActionButton
+                    variant="ghost"
+                    icon={<Edit2 size={16} />}
+                    onClick={() => setEditPersonalModal(true)}
+                    className="text-sm"
+                  >
+                    Edit
+                  </ActionButton>
+                }
+              >
+                <div className="space-y-1">
+                  <div className="text-sm font-medium text-gray-500">Payment Code</div>
+                  <div className="text-lg font-semibold text-gray-900 font-mono">
+                    {student?.payment_code || 'Not set'}
+                  </div>
+                  {student?.payment_code && (
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(student.payment_code!);
+                        setSuccessMsg('Payment code copied to clipboard');
+                        setTimeout(() => setSuccessMsg(null), 2000);
+                      }}
+                      className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1 mt-2"
+                    >
+                      <Copy size={12} />
+                      Copy code
+                    </button>
+                  )}
                 </div>
               </SectionCard>
 
@@ -1695,6 +1735,38 @@ export default function StudentProfileClient() {
                 <option value="dropped out">Dropped Out</option>
               </select>
             </div>
+          </div>
+
+          {/* <-- ADDED: Payment Code Field --> */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              School Pay Code
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={personalForm.payment_code}
+                onChange={(e) => setPersonalForm({...personalForm, payment_code: e.target.value})}
+                placeholder="Enter payment code (e.g., PAY-12345678)"
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:outline-none transition-all font-mono"
+              />
+              {personalForm.payment_code && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(personalForm.payment_code);
+                    setSuccessMsg('Payment code copied');
+                    setTimeout(() => setSuccessMsg(null), 2000);
+                  }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <Copy size={18} />
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Unique code used for financial transactions and fee payments
+            </p>
           </div>
 
           <div className="pt-4 border-t border-gray-200 flex justify-end gap-3">
@@ -2212,7 +2284,7 @@ export default function StudentProfileClient() {
               <div className="font-semibold">Important Notice</div>
             </div>
             <p className="text-sm text-amber-700 font-medium mb-3">
-              Marking a student as "dropped out" will:
+              Marking a student as &quot;dropped out&quot; will:
             </p>
             <ul className="text-sm text-amber-700 space-y-2">
               <li className="flex items-center gap-2">

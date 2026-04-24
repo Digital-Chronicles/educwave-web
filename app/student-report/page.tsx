@@ -27,6 +27,7 @@ import {
   CheckCircle,
   XCircle,
   FileText,
+  Copy,
 } from "lucide-react";
 
 // ============ TYPES ============
@@ -90,6 +91,7 @@ interface StudentRow {
   date_of_birth?: string | null;
   gender?: string | null;
   profile_picture_url?: string | null;
+  payment_code: string | null;  // <-- ADDED: Payment code field
 }
 
 interface QuestionRow {
@@ -325,16 +327,16 @@ function getSubjectComment(gradeText: string, pct: number): string {
     ],
     D2: ["Very good.", "Strong performance.", "Well done."],
     C3: ["Good effort.", "Satisfactory work.", "Average performance."],
-    C4: ["Needs improvement.", "Can do better.", "Below average."],
-    C5: ["Do better.", "Needs help.", "Very weak."],
+    C4: ["Needs improvement.", "Can do better.", "Add more energy."],
+    C5: ["Do better.", "Needs help.", "Aim higher."],
     C6: [
       "Failed to meet expectations.",
       "Critical improvement needed.",
       "More effort.",
     ],
-    P7: ["More Effort Needed.", "No understanding shown.", "Very poor."],
-    P8: ["More Effort.", "Zero grasp of concepts.", "Improve."],
-    F9: ["Aim higher.", "Wake Up.", "Try harder."],
+    P7: ["More Effort Needed.", "Work harder.", "Read harder."],
+    P8: ["More Effort.", "Improve .", "Improve."],
+    F9: ["Aim higher.", "Next time.", "Try harder."],
   };
 
   const comments =
@@ -373,8 +375,8 @@ function getClassTeacherComment(
     ],
     poor: [
       `${studentName} failed to meet minimum standards. .`,
-      `Very poor performance, immediate intervention needed. ${division}.`,
-      `Unsatisfactory results across subjects. ${division}.`,
+      `Fair  performance, immediate intervention needed. ${division}.`,
+      `Improvement needed across subjects. ${division}.`,
     ],
   };
 
@@ -769,11 +771,11 @@ export default function StudentReportPage() {
         const termId = Number(selectedTermId);
         const sessionIds = examSessionsForTerm.map((s) => s.id);
 
-        // Load students
+        // Load students - ADDED payment_code to select
         const studentsRes = await supabase
           .from("students")
           .select(
-            "registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url",
+            "registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code",
           )
           .eq("school_id", school.id)
           .eq("current_grade_id", gradeId)
@@ -1298,7 +1300,7 @@ export default function StudentReportPage() {
         supabase
           .from("students")
           .select(
-            "registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url",
+            "registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code",
           )
           .eq("school_id", school.id)
           .eq("current_grade_id", gradeId)
@@ -1344,6 +1346,14 @@ export default function StudentReportPage() {
       setErrorMsg("Refresh failed: " + e.message);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  // Copy payment code to clipboard
+  const copyPaymentCode = () => {
+    if (selectedStudent?.payment_code) {
+      navigator.clipboard.writeText(selectedStudent.payment_code);
+      tinyToast("Payment code copied to clipboard!");
     }
   };
 
@@ -1623,7 +1633,7 @@ export default function StudentReportPage() {
               </div>
             ) : (
               <div className="space-y-6">
-                {/* Performance Summary Cards - Updated for Lower Primary */}
+                {/* Performance Summary Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   {/* Overall Percentage */}
                   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
@@ -1640,7 +1650,7 @@ export default function StudentReportPage() {
                     </div>
                   </div>
 
-                  {/* Division / Average Mark - Adjusted for Lower Primary */}
+                  {/* Division / Average Mark */}
                   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                     <div className="flex items-center justify-between">
                       <div>
@@ -1744,7 +1754,7 @@ export default function StudentReportPage() {
                   <div className="print-page">
                     <div className="print-inner">
                       {/* Header */}
-                      <div className="flex items-center justify-between mb-0 pb-4 border-b">
+                      <div className="flex items-center justify-between mb-0 pb-0 border-b">
                         <div className="flex items-center gap-4">
                           {school.school_badge ? (
                             <img
@@ -1760,7 +1770,7 @@ export default function StudentReportPage() {
                             </div>
                           )}
                           <div>
-                            <h2 className="text-xl font-bold text-gray-900">
+                            <h2 className="text-xl  font-bold text-gray-900">
                               {school.school_name}
                             </h2>
                             <p className="text-xs text-gray-600">
@@ -1772,7 +1782,9 @@ export default function StudentReportPage() {
                               )}
                             </p>
                           </div>
+                          
                         </div>
+                        
 
                         <div className="text-center justify-center">
                           <div className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">
@@ -1781,12 +1793,27 @@ export default function StudentReportPage() {
                           <p className="text-sm font-bold text-gray-900 mt-1">
                             {termLabel(selectedTerm)}
                           </p>
-                            <p className="font-semibold text-sm">
-                                Payment Code:{" "}
-                                <p className=" text-sm">
-                                {}
-                                </p>
-                            </p>
+                          {/* Payment Code Section - START */}
+                          {selectedStudent.payment_code && (
+                            <div className="mt-1">
+                              <div className="flex items-center justify-center gap-2">
+                                <span className="text-xs font-semibold text-gray-600">
+                                  Payment Code:
+                                </span>
+                                <span className="text-sm font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                                  {selectedStudent.payment_code}
+                                </span>
+                                <button
+                                  onClick={copyPaymentCode}
+                                  className="text-gray-400 hover:text-blue-600 transition-colors"
+                                  title="Copy payment code"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {/* Payment Code Section - END */}
                         </div>
                         <div>
                           {selectedStudent.profile_picture_url ? (
@@ -1805,7 +1832,7 @@ export default function StudentReportPage() {
                         </div>
                       </div>
 
-                      {/* Student Info */}
+                      {/* Student Info - Added Payment Code here as well */}
                       <div className="mb-0 border border-gray-200 rounded-lg bg-white">
                         <div className="flex items-center justify-between p-3 gap-4">
                           <div className="flex items-center gap-3 flex-1">
@@ -1840,7 +1867,16 @@ export default function StudentReportPage() {
                                     {selectedGrade?.grade_name || "—"}
                                   </span>
                                 </span>
-                  
+                                {/* Payment Code in student info - START */}
+                                {/* {selectedStudent.payment_code && (
+                                  <span className="flex items-center gap-1">
+                                    <span>Payment Code:</span>
+                                    <span className="font-mono font-semibold text-blue-700">
+                                      {selectedStudent.payment_code}
+                                    </span>
+                                  </span>
+                                )} */}
+                                {/* Payment Code in student info - END */}
                               </div>
                             </div>
                           </div>
@@ -1848,7 +1884,7 @@ export default function StudentReportPage() {
                       </div>
 
                       {/* Subjects Table */}
-                      <div className="mb-0 space-y-1">
+                      <div className="mb-0 space-y-0">
                         {sessions.map((sess) => {
                           // TOTAL AGG PER SESSION
                           const totalAgg = subjectRowsForStudent.reduce(
@@ -1948,10 +1984,10 @@ export default function StudentReportPage() {
                                       </>
                                     ) : (
                                       <th className="border p-0 text-center">
-                                        Position
+                                        Rank in subject 
                                       </th>
                                     )}
-                                    <th className="border p-0 text-left">
+                                    <th className="border p-1 text-left">
                                       Subject Teacher Remark
                                     </th>
                                     <th className="border p-0 text-center">
@@ -2016,10 +2052,10 @@ export default function StudentReportPage() {
                                           </>
                                         ) : (
                                           <td className="border p-0 text-center font-semibold">
-                                            {subjectPosition}/{students.length}
+                                            {subjectPosition}
                                           </td>
                                         )}
-                                        <td className="border p-0">
+                                        <td className="border p-1">
                                           <textarea
                                             value={
                                               isEditing
@@ -2073,7 +2109,7 @@ export default function StudentReportPage() {
                                       Position: {rank} /{outOf}
                                       &nbsp;&nbsp;|&nbsp;&nbsp;
                                       {isLowerPrimaryClass ? (
-                                        <>AVG: {overall.pct.toFixed(1)}%</>
+                                        <>Class Average: {overall.pct.toFixed(1)}%</>
                                       ) : (
                                         <>
                                           DIV: {aggregateAndDivision.division}
@@ -2089,8 +2125,8 @@ export default function StudentReportPage() {
                       </div>
 
                       {/* comments */}
-                      <div className="space-y-1 mt-0">
-                        <div className="border border-gray-200 rounded-lg p-3">
+                      <div className="space-y-0 mt-0">
+                        <div className="border border-gray-200 rounded-lg p-2.5">
                           <div className="flex items-center justify-between mb-0">
                             <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
                               Class Teacher

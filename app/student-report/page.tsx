@@ -1754,14 +1754,14 @@ export default function StudentReportPage() {
                   <div className="print-page">
                     <div className="print-inner">
                       {/* Header */}
-                      <div className="flex items-center justify-between mb-0 pb-0 border-b">
+                      <div className="flex items-center justify-between mb-0 pb-4 border-b">
                         <div className="flex items-center gap-4">
                           {school.school_badge ? (
                             <img
                               src={school.school_badge}
                               alt="School"
-                              width={80}
-                              height={80}
+                              width={100}
+                              height={100}
                               className="object-contain"
                             />
                           ) : (
@@ -1987,7 +1987,7 @@ export default function StudentReportPage() {
                                         Rank in subject 
                                       </th>
                                     )}
-                                    <th className="border p-1 text-left">
+                                    <th className="border pl-2 text-left">
                                       Subject Teacher Remark
                                     </th>
                                     <th className="border p-0 text-center">
@@ -2055,7 +2055,7 @@ export default function StudentReportPage() {
                                             {subjectPosition}
                                           </td>
                                         )}
-                                        <td className="border p-1">
+                                        <td className="border pl-2">
                                           <textarea
                                             value={
                                               isEditing

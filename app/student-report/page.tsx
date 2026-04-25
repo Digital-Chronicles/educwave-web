@@ -817,7 +817,7 @@ export default function StudentReportPage() {
     const studentName = fmtName(selectedStudent);
     const div = aggregateAndDivision.division || "—";
     const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
-    setClassTeacherComment(getClassTeacherComment(pct, div, studentName));
+    setClassTeacherComment(getClassTeacherComment(pct,  studentName));
     setHeadTeacherComment(getHeadTeacherComment(pct, div));
     tinyToast("Auto-filled comments");
   };

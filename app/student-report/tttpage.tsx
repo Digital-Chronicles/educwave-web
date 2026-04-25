@@ -322,7 +322,6 @@ function getSubjectComment(gradeText: string, pct: number): string {
 
 function getClassTeacherComment(pct: number, studentName: string): string {
   const band = perfBand(pct);
-    console.log('Generating class teacher comment for:', studentName, 'with pct:', pct, 'band:', band);
 
   const templates: Record<string, string[]> = {
     excellent: [
@@ -341,14 +340,14 @@ function getClassTeacherComment(pct: number, studentName: string): string {
       `Fair effort shown throughout. Aim higher next term.`,
     ],
     fair: [
-      `${studentName}'s performance was satisfactory. Could do better.`,
-      `Average performance with room for improvement.`,
-      `Fair effort shown throughout. Aim higher next term.`,
+      `${studentName} needs to improve performance. More effort required.`,
+      `Below expectations. ${studentName} needs to focus more.`,
+      `Weak performance. Requires extra attention at home.`,
     ],
     poor: [
-      `${studentName}'s performance was satisfactory. Could do better.`,
-      `Average performance with room for improvement.`,
-      `Fair effort shown throughout. Aim higher next term.`,
+      `${studentName} failed to meet minimum standards. Urgent improvement needed.`,
+      `Very poor performance. Parental intervention required.`,
+      `Unsatisfactory results. ${studentName} must work much harder.`,
     ],
   };
 
@@ -361,8 +360,8 @@ function getHeadTeacherComment(pct: number, division: string): string {
     excellent: ["Excellent achievement. Top performance in class.", "Outstanding student. Sets a good example."],
     very_good: ["Very good performance. Maintain high standards.", "Strong academic showing. Keep it up."],
     good: ["Satisfactory performance. Room for improvement.", "Average results. Could do better with more effort."],
-    fair:  ["Satisfactory performance. Room for improvement.", "Average results. Could do better with more effort."],
-    poor:  ["Satisfactory performance. Room for improvement.", "Average results. Could do better with more effort."],
+    fair:  ["Below standard performance. Needs immediate improvement.", "Weak results. Requires extra support."],
+    poor:  ["Poor performance. Parental intervention required.", "Unsatisfactory results. Urgent attention needed."],
   };
   return pickStable(templates[band] || templates.good, `${division}${pct}`);
 }
@@ -711,9 +710,30 @@ export default function StudentReportPage() {
     });
   }, [selectedStudent, subjectsForGrade, sessions, totalsByStudentSessionSubject, possibleBySessionSubject]);
 
-  // Add this after subjectRowsForStudent useMemo
-// Calculate per-session averages for lower primary
-
+  // Calculate per-session averages for lower primary
+  const sessionAverages = useMemo(() => {
+    if (!selectedStudent || !isLowerPrimary(selectedGrade?.grade_name || "")) return new Map();
+    
+    const averages = new Map<number, number>();
+    
+    for (const sess of sessions) {
+      let totalMarks = 0;
+      let totalPossible = 0;
+      
+      for (const subject of subjectRowsForStudent) {
+        const sessionData = subject.perSession.find(p => p.sessionId === sess.id);
+        if (sessionData && sessionData.possible > 0) {
+          totalMarks += sessionData.total;
+          totalPossible += sessionData.possible;
+        }
+      }
+      
+      const average = totalPossible > 0 ? (totalMarks / totalPossible) * 100 : 0;
+      averages.set(sess.id, average);
+    }
+    
+    return averages;
+  }, [selectedStudent, subjectRowsForStudent, sessions, selectedGrade]);
 
   const overall = useMemo(() => {
     if (!selectedStudent) return { pct: 0 };
@@ -800,7 +820,7 @@ export default function StudentReportPage() {
     const studentName = fmtName(selectedStudent);
     const div = aggregateAndDivision.division || "—";
     const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
-    setClassTeacherComment(getClassTeacherComment(pct,  studentName));
+    setClassTeacherComment(getClassTeacherComment(pct, studentName));
     setHeadTeacherComment(getHeadTeacherComment(pct, div));
   }, [selectedStudentId, overall.pct, aggregateAndDivision.division]);
 
@@ -815,9 +835,9 @@ export default function StudentReportPage() {
       return next;
     });
     const studentName = fmtName(selectedStudent);
-    const div = aggregateAndDivision.division || "—";
     const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
-    setClassTeacherComment(getClassTeacherComment(pct,  studentName));
+    setClassTeacherComment(getClassTeacherComment(pct, studentName));
+    const div = aggregateAndDivision.division || "—";
     setHeadTeacherComment(getHeadTeacherComment(pct, div));
     tinyToast("Auto-filled comments");
   };
@@ -982,22 +1002,10 @@ export default function StudentReportPage() {
 
       // Generate report for each student
       for (const student of students) {
-        // Calculate student-specific data
-        const studentTotalsOverall = students.map((s) => {
-          let total = 0;
-          for (const r of subjectRowsForStudent) {
-            total += r.perSession.reduce((a, p) => a + p.total, 0);
-          }
-          return { id: s.registration_id, total };
-        });
-        studentTotalsOverall.sort((a, b) => b.total - a.total);
-        const rankOverall = studentTotalsOverall.findIndex(s => s.id === student.registration_id) + 1;
-        const outOfOverall = studentTotalsOverall.length;
-
+        // Calculate student-specific data for batch print...
         frameDoc.write(`
           <div class="report-page">
             <div class="report-inner">
-              <!-- Header -->
               <div class="flex items-center justify-between mb-0 pb-4 border-b">
                 <div class="flex items-center gap-4">
                   ${school?.school_badge ? 
@@ -1030,8 +1038,6 @@ export default function StudentReportPage() {
                   }
                 </div>
               </div>
-              
-              <!-- Student Info -->
               <div class="mb-0 border border-gray-200 rounded-lg bg-white">
                 <div class="flex items-center justify-between p-3 gap-4">
                   <div class="flex items-center gap-3 flex-1">
@@ -1047,87 +1053,44 @@ export default function StudentReportPage() {
                   </div>
                 </div>
               </div>
-              
-              <!-- Subjects Table -->
               <div class="mb-0 space-y-0">
-                ${sessions.map((sess, sessionIndex) => {
-                  const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
-                  const totalMarksForSession = subjectRowsForStudent.reduce((acc, r) => { 
-                    const ps = r.perSession.find(p => p.sessionId === sess.id); 
-                    return acc + (ps?.total ?? 0); 
-                  }, 0);
-                  
-                  const studentTotals = students.map((s) => { 
-                    const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map(); 
-                    const total = subjectsForGrade.reduce((acc, sub) => { 
-                      const totalsForSess = sMapForStudent.get(sess.id) ?? new Map(); 
-                      return acc + Number(totalsForSess.get(sub.id) ?? 0); 
-                    }, 0); 
-                    return { id: s.registration_id, total }; 
-                  });
-                  studentTotals.sort((a, b) => b.total - a.total);
-                  const rank = studentTotals.findIndex(s => s.id === student.registration_id) + 1;
-                  const outOf = studentTotals.length;
-
-                  return `
-                    <div class="border border-gray-200 ${sessionIndex === 0 ? 'rounded-t-lg' : ''} ${sessionIndex === sessions.length - 1 ? 'rounded-b-lg' : ''} ${sessionIndex !== 0 ? 'border-t-0' : ''} overflow-hidden">
-                      <div class="bg-gray-100 px-0 py-0 border-b">
-                        <p class="text-sm text-center font-bold text-gray-900 py-1">
-                          ${sess.exam_type === "BOT" ? "BEGINNING OF TERM" : sess.exam_type === "MOT" ? "MID OF TERM" : "END OF TERM"}
-                        </p>
-                      </div>
-                      <table class="w-full text-xs border-collapse">
-                        <thead class="bg-gray-50 p-0 mt-0">
+                <div class="border border-gray-200 rounded-lg overflow-hidden">
+                  <div class="bg-gray-100 px-0 py-0 border-b">
+                    <p class="text-sm text-center font-bold text-gray-900 py-1">REPORT CARD</p>
+                  </div>
+                  <table class="w-full text-xs border-collapse">
+                    <thead class="bg-gray-50">
+                      <tr>
+                        <th class="border p-1 text-left pl-2">Subject</th>
+                        <th class="border p-1 text-center">Full Marks</th>
+                        <th class="border p-1 text-center">Mark Obtained</th>
+                        ${!isLowerPrimary(selectedGrade?.grade_name || "") ? '<th class="border p-1 text-center">Grade</th><th class="border p-1 text-center">Agg</th>' : '<th class="border p-1 text-center">Rank</th>'}
+                        <th class="border p-1 text-left">Subject Teacher Remark</th>
+                        <th class="border p-1 text-center">Initials</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${subjectRowsForStudent.map((r) => {
+                        const totalMark = r.perSession.reduce((a, p) => a + p.total, 0);
+                        const totalPossible = r.perSession.reduce((a, p) => a + p.possible, 0);
+                        const overallPct = totalPossible > 0 ? (totalMark / totalPossible) * 100 : 0;
+                        const gradeNum = unebSubjectGrade(overallPct);
+                        const gradeText = unebGradeText(gradeNum);
+                        return `
                           <tr>
-                            <th class="border p-1 text-left pl-2">Subject</th>
-                            <th class="border p-0 text-center">Full Marks</th>
-                            <th class="border p-0 text-center">Mark Obtained</th>
-                            ${!isLowerPrimaryClass ? '<th class="border p-0 text-center">Grade</th><th class="border p-0 text-center">Agg</th>' : '<th class="border p-0 text-center">Rank</th>'}
-                            <th class="border pl-2 text-left">Subject Teacher Remark</th>
-                            <th class="border p-0 text-center">Initials</th>
+                            <td class="border p-1 font-medium pl-2">${r.subject_name}</td>
+                            <td class="border p-1 text-center">${totalPossible}</td>
+                            <td class="border p-1 text-center">${totalMark}</td>
+                            ${!isLowerPrimary(selectedGrade?.grade_name || "") ? `<td class="border p-1 text-center font-semibold">${gradeText}</td><td class="border p-1 text-center font-semibold">${gradeNum}</td>` : `<td class="border p-1 text-center font-semibold">—</td>`}
+                            <td class="border p-1">${getSubjectComment(gradeText, overallPct)}</td>
+                            <td class="border p-1 text-center">${subjectTeacherById[r.subject_id] || "—"}</td>
                           </tr>
-                        </thead>
-                        <tbody>
-                          ${subjectRowsForStudent.map((r) => {
-                            const ps = r.perSession.find(p => p.sessionId === sess.id);
-                            const full = 100;
-                            const mark = ps?.total ?? 0;
-                            const gradeNum = mark !== null ? unebSubjectGrade(mark) : null;
-                            const gradeText = gradeNum ? unebGradeText(gradeNum) : "—";
-                            const autoComment = mark !== null ? getSubjectComment(gradeText, mark) : "";
-                            const agg = gradeNum ?? "";
-                            const subjectPosition = isLowerPrimaryClass ? getSubjectPosition(r.subject_id, sess.id, student.registration_id) : null;
-                            
-                            return `
-                              <tr>
-                                <td class="border p-1 font-medium pl-2">${r.subject_name}</td>
-                                <td class="border p-0 text-center">${full}</td>
-                                <td class="border p-0 text-center">${mark}</td>
-                                ${!isLowerPrimaryClass ? `<td class="border p-0 text-center font-semibold">${gradeText}</td><td class="border p-0 text-center font-semibold">${agg}</td>` : `<td class="border p-0 text-center font-semibold">${subjectPosition}</td>`}
-                                <td class="border pl-2">${autoComment}</td>
-                                <td class="border p-1 text-center">${subjectTeacherById[r.subject_id] || "—"}</td>
-                              </tr>
-                            `;
-                          }).join('')}
-                        </tbody>
-                        <tfoot>
-                          <tr class="font-bold bg-gray-100">
-                            <td class="text-left p-1 font-semi-bold pl-2">Total</td>
-                            <td class="text-center">${subjectRowsForStudent.length * 100}</td>
-                            <td class="text-center">${totalMarksForSession}</td>
-                            ${!isLowerPrimaryClass ? '<td class="text-center">—</td><td class="text-center">—</td>' : '<td class="text-center">—</td>'}
-                            <td colspan="2" class="text-right pr-4">
-                              Position: ${rank}/${outOf}
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  `;
-                }).join('')}
+                        `;
+                      }).join('')}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              
-              <!-- Comments -->
               <div class="space-y-0 mt-1">
                 <div class="border border-gray-200 rounded-lg p-2.5">
                   <div class="flex items-center justify-between mb-0">
@@ -1430,37 +1393,108 @@ export default function StudentReportPage() {
               {errorMsg && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{errorMsg}</div>}
             </div>
 
-            {/* Performance Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div><p className="text-sm text-gray-500">Overall %</p><p className="text-2xl font-bold text-gray-900 mt-1">{overall.pct.toFixed(1)}%</p></div>
-                  <div className="p-2 bg-blue-50 rounded-lg"><BarChart3 className="h-6 w-6 text-blue-600" /></div>
+            {/* Performance Summary Cards - Updated for Lower Primary with per-session averages */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+              {/* Session Averages - For Lower Primary */}
+              {isLowerPrimaryClass ? (
+                <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm col-span-2">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-sm text-gray-500 font-semibold">Session Averages</p>
+                    <div className="p-2 bg-blue-50 rounded-lg"><BarChart3 className="h-5 w-5 text-blue-600" /></div>
+                  </div>
+                  <div className="space-y-2">
+                    {sessions.map((sess) => {
+                      const avg = sessionAverages.get(sess.id) || 0;
+                      return (
+                        <div key={sess.id} className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold w-12 text-gray-600">
+                              {sess.exam_type === "BOT" ? "BOT:" : sess.exam_type === "MOT" ? "MOT:" : "EOT:"}
+                            </span>
+                            <div className="w-full bg-gray-200 rounded-full h-2">
+                              <div className={`h-2 rounded-full ${avg >= 80 ? 'bg-emerald-500' : avg >= 60 ? 'bg-blue-500' : avg >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${avg}%` }}></div>
+                            </div>
+                          </div>
+                          <span className={`text-sm font-bold ${gradeColor(avg)}`}>
+                            {avg.toFixed(1)}%
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div><p className="text-sm text-gray-500">Overall %</p><p className="text-2xl font-bold text-gray-900 mt-1">{overall.pct.toFixed(1)}%</p></div>
+                    <div className="p-2 bg-blue-50 rounded-lg"><BarChart3 className="h-6 w-6 text-blue-600" /></div>
+                  </div>
+                </div>
+              )}
+
+              {/* Division / Class Position */}
               <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-gray-500">{isLowerPrimaryClass ? "Average Mark" : "Division"}</p>
+                    <p className="text-sm text-gray-500">{isLowerPrimaryClass ? "Class Position" : "Division"}</p>
                     <div className="flex items-center gap-2 mt-1">
-                      {isLowerPrimaryClass ? <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-blue-100 text-blue-700">{overall.pct.toFixed(1)}%</span> : <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold text-white ${aggregateAndDivision.pill}`}>{aggregateAndDivision.division}</span>}
+                      {isLowerPrimaryClass ? (
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-blue-100 text-blue-700">
+                          Rank: {position.rank}/{position.outOf}
+                        </span>
+                      ) : (
+                        <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold text-white ${aggregateAndDivision.pill}`}>
+                          {aggregateAndDivision.division}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="p-2 bg-emerald-50 rounded-lg"><Award className="h-6 w-6 text-emerald-600" /></div>
                 </div>
               </div>
+
+              {/* Total Aggregates - Only show for upper primary */}
               {!isLowerPrimaryClass && (
                 <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                   <div className="flex items-center justify-between">
-                    <div><p className="text-sm text-gray-500">Aggregates</p><p className="text-2xl font-bold text-gray-900">{aggregateAndDivision.aggregate}</p><p className="text-xs text-gray-500 mt-1">Best 4: {aggregateAndDivision.best4Grades.join(", ")}</p></div>
+                    <div>
+                      <p className="text-sm text-gray-500">Aggregates</p>
+                      <p className="text-2xl font-bold text-gray-900">{aggregateAndDivision.aggregate}</p>
+                      <p className="text-xs text-gray-500 mt-1">Best 4: {aggregateAndDivision.best4Grades.join(", ")}</p>
+                    </div>
                     <div className="p-2 bg-purple-50 rounded-lg"><Hash className="h-6 w-6 text-purple-600" /></div>
                   </div>
                 </div>
               )}
+
+              {/* Best Subject */}
               <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <div><p className="text-sm text-gray-500">Best Subject</p><p className="text-lg font-semibold text-gray-900 mt-1 truncate">{performanceAnalysis.bestSubject}</p><div className="flex items-center gap-2 mt-1"><span className={`text-xs font-medium px-2 py-0.5 rounded ${gradePillClass(performanceAnalysis.bestSubjectGrade)}`}>{performanceAnalysis.bestSubjectGrade}</span></div></div>
+                  <div>
+                    <p className="text-sm text-gray-500">Best Subject</p>
+                    <p className="text-lg font-semibold text-gray-900 mt-1 truncate">{performanceAnalysis.bestSubject}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded ${gradePillClass(performanceAnalysis.bestSubjectGrade)}`}>
+                        {performanceAnalysis.bestSubjectGrade}
+                      </span>
+                    </div>
+                  </div>
                   <div className="p-2 bg-green-50 rounded-lg"><Trophy className="h-6 w-6 text-green-600" /></div>
+                </div>
+              </div>
+
+              {/* Subjects Summary */}
+              <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-500">Subjects</p>
+                    <p className="text-lg font-bold text-gray-900 mt-1">{subjectRowsForStudent.length} total</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs text-emerald-600"><CheckCircle className="inline w-3 h-3 mr-1" />{performanceAnalysis.subjectsAboveAverage} above avg</span>
+                      <span className="text-xs text-rose-600"><AlertCircle className="inline w-3 h-3 mr-1" />{performanceAnalysis.subjectsBelowAverage} below avg</span>
+                    </div>
+                  </div>
+                  <div className="p-2 bg-amber-50 rounded-lg"><Layers className="h-6 w-6 text-amber-600" /></div>
                 </div>
               </div>
             </div>
@@ -1618,9 +1652,22 @@ export default function StudentReportPage() {
                                   <td className="text-center">—</td>
                                 )}
                                 <td colSpan={2} className="text-right pr-4">
-                                  Position: {rank}/{outOf} | {isLowerPrimaryClass ? `Class Average: ${overall.pct.toFixed(1)}%` : `DIV: ${aggregateAndDivision.division}`}
+                                  Position: {rank}/{outOf}
                                 </td>
                               </tr>
+                              {/* For lower primary, add per-session averages row */}
+                              {isLowerPrimaryClass && (
+                                <tr className="bg-blue-50/50 text-xs">
+                                  <td colSpan={3} className="text-left p-1 font-semibold text-blue-700 pl-2">
+                                    Session Average:
+                                  </td>
+                                  <td colSpan={3} className="text-right p-1 pr-4">
+                                    <span className={`font-bold ${gradeColor(sessionAverages.get(sess.id) || 0)}`}>
+                                      {(sessionAverages.get(sess.id) || 0).toFixed(1)}%
+                                    </span>
+                                  </td>
+                                </tr>
+                              )}
                             </tfoot>
                           </table>
                         </div>

@@ -27,6 +27,7 @@ import {
   CheckCircle,
   XCircle,
   FileText,
+  Copy,
 } from "lucide-react";
 
 // ============ TYPES ============
@@ -90,6 +91,7 @@ interface StudentRow {
   date_of_birth?: string | null;
   gender?: string | null;
   profile_picture_url?: string | null;
+  payment_code: string | null;  // <-- ADDED: Payment code field
 }
 
 interface QuestionRow {
@@ -187,14 +189,24 @@ function examTypeLabel(t: "BOT" | "MOT" | "EOT") {
 // Check if class is lower primary
 function isLowerPrimary(gradeName: string): boolean {
   const lowerPrimaryGrades = [
-    'baby', 'baby class', 'top class', 'middle', 'middle class',
-    'p1', 'p.1', 'primary 1', 
-    'p2', 'p.2', 'primary 2',
-    'p3', 'p.3', 'primary 3'
+    "baby",
+    "baby class",
+    "top class",
+    "middle",
+    "middle class",
+    "p1",
+    "p.1",
+    "primary 1",
+    "p2",
+    "p.2",
+    "primary 2",
+    "p3",
+    "p.3",
+    "primary 3",
   ];
-  
+
   const normalizedName = gradeName.toLowerCase().trim();
-  return lowerPrimaryGrades.some(grade => normalizedName.includes(grade));
+  return lowerPrimaryGrades.some((grade) => normalizedName.includes(grade));
 }
 
 // UNEB Grading System
@@ -226,7 +238,7 @@ function unebGradeText(g: number) {
 function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
   // First determine the base division based on aggregate
   let baseDivision = "";
-  
+
   if (agg >= 4 && agg <= 12) {
     baseDivision = "Division 1";
   } else if (agg >= 13 && agg <= 24) {
@@ -240,7 +252,7 @@ function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
   } else {
     baseDivision = "U";
   }
-  
+
   // Apply F9 demotion logic
   if (hasF9) {
     if (baseDivision === "Division 1") {
@@ -254,7 +266,7 @@ function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
       return baseDivision;
     }
   }
-  
+
   return baseDivision;
 }
 
@@ -308,59 +320,23 @@ function perfBand(pct: number) {
 // Comments functions
 function getSubjectComment(gradeText: string, pct: number): string {
   const shortComments: Record<string, string[]> = {
-D1: [
-  "Excellent work.",
-  "Outstanding performance.",
-  "Exceptional achievement."
-],
-
-D2: [
-  "Very good work.",
-  "Strong performance.",
-  "Well done."
-],
-
-C3: [
-  "Good effort.",
-  "Satisfactory work.",
-  "Keep improving."
-],
-
-C4: [
-  "Needs improvement.",
-  "Can do better.",
-  "Put in more effort."
-],
-
-C5: [
-  "Requires more effort.",
-  "Needs support.",
-  "Practice more."
-],
-
-C6: [
-  "Improve.",
-  "Needs serious effort.",
-  "Work harder."
-],
-
-P7: [
-  "More effort needed.",
-  "Stay focused.",
-  "Keep trying."
-],
-
-P8: [
-  "Needs improvement.",
-  "More Effort Needed.",
-  "Try harder."
-],
-
-F9: [
-  "Improve performance.",
-  "Stay committed.",
-  "Put in effort."
-]
+    D1: [
+      "Excellent work.",
+      "Outstanding performance.",
+      "Exceptional achievement.",
+    ],
+    D2: ["Very good.", "Strong performance.", "Well done."],
+    C3: ["Good effort.", "Satisfactory work.", "Average performance."],
+    C4: ["Needs improvement.", "Can do better.", "Add more energy."],
+    C5: ["Do better.", "Needs help.", "Aim higher."],
+    C6: [
+      "Failed to meet expectations.",
+      "Critical improvement needed.",
+      "More effort.",
+    ],
+    P7: ["More Effort Needed.", "Work harder.", "Read harder."],
+    P8: ["More Effort.", "Improve .", "Improve."],
+    F9: ["Aim higher.", "Next time.", "Try harder."],
   };
 
   const comments =
@@ -399,8 +375,8 @@ function getClassTeacherComment(
     ],
     poor: [
       `${studentName} failed to meet minimum standards. .`,
-      `Very poor performance, immediate intervention needed. ${division}.`,
-      `Unsatisfactory results across subjects. ${division}.`,
+      `Fair  performance, immediate intervention needed. ${division}.`,
+      `Improvement needed across subjects. ${division}.`,
     ],
   };
 
@@ -544,40 +520,50 @@ function analyzePerformance(
 }
 
 // Helper function to get next term date
-function getNextTermDate(currentTerm: TermExamRow | null, allTerms: TermExamRow[]): string | null {
+function getNextTermDate(
+  currentTerm: TermExamRow | null,
+  allTerms: TermExamRow[],
+): string | null {
   if (!currentTerm || allTerms.length === 0) return null;
-  
+
   const termOrder = { TERM_1: 1, TERM_2: 2, TERM_3: 3 };
   const currentTermNumber = termOrder[currentTerm.term_name];
   const currentYear = currentTerm.year;
-  
+
   // Find next term
   let nextTerm = null;
-  
+
   // First check if there's a next term in the same year
   if (currentTermNumber < 3) {
     nextTerm = allTerms.find(
-      t => t.year === currentYear && termOrder[t.term_name] === currentTermNumber + 1
+      (t) =>
+        t.year === currentYear &&
+        termOrder[t.term_name] === currentTermNumber + 1,
     );
   }
-  
+
   // If not found, look for Term 1 of next year
   if (!nextTerm) {
     nextTerm = allTerms.find(
-      t => t.year === currentYear + 1 && t.term_name === "TERM_1"
+      (t) => t.year === currentYear + 1 && t.term_name === "TERM_1",
     );
   }
-  
+
   // If still not found, look for the earliest upcoming term
   if (!nextTerm) {
     const currentDate = new Date();
-    const futureTerms = allTerms.filter(t => new Date(t.start_date) > currentDate);
+    const futureTerms = allTerms.filter(
+      (t) => new Date(t.start_date) > currentDate,
+    );
     if (futureTerms.length > 0) {
-      futureTerms.sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime());
+      futureTerms.sort(
+        (a, b) =>
+          new Date(a.start_date).getTime() - new Date(b.start_date).getTime(),
+      );
       nextTerm = futureTerms[0];
     }
   }
-  
+
   return nextTerm ? formatDate(nextTerm.start_date) : null;
 }
 
@@ -614,7 +600,9 @@ export default function StudentReportPage() {
   const [teachers, setTeachers] = useState<
     Array<{ id: string; first_name: string; last_name: string }>
   >([]);
-  const [nextTermStartDate, setNextTermStartDate] = useState<string | null>(null);
+  const [nextTermStartDate, setNextTermStartDate] = useState<string | null>(
+    null,
+  );
 
   // Derived values - MUST be defined before any useEffect that uses them
   const selectedTerm = useMemo(
@@ -783,11 +771,11 @@ export default function StudentReportPage() {
         const termId = Number(selectedTermId);
         const sessionIds = examSessionsForTerm.map((s) => s.id);
 
-        // Load students
+        // Load students - ADDED payment_code to select
         const studentsRes = await supabase
           .from("students")
           .select(
-            "registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url",
+            "registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code",
           )
           .eq("school_id", school.id)
           .eq("current_grade_id", gradeId)
@@ -874,7 +862,8 @@ export default function StudentReportPage() {
         // Get all subjects for this grade with their teacher information
         const { data, error } = await supabase
           .from("subject")
-          .select(`
+          .select(
+            `
             id,
             name,
             teacher_id,
@@ -884,7 +873,8 @@ export default function StudentReportPage() {
               last_name,
               initials
             )
-          `)
+          `,
+          )
           .eq("school_id", school.id)
           .eq("grade_id", Number(selectedGradeId));
 
@@ -899,25 +889,25 @@ export default function StudentReportPage() {
           if (subject.teacher_id && subject.teacher) {
             // Handle case where teacher might be an array or a single object
             let teacherData: TeacherInfo | null = null;
-            
+
             if (Array.isArray(subject.teacher) && subject.teacher.length > 0) {
               const teacher = subject.teacher[0] as any;
               teacherData = {
                 registration_id: teacher.registration_id,
                 first_name: teacher.first_name,
                 last_name: teacher.last_name,
-                initials: teacher.initials
+                initials: teacher.initials,
               };
-            } else if (subject.teacher && typeof subject.teacher === 'object') {
+            } else if (subject.teacher && typeof subject.teacher === "object") {
               const teacher = subject.teacher as any;
               teacherData = {
                 registration_id: teacher.registration_id,
                 first_name: teacher.first_name,
                 last_name: teacher.last_name,
-                initials: teacher.initials
+                initials: teacher.initials,
               };
             }
-            
+
             if (teacherData) {
               // Build display name - prioritize initials, then first+last name
               let displayName = "";
@@ -925,13 +915,17 @@ export default function StudentReportPage() {
                 displayName = teacherData.initials.trim();
               } else if (teacherData.first_name || teacherData.last_name) {
                 // Generate initials from first and last name if not available
-                const firstInitial = teacherData.first_name ? teacherData.first_name.charAt(0).toUpperCase() : "";
-                const lastInitial = teacherData.last_name ? teacherData.last_name.charAt(0).toUpperCase() : "";
+                const firstInitial = teacherData.first_name
+                  ? teacherData.first_name.charAt(0).toUpperCase()
+                  : "";
+                const lastInitial = teacherData.last_name
+                  ? teacherData.last_name.charAt(0).toUpperCase()
+                  : "";
                 displayName = `${firstInitial}${lastInitial}`;
               } else {
                 displayName = "—";
               }
-              
+
               map[subject.id] = displayName;
             } else {
               map[subject.id] = "—";
@@ -940,7 +934,7 @@ export default function StudentReportPage() {
             map[subject.id] = "—";
           }
         }
-        
+
         setSubjectTeacherById(map);
       } catch (err) {
         console.error("Error in subject teacher loading:", err);
@@ -995,6 +989,33 @@ export default function StudentReportPage() {
     }
     return map;
   }, [results, questionToSessionSubject]);
+
+  // Calculate subject position for lower primary
+  const getSubjectPosition = (
+    subjectId: number,
+    sessionId: number,
+    studentId: string,
+  ): number => {
+    const allStudentScores: Array<{ studentId: string; score: number }> = [];
+
+    for (const student of students) {
+      const sMap =
+        totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
+      const totalsForSess = sMap.get(sessionId) ?? new Map();
+      const total = Number(totalsForSess.get(subjectId) ?? 0);
+      allStudentScores.push({
+        studentId: student.registration_id,
+        score: total,
+      });
+    }
+
+    // Sort by score descending
+    allStudentScores.sort((a, b) => b.score - a.score);
+
+    const position =
+      allStudentScores.findIndex((s) => s.studentId === studentId) + 1;
+    return position;
+  };
 
   // Prepare subject rows for selected student
   const subjectRowsForStudent = useMemo(() => {
@@ -1279,7 +1300,7 @@ export default function StudentReportPage() {
         supabase
           .from("students")
           .select(
-            "registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url",
+            "registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code",
           )
           .eq("school_id", school.id)
           .eq("current_grade_id", gradeId)
@@ -1328,6 +1349,14 @@ export default function StudentReportPage() {
     }
   };
 
+  // Copy payment code to clipboard
+  const copyPaymentCode = () => {
+    if (selectedStudent?.payment_code) {
+      navigator.clipboard.writeText(selectedStudent.payment_code);
+      tinyToast("Payment code copied to clipboard!");
+    }
+  };
+
   // ============ RENDER STATES ============
   if (authChecking || loading) {
     return (
@@ -1369,6 +1398,9 @@ export default function StudentReportPage() {
       </div>
     );
   }
+
+  const isLowerPrimaryClass =
+    selectedGrade && isLowerPrimary(selectedGrade.grade_name);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1602,7 +1634,7 @@ export default function StudentReportPage() {
             ) : (
               <div className="space-y-6">
                 {/* Performance Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   {/* Overall Percentage */}
                   <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                     <div className="flex items-center justify-between">
@@ -1623,10 +1655,10 @@ export default function StudentReportPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-gray-500">
-                          {selectedGrade && isLowerPrimary(selectedGrade.grade_name) ? 'Average Mark' : 'Division'}
+                          {isLowerPrimaryClass ? "Average Mark" : "Division"}
                         </p>
                         <div className="flex items-center gap-2 mt-1">
-                          {selectedGrade && isLowerPrimary(selectedGrade.grade_name) ? (
+                          {isLowerPrimaryClass ? (
                             <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-blue-100 text-blue-700">
                               {overall.pct.toFixed(1)}%
                             </span>
@@ -1646,7 +1678,7 @@ export default function StudentReportPage() {
                   </div>
 
                   {/* Total Aggregates - Only show for upper primary */}
-                  {(!selectedGrade || !isLowerPrimary(selectedGrade.grade_name)) && (
+                  {!isLowerPrimaryClass && (
                     <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
                       <div className="flex items-center justify-between">
                         <div>
@@ -1658,7 +1690,8 @@ export default function StudentReportPage() {
                             <p className="text-xs text-gray-600 mb-1">Total</p>
                           </div>
                           <p className="text-xs text-gray-500 mt-1">
-                            Best 4: {aggregateAndDivision.best4Grades.join(", ")}
+                            Best 4:{" "}
+                            {aggregateAndDivision.best4Grades.join(", ")}
                           </p>
                         </div>
                         <div className="p-2 bg-purple-50 rounded-lg">
@@ -1721,14 +1754,14 @@ export default function StudentReportPage() {
                   <div className="print-page">
                     <div className="print-inner">
                       {/* Header */}
-                      <div className="flex items-center justify-between mb-2 pb-4 border-b">
+                      <div className="flex items-center justify-between mb-0 pb-4 border-b">
                         <div className="flex items-center gap-4">
                           {school.school_badge ? (
                             <img
                               src={school.school_badge}
                               alt="School"
-                              width={80}
-                              height={80}
+                              width={100}
+                              height={100}
                               className="object-contain"
                             />
                           ) : (
@@ -1737,7 +1770,7 @@ export default function StudentReportPage() {
                             </div>
                           )}
                           <div>
-                            <h2 className="text-xl font-bold text-gray-900">
+                            <h2 className="text-xl  font-bold text-gray-900">
                               {school.school_name}
                             </h2>
                             <p className="text-xs text-gray-600">
@@ -1749,7 +1782,9 @@ export default function StudentReportPage() {
                               )}
                             </p>
                           </div>
+                          
                         </div>
+                        
 
                         <div className="text-center justify-center">
                           <div className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">
@@ -1758,9 +1793,27 @@ export default function StudentReportPage() {
                           <p className="text-sm font-bold text-gray-900 mt-1">
                             {termLabel(selectedTerm)}
                           </p>
-                          {/* <p className="text-xs text-gray-600">
-                            {new Date().toLocaleDateString("en-GB")}
-                          </p> */}
+                          {/* Payment Code Section - START */}
+                          {selectedStudent.payment_code && (
+                            <div className="mt-1">
+                              <div className="flex items-center justify-center gap-2">
+                                <span className="text-xs font-semibold text-gray-600">
+                                  Payment Code:
+                                </span>
+                                <span className="text-sm font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
+                                  {selectedStudent.payment_code}
+                                </span>
+                                <button
+                                  onClick={copyPaymentCode}
+                                  className="text-gray-400 hover:text-blue-600 transition-colors"
+                                  title="Copy payment code"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {/* Payment Code Section - END */}
                         </div>
                         <div>
                           {selectedStudent.profile_picture_url ? (
@@ -1779,7 +1832,7 @@ export default function StudentReportPage() {
                         </div>
                       </div>
 
-                      {/* Student Info */}
+                      {/* Student Info - Added Payment Code here as well */}
                       <div className="mb-0 border border-gray-200 rounded-lg bg-white">
                         <div className="flex items-center justify-between p-3 gap-4">
                           <div className="flex items-center gap-3 flex-1">
@@ -1814,6 +1867,16 @@ export default function StudentReportPage() {
                                     {selectedGrade?.grade_name || "—"}
                                   </span>
                                 </span>
+                                {/* Payment Code in student info - START */}
+                                {/* {selectedStudent.payment_code && (
+                                  <span className="flex items-center gap-1">
+                                    <span>Payment Code:</span>
+                                    <span className="font-mono font-semibold text-blue-700">
+                                      {selectedStudent.payment_code}
+                                    </span>
+                                  </span>
+                                )} */}
+                                {/* Payment Code in student info - END */}
                               </div>
                             </div>
                           </div>
@@ -1821,7 +1884,7 @@ export default function StudentReportPage() {
                       </div>
 
                       {/* Subjects Table */}
-                      <div className="mb-2 space-y-1">
+                      <div className="mb-0 space-y-0">
                         {sessions.map((sess) => {
                           // TOTAL AGG PER SESSION
                           const totalAgg = subjectRowsForStudent.reduce(
@@ -1887,7 +1950,7 @@ export default function StudentReportPage() {
                               className="border border-gray-200 rounded-lg overflow-hidden"
                             >
                               {/* Section Title */}
-                              <div className="bg-gray-100 px-2 py-2 border-b">
+                              <div className="bg-gray-100 px-0 py-0 border-b">
                                 <p className="text-sm text-center font-bold text-gray-900">
                                   {sess.exam_type === "BOT"
                                     ? "BEGINNING OF TERM"
@@ -1897,29 +1960,37 @@ export default function StudentReportPage() {
                                 </p>
                               </div>
 
-                              {/* Table */}
+                              {/* Table - Different columns for Lower Primary */}
                               <table className="w-full text-xs border-collapse">
-                                <thead className="bg-gray-50 p-1 mt-1 ">
+                                <thead className="bg-gray-50 p-0 mt-0">
                                   <tr className="mt-0  pl-4">
                                     <th className="border p-1 text-left">
                                       Subject
                                     </th>
-                                    <th className="border p-1 text-center">
+                                    <th className="border p-0 text-center">
                                       Full Marks
                                     </th>
-                                    <th className="border p-1 text-center">
+                                    <th className="border p-0 text-center">
                                       Mark Obtained
                                     </th>
-                                    <th className="border p-1 text-center">
-                                      Grade
-                                    </th>
-                                    <th className="border p-1 text-center">
-                                      Agg
-                                    </th>
-                                    <th className="border p-1 text-left">
+                                    {!isLowerPrimaryClass ? (
+                                      <>
+                                        <th className="border p-0 text-center">
+                                          Grade
+                                        </th>
+                                        <th className="border p-0 text-center">
+                                          Agg
+                                        </th>
+                                      </>
+                                    ) : (
+                                      <th className="border p-0 text-center">
+                                        Rank in subject 
+                                      </th>
+                                    )}
+                                    <th className="border pl-2 text-left">
                                       Subject Teacher Remark
                                     </th>
-                                    <th className="border p-1 text-center">
+                                    <th className="border p-0 text-center">
                                       Initials
                                     </th>
                                   </tr>
@@ -1950,24 +2021,41 @@ export default function StudentReportPage() {
 
                                     const agg = gradeNum ?? "";
 
+                                    // Calculate subject position for lower primary
+                                    const subjectPosition = isLowerPrimaryClass
+                                      ? getSubjectPosition(
+                                          r.subject_id,
+                                          sess.id,
+                                          selectedStudent.registration_id,
+                                        )
+                                      : null;
+
                                     return (
                                       <tr key={`${sess.id}-${r.subject_id}`}>
                                         <td className="border p-1 font-medium">
                                           {r.subject_name}
                                         </td>
-                                        <td className="border p-1 text-center">
+                                        <td className="border p-0 text-center">
                                           {full}
                                         </td>
-                                        <td className="border p-1 text-center">
+                                        <td className="border p-0 text-center">
                                           {mark}
                                         </td>
-                                        <td className="border p-1 text-center font-semibold">
-                                          {gradeText}
-                                        </td>
-                                        <td className="border p-1 text-center font-semibold">
-                                          {agg}
-                                        </td>
-                                        <td className="border p-1">
+                                        {!isLowerPrimaryClass ? (
+                                          <>
+                                            <td className="border p-0 text-center font-semibold">
+                                              {gradeText}
+                                            </td>
+                                            <td className="border p-0 text-center font-semibold">
+                                              {agg}
+                                            </td>
+                                          </>
+                                        ) : (
+                                          <td className="border p-0 text-center font-semibold">
+                                            {subjectPosition}
+                                          </td>
+                                        )}
+                                        <td className="border pl-2">
                                           <textarea
                                             value={
                                               isEditing
@@ -1997,8 +2085,8 @@ export default function StudentReportPage() {
                                 </tbody>
 
                                 <tfoot>
-                                  <tr className="font-bold bg-gray-100 p-2">
-                                    <td className="text-left p-2 font-semi-bold">
+                                  <tr className="font-bold bg-gray-100 p-1">
+                                    <td className="text-left p-1 font-semi-bold">
                                       Total
                                     </td>
                                     <td className="text-center">
@@ -2007,15 +2095,25 @@ export default function StudentReportPage() {
                                     <td className="text-center">
                                       {totalMarks}
                                     </td>
-                                    <td className="text-center">—</td>
-                                    <td className="text-center">{totalAgg}</td>
+                                    {!isLowerPrimaryClass ? (
+                                      <>
+                                        <td className="text-center">—</td>
+                                        <td className="text-center">
+                                          {totalAgg}
+                                        </td>
+                                      </>
+                                    ) : (
+                                      <td className="text-center">—</td>
+                                    )}
                                     <td colSpan={2} className="text-right pr-4">
                                       Position: {rank} /{outOf}
                                       &nbsp;&nbsp;|&nbsp;&nbsp;
-                                      {selectedGrade && isLowerPrimary(selectedGrade.grade_name) ? (
-                                        <>AVG: {overall.pct.toFixed(1)}%</>
+                                      {isLowerPrimaryClass ? (
+                                        <>Class Average: {overall.pct.toFixed(1)}%</>
                                       ) : (
-                                        <>DIV: {aggregateAndDivision.division}</>
+                                        <>
+                                          DIV: {aggregateAndDivision.division}
+                                        </>
                                       )}
                                     </td>
                                   </tr>
@@ -2026,13 +2124,10 @@ export default function StudentReportPage() {
                         })}
                       </div>
 
-                      {/* Comments Section */}
-                     
-
-                      <div className="space-y-4">
-                        {/* Class Teacher */}
-                        <div className="border border-gray-200 rounded-lg p-2 pl-4 mb-0">
-                          <div className="flex items-center justify-between mb-1">
+                      {/* comments */}
+                      <div className="space-y-0 mt-0">
+                        <div className="border border-gray-200 rounded-lg p-2.5">
+                          <div className="flex items-center justify-between mb-0">
                             <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
                               Class Teacher
                             </p>
@@ -2050,41 +2145,48 @@ export default function StudentReportPage() {
                             placeholder="Class teacher's performance comment..."
                             rows={2}
                           />
-                          <div className="mt-0 pt-0">
+                          <div className="mt-2 pt-2 border-t border-gray-100">
                             <p className="text-xs text-gray-500">
                               Signature: ________________
                             </p>
                           </div>
                         </div>
 
-
-
-                        {/* Next Term Begins */}
-                        {/* {nextTermStartDate && (
-                          <div className="border border-gray-200 rounded-lg p-3 bg-green-50">
-                            <p className="text-sm font-semibold text-green-800 text-center">
-                              Next Term Begins on {nextTermStartDate}
+                        <div className="border border-gray-200 rounded-lg p-3">
+                          <div className="flex items-center justify-between mb-0">
+                            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                              Head Teacher
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              School Performance Comment
                             </p>
                           </div>
-                        )} */}
+                          <textarea
+                            value={headTeacherComment}
+                            onChange={(e) =>
+                              setHeadTeacherComment(e.target.value)
+                            }
+                            disabled={!isEditing}
+                            className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
+                            placeholder="Head teacher's performance comment..."
+                            rows={2}
+                          />
+                          <div className="mt-0 pt-0 border-t border-gray-100">
+                            <p className="text-xs text-gray-500">
+                              Signature: ________________
+                            </p>
+                          </div>
+                          <p className="text-sm font-semibold text-green-700 text-center">
+                            Next Term Begins on {nextTermStartDate}
+                          </p>
+                        </div>
                       </div>
 
                       {/* Footer */}
-                      <div className="pt-1 mt-1 border-t border-gray-200">
+                      <div className="pt-4 mt-0 border-t border-gray-200">
                         <div className="flex items-center justify-between text-xs text-gray-500">
-                          <div>
-                            {/* <span>
-                              {school.website ||
-                                school.email ||
-                                "Official Report"}
-                            </span> */}
-                          </div>
-                          <div className="text-right">
-                            {/* <p>
-                              Generated on{" "}
-                              {new Date().toLocaleDateString("en-GB")}
-                            </p> */}
-                          </div>
+                          <div></div>
+                          <div className="text-right"></div>
                         </div>
                       </div>
                     </div>
@@ -2113,7 +2215,7 @@ function PrintCSS() {
       }
 
       .print-inner {
-        padding: 5mm 12mm 8mm 12mm;
+        padding: 3mm 6mm 4mm 6mm;
         box-sizing: border-box;
       }
 

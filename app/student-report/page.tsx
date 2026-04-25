@@ -28,6 +28,7 @@ import {
   XCircle,
   FileText,
   Copy,
+  Users,
 } from "lucide-react";
 
 // ============ TYPES ============
@@ -91,7 +92,7 @@ interface StudentRow {
   date_of_birth?: string | null;
   gender?: string | null;
   profile_picture_url?: string | null;
-  payment_code: string | null;  // <-- ADDED: Payment code field
+  payment_code: string | null;
 }
 
 interface QuestionRow {
@@ -122,12 +123,6 @@ interface TeacherInfo {
   first_name: string | null;
   last_name: string | null;
   initials: string | null;
-}
-
-interface SubjectTeacherAssignmentRow {
-  subject_id: string;
-  teacher_user_id: string;
-  teachers: TeacherJoinRow[] | TeacherJoinRow | null;
 }
 
 interface SubjectRowWithDetails {
@@ -182,10 +177,6 @@ function termLabel(t?: TermExamRow | null) {
   return `${tn} ${t.year}`;
 }
 
-function examTypeLabel(t: "BOT" | "MOT" | "EOT") {
-  return t;
-}
-
 // Check if class is lower primary
 function isLowerPrimary(gradeName: string): boolean {
   const lowerPrimaryGrades = [
@@ -204,7 +195,6 @@ function isLowerPrimary(gradeName: string): boolean {
     "p.3",
     "primary 3",
   ];
-
   const normalizedName = gradeName.toLowerCase().trim();
   return lowerPrimaryGrades.some((grade) => normalizedName.includes(grade));
 }
@@ -236,7 +226,6 @@ function unebGradeText(g: number) {
 
 // Division calculation with F9 demotion logic
 function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
-  // First determine the base division based on aggregate
   let baseDivision = "";
 
   if (agg >= 4 && agg <= 12) {
@@ -253,7 +242,6 @@ function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
     baseDivision = "U";
   }
 
-  // Apply F9 demotion logic
   if (hasF9) {
     if (baseDivision === "Division 1") {
       return "Division 2";
@@ -262,7 +250,6 @@ function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
     } else if (baseDivision === "Division 3") {
       return "Division 4";
     } else {
-      // Division 4 and U remain unchanged
       return baseDivision;
     }
   }
@@ -317,170 +304,59 @@ function perfBand(pct: number) {
   return "poor";
 }
 
-// Comments functions
 function getSubjectComment(gradeText: string, pct: number): string {
   const shortComments: Record<string, string[]> = {
-    D1: [
-      "Excellent work.",
-      "Outstanding performance.",
-      "Exceptional achievement.",
-    ],
-    D2: ["Very good.", "Strong performance.", "Well done."],
-    C3: ["Good effort.", "Satisfactory work.", "Average performance."],
-    C4: ["Needs improvement.", "Can do better.", "Add more energy."],
-    C5: ["Do better.", "Needs help.", "Aim higher."],
-    C6: [
-      "Failed to meet expectations.",
-      "Critical improvement needed.",
-      "More effort.",
-    ],
-    P7: ["More Effort Needed.", "Work harder.", "Read harder."],
-    P8: ["More Effort.", "Improve .", "Improve."],
-    F9: ["Aim higher.", "Next time.", "Try harder."],
+    D1: ["Excellent work.", "Excellent.", "Excellent."],
+    D2: ["Very good performance.", "Very good performance."],
+    C3: ["Good Attempt.", "Good Attempt.", "Good Attempt."],
+    C4: ["Promsing."],
+    C5: [ "Aim higher."],
+    C6: ["More effort."],
+    P7: ["More Effort Needed."],
+    P8: ["Next time."],
+    F9:["Next time"]
   };
-
-  const comments =
-    shortComments[gradeText as keyof typeof shortComments] || shortComments.C3;
-
+  const comments = shortComments[gradeText as keyof typeof shortComments] || shortComments.C3;
   return pickStable(comments, `${gradeText}${pct}`);
 }
 
-function getClassTeacherComment(
-  pct: number,
-  division: string,
-  studentName: string,
-): string {
+function getClassTeacherComment(pct: number, division: string, studentName: string): string {
   const band = perfBand(pct);
-
   const templates: Record<string, string[]> = {
-    excellent: [
-      `${studentName} has performed excellently. Division: ${division}.`,
-      `Outstanding performance by ${studentName}. ${division}.`,
-      `Excellent work throughout the term. ${division}.`,
-    ],
-    very_good: [
-      `${studentName} performed very well. ${division}.`,
-      `Good consistent performance. ${division}.`,
-      `Strong work ethic demonstrated. ${division}.`,
-    ],
-    good: [
-      `${studentName}'s performance was satisfactory. ${division}.`,
-      `Average performance with room for improvement. ${division}.`,
-      `Fair effort shown throughout. ${division}.`,
-    ],
-    fair: [
-      `${studentName} needs to improve performance. ${division}.`,
-      `Below expectations, needs more effort. ${division}.`,
-      `Weak performance, requires attention. ${division}.`,
-    ],
-    poor: [
-      `${studentName} failed to meet minimum standards. .`,
-      `Fair  performance, immediate intervention needed. ${division}.`,
-      `Improvement needed across subjects. ${division}.`,
-    ],
+    excellent: [`${studentName} has performed excellently. Division: ${division}.`, `Outstanding performance by ${studentName}. ${division}.`],
+    very_good: [`${studentName} performed very well. ${division}.`, `Good consistent performance. ${division}.`],
+    good: [`${studentName}'s performance was satisfactory. ${division}.`, `Average performance with room for improvement. ${division}.`],
+    fair: [`${studentName} needs to improve performance. ${division}.`, `Below expectations, needs more effort. ${division}.`],
+    poor: [`${studentName} failed to meet minimum standards.`, `Fair performance, immediate intervention needed. ${division}.`],
   };
-
-  return pickStable(
-    templates[band] || templates.good,
-    `${studentName}${division}${pct}`,
-  );
+  return pickStable(templates[band] || templates.good, `${studentName}${division}${pct}`);
 }
 
 function getHeadTeacherComment(pct: number, division: string): string {
   const band = perfBand(pct);
-
   const templates: Record<string, string[]> = {
-    excellent: [
-      "Excellent achievement. Top performance in class.",
-      "Outstanding student. Sets a good example.",
-      "Academic excellence demonstrated throughout.",
-    ],
-    very_good: [
-      "Very good performance. Maintain high standards.",
-      "Strong academic showing. Keep it up.",
-      "Commendable effort and results.",
-    ],
-    good: [
-      "Satisfactory performance. Room for improvement.",
-      "Average results. Could do better with more effort.",
-      "Fair achievement. Needs to aim higher.",
-    ],
-    fair: [
-      "Below standard performance. Needs immediate improvement.",
-      "Weak results. Requires extra support.",
-      "Needs to work harder to meet expectations.",
-    ],
-    poor: [
-      "Poor performance. Parental intervention required.",
-      "Unsatisfactory results. Urgent attention needed.",
-      "Failed to meet academic standards.",
-    ],
+    excellent: ["Excellent achievement. Top performance in class.", "Outstanding student. Sets a good example."],
+    very_good: ["Very good performance. Maintain high standards.", "Strong academic showing. Keep it up."],
+    good: ["Satisfactory performance. Room for improvement.", "Average results. Could do better with more effort."],
+    fair: ["Below standard performance. Needs immediate improvement.", "Weak results. Requires extra support."],
+    poor: ["More Effort needed. Parental intervention required.", "Unsatisfactory results. Urgent attention needed."],
   };
-
   return pickStable(templates[band] || templates.good, `${division}${pct}`);
-}
-
-function getOverallRemark(pct: number, division: string): string {
-  const band = perfBand(pct);
-  const roundPct = Math.round(pct);
-
-  const remarks: Record<string, string[]> = {
-    excellent: [
-      `Excellent! ${division} with ${roundPct}% average.`,
-      `Outstanding performance! ${division}.`,
-      `Top performer! Excellent results across all subjects.`,
-    ],
-    very_good: [
-      `Very good! ${division} with ${roundPct}% average.`,
-      `Strong performance! ${division}.`,
-      `Well done! Good academic achievement.`,
-    ],
-    good: [
-      `Satisfactory. ${division} with ${roundPct}% average.`,
-      `Average performance. ${division}.`,
-      `Fair results. Room for improvement.`,
-    ],
-    fair: [
-      `Needs improvement. ${division} with ${roundPct}% average.`,
-      `Below expectations. ${division}.`,
-      `Weak performance. Requires more effort.`,
-    ],
-    poor: [
-      `Poor performance. ${division} with ${roundPct}% average.`,
-      `Failed to meet standards. ${division}.`,
-      `Very weak results. Immediate attention required.`,
-    ],
-  };
-
-  return pickStable(remarks[band] || remarks.good, `${division}${pct}`);
 }
 
 function tinyToast(message: string) {
   const el = document.createElement("div");
-  el.className =
-    "fixed top-4 right-4 z-50 rounded-lg bg-gray-900 text-white px-4 py-2 text-sm shadow-lg";
+  el.className = "fixed top-4 right-4 z-50 rounded-lg bg-gray-900 text-white px-4 py-2 text-sm shadow-lg";
   el.textContent = message;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 2000);
 }
 
-function teacherDisplayName(t?: TeacherJoinRow | null) {
-  if (!t) return "";
-  return `${t.initials ?? ""} ${t.first_name ?? ""} ${t.last_name ?? ""}`.trim();
-}
-
-function buildLocalKey(
-  schoolId: string,
-  gradeId: string,
-  termId: string,
-  studentId: string,
-) {
+function buildLocalKey(schoolId: string, gradeId: string, termId: string, studentId: string) {
   return `report_comments::${schoolId}::${gradeId}::${termId}::${studentId}`;
 }
 
-function analyzePerformance(
-  subjectRows: SubjectRowWithDetails[],
-): PerformanceAnalysis {
+function analyzePerformance(subjectRows: SubjectRowWithDetails[]): PerformanceAnalysis {
   if (subjectRows.length === 0) {
     return {
       bestSubject: "—",
@@ -494,14 +370,8 @@ function analyzePerformance(
     };
   }
 
-  const bestSubject = subjectRows.reduce((best, current) =>
-    current.termPct > best.termPct ? current : best,
-  );
-
-  const worstSubject = subjectRows.reduce((worst, current) =>
-    current.termPct < worst.termPct ? current : worst,
-  );
-
+  const bestSubject = subjectRows.reduce((best, current) => current.termPct > best.termPct ? current : best);
+  const worstSubject = subjectRows.reduce((worst, current) => current.termPct < worst.termPct ? current : worst);
   const strengths = subjectRows.filter((s) => s.termPct >= 70);
   const improvements = subjectRows.filter((s) => s.termPct < 50);
   const aboveAverage = subjectRows.filter((s) => s.termPct >= 60);
@@ -519,51 +389,27 @@ function analyzePerformance(
   };
 }
 
-// Helper function to get next term date
-function getNextTermDate(
-  currentTerm: TermExamRow | null,
-  allTerms: TermExamRow[],
-): string | null {
+function getNextTermDate(currentTerm: TermExamRow | null, allTerms: TermExamRow[]): string | null {
   if (!currentTerm || allTerms.length === 0) return null;
-
   const termOrder = { TERM_1: 1, TERM_2: 2, TERM_3: 3 };
   const currentTermNumber = termOrder[currentTerm.term_name];
   const currentYear = currentTerm.year;
 
-  // Find next term
   let nextTerm = null;
-
-  // First check if there's a next term in the same year
   if (currentTermNumber < 3) {
-    nextTerm = allTerms.find(
-      (t) =>
-        t.year === currentYear &&
-        termOrder[t.term_name] === currentTermNumber + 1,
-    );
+    nextTerm = allTerms.find((t) => t.year === currentYear && termOrder[t.term_name] === currentTermNumber + 1);
   }
-
-  // If not found, look for Term 1 of next year
   if (!nextTerm) {
-    nextTerm = allTerms.find(
-      (t) => t.year === currentYear + 1 && t.term_name === "TERM_1",
-    );
+    nextTerm = allTerms.find((t) => t.year === currentYear + 1 && t.term_name === "TERM_1");
   }
-
-  // If still not found, look for the earliest upcoming term
   if (!nextTerm) {
     const currentDate = new Date();
-    const futureTerms = allTerms.filter(
-      (t) => new Date(t.start_date) > currentDate,
-    );
+    const futureTerms = allTerms.filter((t) => new Date(t.start_date) > currentDate);
     if (futureTerms.length > 0) {
-      futureTerms.sort(
-        (a, b) =>
-          new Date(a.start_date).getTime() - new Date(b.start_date).getTime(),
-      );
+      futureTerms.sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime());
       nextTerm = futureTerms[0];
     }
   }
-
   return nextTerm ? formatDate(nextTerm.start_date) : null;
 }
 
@@ -571,7 +417,6 @@ function getNextTermDate(
 export default function StudentReportPage() {
   const router = useRouter();
 
-  // State Management
   const [authChecking, setAuthChecking] = useState(true);
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [school, setSchool] = useState<SchoolRow | null>(null);
@@ -583,44 +428,21 @@ export default function StudentReportPage() {
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [results, setResults] = useState<ExamResultRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [batchPrinting, setBatchPrinting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [selectedGradeId, setSelectedGradeId] = useState("");
   const [selectedTermId, setSelectedTermId] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("");
-  const [subjectComments, setSubjectComments] = useState<
-    Record<number, string>
-  >({});
+  const [subjectComments, setSubjectComments] = useState<Record<number, string>>({});
   const [classTeacherComment, setClassTeacherComment] = useState("");
   const [headTeacherComment, setHeadTeacherComment] = useState("");
-  const [subjectTeacherById, setSubjectTeacherById] = useState<
-    Record<number, string>
-  >({});
+  const [subjectTeacherById, setSubjectTeacherById] = useState<Record<number, string>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [teachers, setTeachers] = useState<
-    Array<{ id: string; first_name: string; last_name: string }>
-  >([]);
-  const [nextTermStartDate, setNextTermStartDate] = useState<string | null>(
-    null,
-  );
+  const [nextTermStartDate, setNextTermStartDate] = useState<string | null>(null);
 
-  // Derived values - MUST be defined before any useEffect that uses them
-  const selectedTerm = useMemo(
-    () =>
-      selectedTermId
-        ? (terms.find((t) => t.id === Number(selectedTermId)) ?? null)
-        : null,
-    [terms, selectedTermId],
-  );
-
-  const selectedGrade = useMemo(
-    () =>
-      selectedGradeId
-        ? (grades.find((g) => g.id === Number(selectedGradeId)) ?? null)
-        : null,
-    [grades, selectedGradeId],
-  );
-
+  const selectedTerm = useMemo(() => selectedTermId ? terms.find((t) => t.id === Number(selectedTermId)) ?? null : null, [terms, selectedTermId]);
+  const selectedGrade = useMemo(() => selectedGradeId ? grades.find((g) => g.id === Number(selectedGradeId)) ?? null : null, [grades, selectedGradeId]);
   const subjectsForGrade = useMemo(() => {
     if (!selectedGradeId) return [];
     return subjects.filter((s) => s.grade_id === Number(selectedGradeId));
@@ -628,34 +450,24 @@ export default function StudentReportPage() {
 
   const examSessionsForTerm = useMemo(() => {
     if (!selectedTermId) return [];
-    return examSessions
-      .filter((es) => es.term_id === Number(selectedTermId))
-      .sort((a, b) => {
-        const ord = (x: ExamSessionRow["exam_type"]) =>
-          x === "BOT" ? 1 : x === "MOT" ? 2 : 3;
-        return ord(a.exam_type) - ord(b.exam_type);
-      });
+    return examSessions.filter((es) => es.term_id === Number(selectedTermId)).sort((a, b) => {
+      const ord = (x: ExamSessionRow["exam_type"]) => x === "BOT" ? 1 : x === "MOT" ? 2 : 3;
+      return ord(a.exam_type) - ord(b.exam_type);
+    });
   }, [examSessions, selectedTermId]);
 
-  const canLoad = useMemo(
-    () => Boolean(school?.id && selectedGradeId && selectedTermId),
-    [school?.id, selectedGradeId, selectedTermId],
-  );
-
+  const canLoad = useMemo(() => Boolean(school?.id && selectedGradeId && selectedTermId), [school?.id, selectedGradeId, selectedTermId]);
   const sessions = examSessionsForTerm;
   const noSessions = canLoad && sessions.length === 0;
 
-  // Calculate next term date when selected term changes - Now after selectedTerm is defined
   useEffect(() => {
     if (selectedTerm && terms.length > 0) {
-      const nextDate = getNextTermDate(selectedTerm, terms);
-      setNextTermStartDate(nextDate);
+      setNextTermStartDate(getNextTermDate(selectedTerm, terms));
     } else {
       setNextTermStartDate(null);
     }
   }, [selectedTerm, terms]);
 
-  // ============ EFFECTS ============
   // Auth check
   useEffect(() => {
     (async () => {
@@ -671,73 +483,34 @@ export default function StudentReportPage() {
   // Load profile and school data
   useEffect(() => {
     if (authChecking) return;
-
     (async () => {
       setLoading(true);
       setErrorMsg(null);
-
       try {
         const { data: userData, error: uErr } = await supabase.auth.getUser();
-        if (uErr || !userData.user)
-          throw new Error(uErr?.message || "Could not load user.");
-
-        const { data: p, error: pErr } = await supabase
-          .from("profiles")
-          .select("user_id, email, full_name, role, school_id")
-          .eq("user_id", userData.user.id)
-          .single();
-
+        if (uErr || !userData.user) throw new Error(uErr?.message || "Could not load user.");
+        const { data: p, error: pErr } = await supabase.from("profiles").select("user_id, email, full_name, role, school_id").eq("user_id", userData.user.id).single();
         if (pErr || !p) throw new Error(pErr?.message || "Profile not found.");
         const prof = p as ProfileRow;
         setProfile(prof);
-
         if (!prof.school_id) {
           setSchool(null);
           setLoading(false);
           return;
         }
-
-        const { data: s, error: sErr } = await supabase
-          .from("general_information")
-          .select(
-            "id, school_name, location, contact_number, email, website, school_badge",
-          )
-          .eq("id", prof.school_id)
-          .single();
-
+        const { data: s, error: sErr } = await supabase.from("general_information").select("id, school_name, location, contact_number, email, website, school_badge").eq("id", prof.school_id).single();
         if (sErr || !s) throw new Error(sErr?.message || "School not found.");
         setSchool(s as SchoolRow);
-
-        // Load all data in parallel
         const [gradeRes, subjectRes, termRes, examSessRes] = await Promise.all([
-          supabase
-            .from("class")
-            .select("id, grade_name")
-            .eq("school_id", s.id)
-            .order("grade_name"),
-          supabase
-            .from("subject")
-            .select("id, name, grade_id")
-            .eq("school_id", s.id)
-            .order("name"),
-          supabase
-            .from("term_exam_session")
-            .select("id, term_name, year, start_date, end_date")
-            .eq("school_id", s.id)
-            .order("year", { ascending: false })
-            .order("term_name"),
-          supabase
-            .from("exam_session")
-            .select("id, term_id, exam_type")
-            .eq("school_id", s.id)
-            .order("id"),
+          supabase.from("class").select("id, grade_name").eq("school_id", s.id).order("grade_name"),
+          supabase.from("subject").select("id, name, grade_id").eq("school_id", s.id).order("name"),
+          supabase.from("term_exam_session").select("id, term_name, year, start_date, end_date").eq("school_id", s.id).order("year", { ascending: false }).order("term_name"),
+          supabase.from("exam_session").select("id, term_id, exam_type").eq("school_id", s.id).order("id"),
         ]);
-
         if (gradeRes.error) throw gradeRes.error;
         if (subjectRes.error) throw subjectRes.error;
         if (termRes.error) throw termRes.error;
         if (examSessRes.error) throw examSessRes.error;
-
         setGrades((gradeRes.data ?? []) as GradeRow[]);
         setSubjects((subjectRes.data ?? []) as SubjectRow[]);
         setTerms((termRes.data ?? []) as TermExamRow[]);
@@ -753,10 +526,8 @@ export default function StudentReportPage() {
   // Load students, questions, results
   useEffect(() => {
     if (!school?.id) return;
-
     (async () => {
       setErrorMsg(null);
-
       if (!canLoad) {
         setStudents([]);
         setQuestions([]);
@@ -764,67 +535,23 @@ export default function StudentReportPage() {
         setSelectedStudentId("");
         return;
       }
-
       setLoading(true);
       try {
         const gradeId = Number(selectedGradeId);
         const termId = Number(selectedTermId);
         const sessionIds = examSessionsForTerm.map((s) => s.id);
-
-        // Load students - ADDED payment_code to select
-        const studentsRes = await supabase
-          .from("students")
-          .select(
-            "registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code",
-          )
-          .eq("school_id", school.id)
-          .eq("current_grade_id", gradeId)
-          .order("first_name");
-
+        const studentsRes = await supabase.from("students").select("registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code").eq("school_id", school.id).eq("current_grade_id", gradeId).order("first_name");
         if (studentsRes.error) throw studentsRes.error;
-
-        // Load questions
-        const questionsRes =
-          sessionIds.length === 0
-            ? { data: [], error: null }
-            : await supabase
-                .from("assessment_question")
-                .select("id, max_score, grade_id, subject_id, exam_type_id")
-                .eq("school_id", school.id)
-                .eq("grade_id", gradeId)
-                .eq("term_exam_id", termId)
-                .in("exam_type_id", sessionIds);
-
+        const questionsRes = sessionIds.length === 0 ? { data: [], error: null } : await supabase.from("assessment_question").select("id, max_score, grade_id, subject_id, exam_type_id").eq("school_id", school.id).eq("grade_id", gradeId).eq("term_exam_id", termId).in("exam_type_id", sessionIds);
         if ((questionsRes as any).error) throw (questionsRes as any).error;
-
         const qRows = ((questionsRes as any).data ?? []) as QuestionRow[];
         const qIds = qRows.map((q) => q.id);
-
-        // Load results
-        const resultsRes =
-          qIds.length === 0
-            ? { data: [], error: null }
-            : await supabase
-                .from("assessment_examresult")
-                .select(
-                  "id, student_id, question_id, grade_id, exam_session_id, score",
-                )
-                .eq("school_id", school.id)
-                .eq("grade_id", gradeId)
-                .in("exam_session_id", sessionIds)
-                .in("question_id", qIds);
-
+        const resultsRes = qIds.length === 0 ? { data: [], error: null } : await supabase.from("assessment_examresult").select("id, student_id, question_id, grade_id, exam_session_id, score").eq("school_id", school.id).eq("grade_id", gradeId).in("exam_session_id", sessionIds).in("question_id", qIds);
         if ((resultsRes as any).error) throw (resultsRes as any).error;
-
         setStudents((studentsRes.data ?? []) as StudentRow[]);
         setQuestions(qRows);
         setResults(((resultsRes as any).data ?? []) as ExamResultRow[]);
-
-        if (
-          !selectedStudentId &&
-          studentsRes.data &&
-          studentsRes.data.length > 0
-        ) {
+        if (!selectedStudentId && studentsRes.data && studentsRes.data.length > 0) {
           setSelectedStudentId(studentsRes.data[0].registration_id);
         }
       } catch (e: any) {
@@ -836,96 +563,42 @@ export default function StudentReportPage() {
         setLoading(false);
       }
     })();
-  }, [
-    school?.id,
-    canLoad,
-    selectedGradeId,
-    selectedTermId,
-    examSessionsForTerm.length,
-  ]);
+  }, [school?.id, canLoad, selectedGradeId, selectedTermId, examSessionsForTerm.length]);
 
-  const selectedStudent = useMemo(
-    () =>
-      selectedStudentId
-        ? (students.find((s) => s.registration_id === selectedStudentId) ??
-          null)
-        : null,
-    [students, selectedStudentId],
-  );
+  const selectedStudent = useMemo(() => selectedStudentId ? students.find((s) => s.registration_id === selectedStudentId) ?? null : null, [students, selectedStudentId]);
 
-  // Load subject teachers - Using the direct teacher_id field from subject table
+  // Load subject teachers
   useEffect(() => {
     if (!school?.id || !selectedGradeId) return;
-
     (async () => {
       try {
-        // Get all subjects for this grade with their teacher information
-        const { data, error } = await supabase
-          .from("subject")
-          .select(
-            `
-            id,
-            name,
-            teacher_id,
-            teacher:teachers (
-              registration_id,
-              first_name,
-              last_name,
-              initials
-            )
-          `,
-          )
-          .eq("school_id", school.id)
-          .eq("grade_id", Number(selectedGradeId));
-
+        const { data, error } = await supabase.from("subject").select(`id, name, teacher_id, teacher:teachers (registration_id, first_name, last_name, initials)`).eq("school_id", school.id).eq("grade_id", Number(selectedGradeId));
         if (error) {
           console.error("Error loading subject teachers:", error);
           return;
         }
-
         const map: Record<string, string> = {};
-
         for (const subject of data || []) {
           if (subject.teacher_id && subject.teacher) {
-            // Handle case where teacher might be an array or a single object
             let teacherData: TeacherInfo | null = null;
-
             if (Array.isArray(subject.teacher) && subject.teacher.length > 0) {
               const teacher = subject.teacher[0] as any;
-              teacherData = {
-                registration_id: teacher.registration_id,
-                first_name: teacher.first_name,
-                last_name: teacher.last_name,
-                initials: teacher.initials,
-              };
+              teacherData = { registration_id: teacher.registration_id, first_name: teacher.first_name, last_name: teacher.last_name, initials: teacher.initials };
             } else if (subject.teacher && typeof subject.teacher === "object") {
               const teacher = subject.teacher as any;
-              teacherData = {
-                registration_id: teacher.registration_id,
-                first_name: teacher.first_name,
-                last_name: teacher.last_name,
-                initials: teacher.initials,
-              };
+              teacherData = { registration_id: teacher.registration_id, first_name: teacher.first_name, last_name: teacher.last_name, initials: teacher.initials };
             }
-
             if (teacherData) {
-              // Build display name - prioritize initials, then first+last name
               let displayName = "";
               if (teacherData.initials && teacherData.initials.trim()) {
                 displayName = teacherData.initials.trim();
               } else if (teacherData.first_name || teacherData.last_name) {
-                // Generate initials from first and last name if not available
-                const firstInitial = teacherData.first_name
-                  ? teacherData.first_name.charAt(0).toUpperCase()
-                  : "";
-                const lastInitial = teacherData.last_name
-                  ? teacherData.last_name.charAt(0).toUpperCase()
-                  : "";
+                const firstInitial = teacherData.first_name ? teacherData.first_name.charAt(0).toUpperCase() : "";
+                const lastInitial = teacherData.last_name ? teacherData.last_name.charAt(0).toUpperCase() : "";
                 displayName = `${firstInitial}${lastInitial}`;
               } else {
                 displayName = "—";
               }
-
               map[subject.id] = displayName;
             } else {
               map[subject.id] = "—";
@@ -934,7 +607,6 @@ export default function StudentReportPage() {
             map[subject.id] = "—";
           }
         }
-
         setSubjectTeacherById(map);
       } catch (err) {
         console.error("Error in subject teacher loading:", err);
@@ -942,7 +614,6 @@ export default function StudentReportPage() {
     })();
   }, [school?.id, selectedGradeId]);
 
-  // Calculate possible scores by session and subject
   const possibleBySessionSubject = useMemo(() => {
     const map = new Map<number, Map<number, number>>();
     for (const q of questions) {
@@ -956,7 +627,6 @@ export default function StudentReportPage() {
     return map;
   }, [questions]);
 
-  // Map question to session and subject
   const questionToSessionSubject = useMemo(() => {
     const m = new Map<number, { sessionId: number; subjectId: number }>();
     for (const q of questions) {
@@ -967,163 +637,79 @@ export default function StudentReportPage() {
     return m;
   }, [questions]);
 
-  // Calculate totals by student, session, subject
   const totalsByStudentSessionSubject = useMemo(() => {
     const map = new Map<string, Map<number, Map<number, number>>>();
     for (const r of results) {
       if (!r.question_id || !r.exam_session_id) continue;
       const meta = questionToSessionSubject.get(Number(r.question_id));
       if (!meta) continue;
-
       const studentId = r.student_id;
       const sessionId = Number(r.exam_session_id);
       const subjectId = meta.subjectId;
-
       if (!map.has(studentId)) map.set(studentId, new Map());
       const bySess = map.get(studentId)!;
-
       if (!bySess.has(sessionId)) bySess.set(sessionId, new Map());
       const bySub = bySess.get(sessionId)!;
-
       bySub.set(subjectId, (bySub.get(subjectId) ?? 0) + Number(r.score ?? 0));
     }
     return map;
   }, [results, questionToSessionSubject]);
 
-  // Calculate subject position for lower primary
-  const getSubjectPosition = (
-    subjectId: number,
-    sessionId: number,
-    studentId: string,
-  ): number => {
+  const getSubjectPosition = (subjectId: number, sessionId: number, studentId: string): number => {
     const allStudentScores: Array<{ studentId: string; score: number }> = [];
-
     for (const student of students) {
-      const sMap =
-        totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
+      const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
       const totalsForSess = sMap.get(sessionId) ?? new Map();
       const total = Number(totalsForSess.get(subjectId) ?? 0);
-      allStudentScores.push({
-        studentId: student.registration_id,
-        score: total,
-      });
+      allStudentScores.push({ studentId: student.registration_id, score: total });
     }
-
-    // Sort by score descending
     allStudentScores.sort((a, b) => b.score - a.score);
-
-    const position =
-      allStudentScores.findIndex((s) => s.studentId === studentId) + 1;
-    return position;
+    return allStudentScores.findIndex((s) => s.studentId === studentId) + 1;
   };
 
-  // Prepare subject rows for selected student
   const subjectRowsForStudent = useMemo(() => {
     if (!selectedStudent) return [];
-    const sMap =
-      totalsByStudentSessionSubject.get(selectedStudent.registration_id) ??
-      new Map();
-
+    const sMap = totalsByStudentSessionSubject.get(selectedStudent.registration_id) ?? new Map();
     return subjectsForGrade.map((sub) => {
       const perSession = sessions.map((sess) => {
         const totalsForSess = sMap.get(sess.id) ?? new Map();
         const total = Number(totalsForSess.get(sub.id) ?? 0);
-        const possible = Number(
-          (possibleBySessionSubject.get(sess.id)?.get(sub.id) ?? 0) as number,
-        );
+        const possible = Number((possibleBySessionSubject.get(sess.id)?.get(sub.id) ?? 0) as number);
         const pct = possible > 0 ? (total / possible) * 100 : 0;
-        return {
-          sessionId: sess.id,
-          exam_type: sess.exam_type,
-          total,
-          possible,
-          pct,
-        };
+        return { sessionId: sess.id, exam_type: sess.exam_type, total, possible, pct };
       });
-
       const valid = perSession.filter((x) => x.possible > 0);
       const totalAll = valid.reduce((a, x) => a + x.total, 0);
       const possibleAll = valid.reduce((a, x) => a + x.possible, 0);
       const termPct = possibleAll > 0 ? (totalAll / possibleAll) * 100 : 0;
-
       const unebGrade = unebSubjectGrade(termPct);
       const txt = unebGradeText(unebGrade);
-
-      return {
-        subject_id: sub.id,
-        subject_name: sub.name,
-        perSession,
-        termPct,
-        grade_text: txt,
-        pill: gradePillClass(txt),
-        colorClass: gradeColor(termPct),
-        unebGrade,
-      };
+      return { subject_id: sub.id, subject_name: sub.name, perSession, termPct, grade_text: txt, pill: gradePillClass(txt), colorClass: gradeColor(termPct), unebGrade };
     });
-  }, [
-    selectedStudent,
-    subjectsForGrade,
-    sessions,
-    totalsByStudentSessionSubject,
-    possibleBySessionSubject,
-  ]);
+  }, [selectedStudent, subjectsForGrade, sessions, totalsByStudentSessionSubject, possibleBySessionSubject]);
 
-  // Calculate overall percentage
   const overall = useMemo(() => {
     if (!selectedStudent) return { pct: 0 };
-    const valid = subjectRowsForStudent
-      .map((r) => r.termPct)
-      .filter((x) => Number.isFinite(x) && x > 0);
-    const pct = valid.length
-      ? valid.reduce((a, x) => a + x, 0) / valid.length
-      : 0;
+    const valid = subjectRowsForStudent.map((r) => r.termPct).filter((x) => Number.isFinite(x) && x > 0);
+    const pct = valid.length ? valid.reduce((a, x) => a + x, 0) / valid.length : 0;
     return { pct };
   }, [selectedStudent, subjectRowsForStudent]);
 
-  // Calculate aggregate and division - Updated with F9 demotion logic
   const aggregateAndDivision = useMemo(() => {
-    if (!selectedStudent)
-      return {
-        aggregate: 0,
-        division: "—",
-        pill: divisionPillClass("U"),
-        best4Count: 0,
-        best4Grades: [],
-      };
-
-    const gradesArr = subjectRowsForStudent
-      .filter((s) => s.unebGrade > 0)
-      .map((s) => s.unebGrade)
-      .sort((a, b) => a - b);
-
+    if (!selectedStudent) return { aggregate: 0, division: "—", pill: divisionPillClass("U"), best4Count: 0, best4Grades: [] };
+    const gradesArr = subjectRowsForStudent.filter((s) => s.unebGrade > 0).map((s) => s.unebGrade).sort((a, b) => a - b);
     const hasF9 = gradesArr.includes(9);
     const best4 = gradesArr.slice(0, 4);
     const aggregate = best4.reduce((a, g) => a + g, 0);
     const division = unebDivisionFromAggregate(aggregate, hasF9);
-
-    return {
-      aggregate,
-      division,
-      pill: divisionPillClass(division),
-      best4Count: best4.length,
-      best4Grades: best4.map((g) => unebGradeText(g)),
-    };
+    return { aggregate, division, pill: divisionPillClass(division), best4Count: best4.length, best4Grades: best4.map((g) => unebGradeText(g)) };
   }, [selectedStudent, subjectRowsForStudent]);
 
-  // Performance analysis
-  const performanceAnalysis = useMemo(() => {
-    return analyzePerformance(subjectRowsForStudent);
-  }, [subjectRowsForStudent]);
+  const performanceAnalysis = useMemo(() => analyzePerformance(subjectRowsForStudent), [subjectRowsForStudent]);
+  const canEditComments = useMemo(() => profile?.role === "ADMIN" || profile?.role === "TEACHER" || profile?.role === "ACADEMIC", [profile?.role]);
 
-  const canEditComments = useMemo(() => {
-    const role = profile?.role;
-    return role === "ADMIN" || role === "TEACHER" || role === "ACADEMIC";
-  }, [profile?.role]);
-
-  // Calculate total marks for the selected student
   const totalMarks = useMemo(() => {
     if (!selectedStudent) return 0;
-
     let total = 0;
     for (const r of subjectRowsForStudent) {
       total += r.perSession.reduce((acc, s) => acc + s.total, 0);
@@ -1131,109 +717,50 @@ export default function StudentReportPage() {
     return total;
   }, [selectedStudent, subjectRowsForStudent]);
 
-  // Calculate total possible marks for the selected grade/session
-  const totalPossible = useMemo(() => {
-    let total = 0;
-    for (const r of subjectRowsForStudent) {
-      total += r.perSession.reduce((acc, s) => acc + s.possible, 0);
-    }
-
-    return total;
-  }, [subjectRowsForStudent]);
-
-  // Calculate position among students
   const position = useMemo(() => {
-    if (!selectedGrade || !selectedTerm || !selectedStudent)
-      return { rank: "-", outOf: "-" };
-
-    // Sum total marks per student
+    if (!selectedGrade || !selectedTerm || !selectedStudent) return { rank: "-", outOf: "-" };
     const studentTotals = students.map((s) => {
-      const sRows = subjectRowsForStudent; // or calculate per student if needed
-      const t = sRows.reduce(
-        (acc, r) => acc + r.perSession.reduce((a, p) => a + p.total, 0),
-        0,
-      );
-      return { id: s.registration_id, total: t };
+      let total = 0;
+      for (const r of subjectRowsForStudent) {
+        total += r.perSession.reduce((a, p) => a + p.total, 0);
+      }
+      return { id: s.registration_id, total };
     });
-
-    // Sort descending
     studentTotals.sort((a, b) => b.total - a.total);
-
-    const idx = studentTotals.findIndex(
-      (s) => s.id === selectedStudent.registration_id,
-    );
+    const idx = studentTotals.findIndex((s) => s.id === selectedStudent.registration_id);
     return { rank: idx + 1, outOf: studentTotals.length };
   }, [students, selectedStudent, subjectRowsForStudent]);
 
   // Load saved comments
   useEffect(() => {
-    if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId)
-      return;
-
-    const key = buildLocalKey(
-      school.id,
-      selectedGradeId,
-      selectedTermId,
-      selectedStudent.registration_id,
-    );
+    if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId) return;
+    const key = buildLocalKey(school.id, selectedGradeId, selectedTermId, selectedStudent.registration_id);
     try {
       const raw = localStorage.getItem(key);
       if (!raw) return;
       const parsed = JSON.parse(raw) as any;
-
       if (parsed?.subjectComments) setSubjectComments(parsed.subjectComments);
-      if (typeof parsed?.classTeacherComment === "string")
-        setClassTeacherComment(parsed.classTeacherComment);
-      if (typeof parsed?.headTeacherComment === "string")
-        setHeadTeacherComment(parsed.headTeacherComment);
-    } catch {
-      // ignore
-    }
+      if (typeof parsed?.classTeacherComment === "string") setClassTeacherComment(parsed.classTeacherComment);
+      if (typeof parsed?.headTeacherComment === "string") setHeadTeacherComment(parsed.headTeacherComment);
+    } catch { }
   }, [school?.id, selectedStudentId, selectedGradeId, selectedTermId]);
 
   // Save comments
   useEffect(() => {
-    if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId)
-      return;
-
-    const key = buildLocalKey(
-      school.id,
-      selectedGradeId,
-      selectedTermId,
-      selectedStudent.registration_id,
-    );
-    const payload = {
-      subjectComments,
-      classTeacherComment,
-      headTeacherComment,
-    };
-
-    try {
-      localStorage.setItem(key, JSON.stringify(payload));
-    } catch {
-      // ignore
-    }
-  }, [
-    school?.id,
-    selectedStudentId,
-    selectedGradeId,
-    selectedTermId,
-    subjectComments,
-    classTeacherComment,
-    headTeacherComment,
-  ]);
+    if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId) return;
+    const key = buildLocalKey(school.id, selectedGradeId, selectedTermId, selectedStudent.registration_id);
+    localStorage.setItem(key, JSON.stringify({ subjectComments, classTeacherComment, headTeacherComment }));
+  }, [school?.id, selectedStudentId, selectedGradeId, selectedTermId, subjectComments, classTeacherComment, headTeacherComment]);
 
   // Auto-generate subject comments
   useEffect(() => {
     if (!selectedStudent || subjectRowsForStudent.length === 0) return;
-
     setSubjectComments((prev) => {
       const next = { ...prev };
       for (const r of subjectRowsForStudent) {
         const existing = (next[r.subject_id] ?? "").trim();
         if (!existing) {
-          const pct = Math.round(r.termPct);
-          next[r.subject_id] = getSubjectComment(r.grade_text, pct);
+          next[r.subject_id] = getSubjectComment(r.grade_text, Math.round(r.termPct));
         }
       }
       return next;
@@ -1243,11 +770,9 @@ export default function StudentReportPage() {
   // Auto-generate class and head teacher comments
   useEffect(() => {
     if (!selectedStudent) return;
-
     const studentName = fmtName(selectedStudent);
     const div = aggregateAndDivision.division || "—";
     const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
-
     setClassTeacherComment(getClassTeacherComment(pct, div, studentName));
     setHeadTeacherComment(getHeadTeacherComment(pct, div));
   }, [selectedStudentId, overall.pct, aggregateAndDivision.division]);
@@ -1255,23 +780,18 @@ export default function StudentReportPage() {
   // ============ ACTION HANDLERS ============
   const autoFillAllComments = () => {
     if (!selectedStudent) return;
-
     setSubjectComments(() => {
       const next: Record<number, string> = {};
       for (const r of subjectRowsForStudent) {
-        const pct = Math.round(r.termPct);
-        next[r.subject_id] = getSubjectComment(r.grade_text, pct);
+        next[r.subject_id] = getSubjectComment(r.grade_text, Math.round(r.termPct));
       }
       return next;
     });
-
     const studentName = fmtName(selectedStudent);
     const div = aggregateAndDivision.division || "—";
     const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
-
     setClassTeacherComment(getClassTeacherComment(pct, div, studentName));
     setHeadTeacherComment(getHeadTeacherComment(pct, div));
-
     tinyToast("Auto-filled comments");
   };
 
@@ -1289,58 +809,24 @@ export default function StudentReportPage() {
 
   const handleRefresh = async () => {
     if (!school?.id || !selectedGradeId || !selectedTermId) return;
-
     setRefreshing(true);
     try {
       const gradeId = Number(selectedGradeId);
       const termId = Number(selectedTermId);
       const sessionIds = examSessionsForTerm.map((s) => s.id);
-
       const [studentsRes, questionsRes] = await Promise.all([
-        supabase
-          .from("students")
-          .select(
-            "registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code",
-          )
-          .eq("school_id", school.id)
-          .eq("current_grade_id", gradeId)
-          .order("first_name"),
-        sessionIds.length === 0
-          ? { data: [], error: null }
-          : supabase
-              .from("assessment_question")
-              .select("id, max_score, grade_id, subject_id, exam_type_id")
-              .eq("school_id", school.id)
-              .eq("grade_id", gradeId)
-              .eq("term_exam_id", termId)
-              .in("exam_type_id", sessionIds),
+        supabase.from("students").select("registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code").eq("school_id", school.id).eq("current_grade_id", gradeId).order("first_name"),
+        sessionIds.length === 0 ? { data: [], error: null } : supabase.from("assessment_question").select("id, max_score, grade_id, subject_id, exam_type_id").eq("school_id", school.id).eq("grade_id", gradeId).eq("term_exam_id", termId).in("exam_type_id", sessionIds),
       ]);
-
       if (studentsRes.error) throw studentsRes.error;
       if ((questionsRes as any).error) throw (questionsRes as any).error;
-
       const qRows = ((questionsRes as any).data ?? []) as QuestionRow[];
       const qIds = qRows.map((q) => q.id);
-
-      const resultsRes =
-        qIds.length === 0
-          ? { data: [], error: null }
-          : await supabase
-              .from("assessment_examresult")
-              .select(
-                "id, student_id, question_id, grade_id, exam_session_id, score",
-              )
-              .eq("school_id", school.id)
-              .eq("grade_id", gradeId)
-              .in("exam_session_id", sessionIds)
-              .in("question_id", qIds);
-
+      const resultsRes = qIds.length === 0 ? { data: [], error: null } : await supabase.from("assessment_examresult").select("id, student_id, question_id, grade_id, exam_session_id, score").eq("school_id", school.id).eq("grade_id", gradeId).in("exam_session_id", sessionIds).in("question_id", qIds);
       if ((resultsRes as any).error) throw (resultsRes as any).error;
-
       setStudents((studentsRes.data ?? []) as StudentRow[]);
       setQuestions(qRows);
       setResults(((resultsRes as any).data ?? []) as ExamResultRow[]);
-
       tinyToast("Data refreshed");
     } catch (e: any) {
       setErrorMsg("Refresh failed: " + e.message);
@@ -1349,7 +835,6 @@ export default function StudentReportPage() {
     }
   };
 
-  // Copy payment code to clipboard
   const copyPaymentCode = () => {
     if (selectedStudent?.payment_code) {
       navigator.clipboard.writeText(selectedStudent.payment_code);
@@ -1357,7 +842,311 @@ export default function StudentReportPage() {
     }
   };
 
-  // ============ RENDER STATES ============
+  // ============ BATCH PRINT FUNCTION ============
+  const printAllClassReports = async () => {
+    if (!selectedGrade || !selectedTerm || students.length === 0) {
+      tinyToast("Please select a grade and term first");
+      return;
+    }
+
+    setBatchPrinting(true);
+    try {
+      const printFrame = document.createElement('iframe');
+      printFrame.style.position = 'absolute';
+      printFrame.style.width = '0px';
+      printFrame.style.height = '0px';
+      printFrame.style.border = '0';
+      document.body.appendChild(printFrame);
+
+      const frameDoc = printFrame.contentWindow?.document;
+      if (!frameDoc) return;
+
+      frameDoc.open();
+      frameDoc.write(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>${selectedGrade.grade_name} - ${termLabel(selectedTerm)} Reports</title>
+          <meta charset="UTF-8">
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; background: white; }
+            .report-page {
+              width: 210mm;
+              min-height: 297mm;
+              page-break-after: always;
+              position: relative;
+              background: white;
+            }
+            .report-page:last-child { page-break-after: auto; }
+            .report-inner { padding: 10mm 15mm; }
+            @page { size: A4; margin: 0; }
+            @media print {
+              body { margin: 0; padding: 0; }
+              .report-page { page-break-after: always; }
+            }
+            .flex { display: flex; }
+            .items-center { align-items: center; }
+            .justify-between { justify-content: space-between; }
+            .justify-center { justify-content: center; }
+            .gap-4 { gap: 1rem; }
+            .gap-2 { gap: 0.5rem; }
+            .gap-3 { gap: 0.75rem; }
+            .mb-0 { margin-bottom: 0; }
+            .mt-1 { margin-top: 0.25rem; }
+            .mt-2 { margin-top: 0.5rem; }
+            .pb-4 { padding-bottom: 1rem; }
+            .pt-2 { padding-top: 0.5rem; }
+            .pl-2 { padding-left: 0.5rem; }
+            .pr-4 { padding-right: 1rem; }
+            .p-1 { padding: 0.25rem; }
+            .p-2 { padding: 0.5rem; }
+            .p-3 { padding: 0.75rem; }
+            .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+            .py-0 { padding-top: 0; padding-bottom: 0; }
+            .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+            .border { border: 1px solid #e5e7eb; }
+            .border-b { border-bottom: 1px solid #e5e7eb; }
+            .border-t { border-top: 1px solid #e5e7eb; }
+            .rounded-lg { border-radius: 0.5rem; }
+            .rounded-t-lg { border-top-left-radius: 0.5rem; border-top-right-radius: 0.5rem; }
+            .rounded-b-lg { border-bottom-left-radius: 0.5rem; border-bottom-right-radius: 0.5rem; }
+            .bg-white { background-color: white; }
+            .bg-gray-50 { background-color: #f9fafb; }
+            .bg-gray-100 { background-color: #f3f4f6; }
+            .bg-blue-50 { background-color: #eff6ff; }
+            .bg-blue-100 { background-color: #dbeafe; }
+            .text-left { text-align: left; }
+            .text-center { text-align: center; }
+            .text-right { text-align: right; }
+            .text-xs { font-size: 0.75rem; }
+            .text-sm { font-size: 0.875rem; }
+            .text-xl { font-size: 1.25rem; }
+            .font-bold { font-weight: 700; }
+            .font-semibold { font-weight: 600; }
+            .font-medium { font-weight: 500; }
+            .font-mono { font-family: monospace; }
+            .text-gray-400 { color: #9ca3af; }
+            .text-gray-500 { color: #6b7280; }
+            .text-gray-600 { color: #4b5563; }
+            .text-gray-700 { color: #374151; }
+            .text-gray-900 { color: #111827; }
+            .text-blue-600 { color: #2563eb; }
+            .text-blue-700 { color: #1d4ed8; }
+            .text-green-700 { color: #15803d; }
+            .w-full { width: 100%; }
+            .w-20 { width: 5rem; }
+            .h-20 { height: 5rem; }
+            .h-10 { height: 2.5rem; }
+            .w-10 { width: 2.5rem; }
+            .overflow-hidden { overflow: hidden; }
+            .object-contain { object-fit: contain; }
+            .object-cover { object-fit: cover; }
+            .flex-shrink-0 { flex-shrink: 0; }
+            .flex-wrap { flex-wrap: wrap; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #e5e7eb; padding: 0.5rem; text-align: center; }
+            th { background-color: #f9fafb; font-weight: 600; }
+            textarea { border: none; background: transparent; resize: none; width: 100%; font-family: inherit; font-size: 0.875rem; }
+          </style>
+        </head>
+        <body>
+      `);
+
+      // Generate report for each student
+      for (const student of students) {
+        // Calculate student-specific data
+        const studentTotalsOverall = students.map((s) => {
+          let total = 0;
+          for (const r of subjectRowsForStudent) {
+            total += r.perSession.reduce((a, p) => a + p.total, 0);
+          }
+          return { id: s.registration_id, total };
+        });
+        studentTotalsOverall.sort((a, b) => b.total - a.total);
+        const rankOverall = studentTotalsOverall.findIndex(s => s.id === student.registration_id) + 1;
+        const outOfOverall = studentTotalsOverall.length;
+
+        frameDoc.write(`
+          <div class="report-page">
+            <div class="report-inner">
+              <!-- Header -->
+              <div class="flex items-center justify-between mb-0 pb-4 border-b">
+                <div class="flex items-center gap-4">
+                  ${school?.school_badge ? 
+                    `<img src="${school.school_badge}" alt="School" width="100" height="100" class="object-contain" />` : 
+                    `<div class="h-20 w-20 rounded-lg bg-blue-100 flex items-center justify-center">
+                      <svg class="h-10 w-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l9-5-9-5-9 5 9 5z"></path></svg>
+                    </div>`
+                  }
+                  <div>
+                    <h2 class="text-xl font-bold text-gray-900">${school?.school_name || ''}</h2>
+                    <p class="text-xs text-gray-600">${school?.location ? `<span class="mr-3">${school.location}</span>` : ''}${school?.contact_number ? `<span>📞 ${school.contact_number}</span>` : ''}</p>
+                  </div>
+                </div>
+                <div class="text-center">
+                  <div class="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">STUDENT REPORT CARD</div>
+                  <p class="text-sm font-bold text-gray-900 mt-1">${termLabel(selectedTerm)}</p>
+                  ${student.payment_code ? `
+                    <div class="mt-1">
+                      <div class="flex items-center justify-center gap-2">
+                        <span class="text-xs font-semibold text-gray-600">Payment Code:</span>
+                        <span class="text-sm font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">${student.payment_code}</span>
+                      </div>
+                    </div>
+                  ` : ''}
+                </div>
+                <div>
+                  ${student.profile_picture_url ? 
+                    `<div class="w-20 h-20 rounded-lg overflow-hidden border border-gray-200"><img src="${student.profile_picture_url}" alt="Student" class="w-full h-full object-cover" /></div>` : 
+                    `<div class="w-20 h-20 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center"><svg class="h-10 w-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg></div>`
+                  }
+                </div>
+              </div>
+              
+              <!-- Student Info -->
+              <div class="mb-0 border border-gray-200 rounded-lg bg-white">
+                <div class="flex items-center justify-between p-3 gap-4">
+                  <div class="flex items-center gap-3 flex-1">
+                    <div class="flex items-center gap-4 flex-wrap">
+                      <p class="text-sm font-bold text-gray-900">${student.first_name} ${student.last_name}</p>
+                      <div class="flex items-center gap-3 text-xs text-gray-600">
+                        <span>ID: <span class="font-semibold">${student.registration_id}</span></span>
+                        <span>LIN: <span class="font-semibold">${student.lin_id || "—"}</span></span>
+                        ${student.gender ? `<span>Gender: <span class="font-semibold">${student.gender}</span></span>` : ''}
+                        <span>Class: <span class="font-semibold">${selectedGrade?.grade_name || "—"}</span></span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Subjects Table -->
+              <div class="mb-0 space-y-0">
+                ${sessions.map((sess, sessionIndex) => {
+                  const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
+                  const totalMarksForSession = subjectRowsForStudent.reduce((acc, r) => { 
+                    const ps = r.perSession.find(p => p.sessionId === sess.id); 
+                    return acc + (ps?.total ?? 0); 
+                  }, 0);
+                  
+                  const studentTotals = students.map((s) => { 
+                    const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map(); 
+                    const total = subjectsForGrade.reduce((acc, sub) => { 
+                      const totalsForSess = sMapForStudent.get(sess.id) ?? new Map(); 
+                      return acc + Number(totalsForSess.get(sub.id) ?? 0); 
+                    }, 0); 
+                    return { id: s.registration_id, total }; 
+                  });
+                  studentTotals.sort((a, b) => b.total - a.total);
+                  const rank = studentTotals.findIndex(s => s.id === student.registration_id) + 1;
+                  const outOf = studentTotals.length;
+
+                  return `
+                    <div class="border border-gray-200 ${sessionIndex === 0 ? 'rounded-t-lg' : ''} ${sessionIndex === sessions.length - 1 ? 'rounded-b-lg' : ''} ${sessionIndex !== 0 ? 'border-t-0' : ''} overflow-hidden">
+                      <div class="bg-gray-100 px-0 py-0 border-b">
+                        <p class="text-sm text-center font-bold text-gray-900 py-1">
+                          ${sess.exam_type === "BOT" ? "BEGINNING OF TERM" : sess.exam_type === "MOT" ? "MID OF TERM" : "END OF TERM"}
+                        </p>
+                      </div>
+                      <table class="w-full text-xs border-collapse">
+                        <thead class="bg-gray-50 p-0 mt-0">
+                          <tr>
+                            <th class="border p-1 text-left pl-2">Subject</th>
+                            <th class="border p-0 text-center">Full Marks</th>
+                            <th class="border p-0 text-center">Mark Obtained</th>
+                            ${!isLowerPrimaryClass ? '<th class="border p-0 text-center">Grade</th><th class="border p-0 text-center">Agg</th>' : '<th class="border p-0 text-center">Rank</th>'}
+                            <th class="border pl-2 text-left">Subject Teacher Remark</th>
+                            <th class="border p-0 text-center">Initials</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${subjectRowsForStudent.map((r) => {
+                            const ps = r.perSession.find(p => p.sessionId === sess.id);
+                            const full = 100;
+                            const mark = ps?.total ?? 0;
+                            const gradeNum = mark !== null ? unebSubjectGrade(mark) : null;
+                            const gradeText = gradeNum ? unebGradeText(gradeNum) : "—";
+                            const autoComment = mark !== null ? getSubjectComment(gradeText, mark) : "";
+                            const agg = gradeNum ?? "";
+                            const subjectPosition = isLowerPrimaryClass ? getSubjectPosition(r.subject_id, sess.id, student.registration_id) : null;
+                            
+                            return `
+                              <tr>
+                                <td class="border p-1 font-medium pl-2">${r.subject_name}</td>
+                                <td class="border p-0 text-center">${full}</td>
+                                <td class="border p-0 text-center">${mark}</td>
+                                ${!isLowerPrimaryClass ? `<td class="border p-0 text-center font-semibold">${gradeText}</td><td class="border p-0 text-center font-semibold">${agg}</td>` : `<td class="border p-0 text-center font-semibold">${subjectPosition}</td>`}
+                                <td class="border pl-2">${autoComment}</td>
+                                <td class="border p-1 text-center">${subjectTeacherById[r.subject_id] || "—"}</td>
+                              </tr>
+                            `;
+                          }).join('')}
+                        </tbody>
+                        <tfoot>
+                          <tr class="font-bold bg-gray-100">
+                            <td class="text-left p-1 font-semi-bold pl-2">Total</td>
+                            <td class="text-center">${subjectRowsForStudent.length * 100}</td>
+                            <td class="text-center">${totalMarksForSession}</td>
+                            ${!isLowerPrimaryClass ? '<td class="text-center">—</td><td class="text-center">—</td>' : '<td class="text-center">—</td>'}
+                            <td colspan="2" class="text-right pr-4">
+                              Position: ${rank}/${outOf}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+              
+              <!-- Comments -->
+              <div class="space-y-0 mt-1">
+                <div class="border border-gray-200 rounded-lg p-2.5">
+                  <div class="flex items-center justify-between mb-0">
+                    <p class="text-xs font-semibold text-gray-700 uppercase tracking-wider">Class Teacher</p>
+                    <p class="text-xs text-gray-500">Class Performance Comment</p>
+                  </div>
+                  <textarea class="w-full bg-transparent text-sm text-gray-700 outline-none resize-none" rows="2" disabled>${classTeacherComment}</textarea>
+                  <div class="mt-2 pt-2 border-t border-gray-100">
+                    <p class="text-xs text-gray-500">Signature: ________________</p>
+                  </div>
+                </div>
+                <div class="border border-gray-200 rounded-lg p-3 mt-1">
+                  <div class="flex items-center justify-between mb-0">
+                    <p class="text-xs font-semibold text-gray-700 uppercase tracking-wider">Head Teacher</p>
+                    <p class="text-xs text-gray-500">School Performance Comment</p>
+                  </div>
+                  <textarea class="w-full bg-transparent text-sm text-gray-700 outline-none resize-none" rows="2" disabled>${headTeacherComment}</textarea>
+                  <div class="mt-0 pt-0 border-t border-gray-100">
+                    <p class="text-xs text-gray-500">Signature: ________________</p>
+                  </div>
+                  <p class="text-sm font-semibold text-green-700 text-center">Next Term Begins on ${nextTermStartDate}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        `);
+      }
+
+      frameDoc.write(`</body></html>`);
+      frameDoc.close();
+
+      setTimeout(() => {
+        printFrame.contentWindow?.focus();
+        printFrame.contentWindow?.print();
+        setTimeout(() => document.body.removeChild(printFrame), 1000);
+      }, 500);
+
+      tinyToast(`Preparing ${students.length} reports for printing...`);
+    } catch (error) {
+      console.error('Batch print error:', error);
+      tinyToast('Error generating batch reports');
+    } finally {
+      setBatchPrinting(false);
+    }
+  };
+
   if (authChecking || loading) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -1380,18 +1169,9 @@ export default function StudentReportPage() {
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <School className="w-8 h-8 text-blue-600" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                No School
-              </h3>
-              <p className="text-gray-600 mb-6">
-                Link your account to a school first.
-              </p>
-              <button
-                onClick={() => router.push("/settings")}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              >
-                Go to Settings
-              </button>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No School</h3>
+              <p className="text-gray-600 mb-6">Link your account to a school first.</p>
+              <button onClick={() => router.push("/settings")} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Go to Settings</button>
             </div>
           </main>
         </div>
@@ -1399,9 +1179,146 @@ export default function StudentReportPage() {
     );
   }
 
-  const isLowerPrimaryClass =
-    selectedGrade && isLowerPrimary(selectedGrade.grade_name);
+  const isLowerPrimaryClass = selectedGrade && isLowerPrimary(selectedGrade.grade_name);
 
+  // If no student selected or no exams, show appropriate messages
+  if (!selectedStudent) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navbar />
+        <div className="flex">
+          <AppShell />
+          <main className="flex-1 p-4 md:p-6">
+            <div className="max-w-7xl mx-auto">
+              <div className="mb-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                  <div>
+                    <h1 className="text-2xl font-bold text-gray-900">Student Report Card</h1>
+                    <p className="text-gray-600 mt-1">Academic performance report</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={handleRefresh} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm text-gray-700">
+                      <RefreshCw className="w-4 h-4" />
+                      Refresh
+                    </button>
+                    <button disabled className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-gray-200 text-gray-500 cursor-not-allowed">
+                      <Printer className="w-4 h-4" />
+                      Print Single
+                    </button>
+                    <button disabled className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-gray-200 text-gray-500 cursor-not-allowed">
+                      <Users className="w-4 h-4" />
+                      Print All
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Filter className="w-5 h-5 text-gray-500" />
+                    <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Grade</label>
+                      <select value={selectedGradeId} onChange={(e) => { setSelectedGradeId(e.target.value); setSelectedTermId(""); setSelectedStudentId(""); }} className="w-full px-4 py-2.5 rounded-lg border border-gray-300">
+                        <option value="">Select grade</option>
+                        {grades.map((g) => (<option key={g.id} value={g.id}>{g.grade_name}</option>))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Term</label>
+                      <select value={selectedTermId} onChange={(e) => { setSelectedTermId(e.target.value); setSelectedStudentId(""); }} disabled={!selectedGradeId} className="w-full px-4 py-2.5 rounded-lg border border-gray-300 disabled:bg-gray-50">
+                        <option value="">{selectedGradeId ? "Select term" : "Select grade first"}</option>
+                        {terms.map((t) => (<option key={t.id} value={t.id}>{t.term_name.replace("_", " ")} {t.year}</option>))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Student</label>
+                      <select value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)} disabled={!canLoad || students.length === 0} className="w-full px-4 py-2.5 rounded-lg border border-gray-300 disabled:bg-gray-50">
+                        <option value="">{canLoad ? (students.length ? "Select student" : "No students") : "Select grade + term"}</option>
+                        {students.map((s) => (<option key={s.registration_id} value={s.registration_id}>{fmtName(s)}</option>))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
+                <div className="mx-auto mb-6 h-20 w-20 rounded-full bg-gray-100 flex items-center justify-center">
+                  <User className="h-10 w-10 text-gray-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">Select Student</h3>
+                <p className="text-gray-600 max-w-md mx-auto">Choose a grade, term, and student to generate report.</p>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  if (noSessions) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navbar />
+        <div className="flex">
+          <AppShell />
+          <main className="flex-1 p-4 md:p-6">
+            <div className="max-w-7xl mx-auto">
+              <div className="mb-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+                  <div>
+                    <h1 className="text-2xl font-bold text-gray-900">Student Report Card</h1>
+                    <p className="text-gray-600 mt-1">Academic performance report</p>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Filter className="w-5 h-5 text-gray-500" />
+                    <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Grade</label>
+                      <select value={selectedGradeId} onChange={(e) => { setSelectedGradeId(e.target.value); setSelectedTermId(""); setSelectedStudentId(""); }} className="w-full px-4 py-2.5 rounded-lg border border-gray-300">
+                        <option value="">Select grade</option>
+                        {grades.map((g) => (<option key={g.id} value={g.id}>{g.grade_name}</option>))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Term</label>
+                      <select value={selectedTermId} onChange={(e) => { setSelectedTermId(e.target.value); setSelectedStudentId(""); }} className="w-full px-4 py-2.5 rounded-lg border border-gray-300">
+                        <option value="">Select term</option>
+                        {terms.map((t) => (<option key={t.id} value={t.id}>{t.term_name.replace("_", " ")} {t.year}</option>))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Student</label>
+                      <select value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-gray-300">
+                        <option value={selectedStudentId}>{fmtName(selectedStudent)}</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
+                <div className="mx-auto mb-6 h-20 w-20 rounded-full bg-amber-100 flex items-center justify-center">
+                  <FileText className="h-10 w-10 text-amber-600" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">No Exams</h3>
+                <p className="text-gray-600 max-w-md mx-auto mb-6">Create exam sessions for this term.</p>
+                <button onClick={() => router.push("/academics/exam-sessions")} className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700">Create Exams</button>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  // MAIN RENDER WITH SINGLE REPORT CARD
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
@@ -1409,795 +1326,323 @@ export default function StudentReportPage() {
         <AppShell />
         <main className="flex-1 p-4 md:p-6">
           <div className="max-w-7xl mx-auto">
-            {/* Header */}
             <div className="mb-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
                 <div>
-                  <h1 className="text-2xl font-bold text-gray-900">
-                    Student Report Card
-                  </h1>
-                  <p className="text-gray-600 mt-1">
-                    Academic performance report
-                  </p>
+                  <h1 className="text-2xl font-bold text-gray-900">Student Report Card</h1>
+                  <p className="text-gray-600 mt-1">Academic performance report</p>
                 </div>
-
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleRefresh}
-                    disabled={refreshing || !selectedStudent}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm text-gray-700 disabled:opacity-50"
-                  >
-                    <RefreshCw
-                      className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
-                    />
+                  <button onClick={handleRefresh} disabled={refreshing} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm text-gray-700">
+                    <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
                     Refresh
                   </button>
-
                   {canEditComments && (
-                    <button
-                      onClick={() => setIsEditing(!isEditing)}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm text-gray-700"
-                    >
-                      {isEditing ? (
-                        <Save className="w-4 h-4" />
-                      ) : (
-                        <Edit className="w-4 h-4" />
-                      )}
+                    <button onClick={() => setIsEditing(!isEditing)} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm text-gray-700">
+                      {isEditing ? <Save className="w-4 h-4" /> : <Edit className="w-4 h-4" />}
                       {isEditing ? "Save" : "Edit"}
                     </button>
                   )}
-
-                  <button
-                    onClick={printReport}
-                    disabled={!selectedStudent || noSessions}
-                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
-                      ${
-                        !selectedStudent || noSessions
-                          ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                          : "bg-blue-600 text-white hover:bg-blue-700"
-                      }`}
-                  >
+                  <button onClick={printReport} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700">
                     <Printer className="w-4 h-4" />
-                    Print
+                    Print Single
+                  </button>
+                  <button onClick={printAllClassReports} disabled={batchPrinting} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-green-600 text-white hover:bg-green-700">
+                    {batchPrinting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
+                    Print All ({students.length})
                   </button>
                 </div>
               </div>
 
-              {/* Filters */}
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-4">
                 <div className="flex items-center gap-2 mb-4">
                   <Filter className="w-5 h-5 text-gray-500" />
-                  <h3 className="text-sm font-semibold text-gray-700">
-                    Filters
-                  </h3>
+                  <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
                 </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Grade
-                    </label>
-                    <select
-                      value={selectedGradeId}
-                      onChange={(e) => {
-                        setSelectedGradeId(e.target.value);
-                        setSelectedTermId("");
-                        setSelectedStudentId("");
-                      }}
-                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    >
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Grade</label>
+                    <select value={selectedGradeId} onChange={(e) => { setSelectedGradeId(e.target.value); setSelectedTermId(""); setSelectedStudentId(""); }} className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500">
                       <option value="">Select grade</option>
-                      {grades.map((g) => (
-                        <option key={g.id} value={g.id}>
-                          {g.grade_name}
-                        </option>
-                      ))}
+                      {grades.map((g) => (<option key={g.id} value={g.id}>{g.grade_name}</option>))}
                     </select>
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Term
-                    </label>
-                    <select
-                      value={selectedTermId}
-                      onChange={(e) => {
-                        setSelectedTermId(e.target.value);
-                        setSelectedStudentId("");
-                      }}
-                      disabled={!selectedGradeId}
-                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50"
-                    >
-                      <option value="">
-                        {selectedGradeId ? "Select term" : "Select grade first"}
-                      </option>
-                      {terms.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.term_name.replace("_", " ")} {t.year}
-                        </option>
-                      ))}
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Term</label>
+                    <select value={selectedTermId} onChange={(e) => { setSelectedTermId(e.target.value); setSelectedStudentId(""); }} disabled={!selectedGradeId} className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50">
+                      <option value="">{selectedGradeId ? "Select term" : "Select grade first"}</option>
+                      {terms.map((t) => (<option key={t.id} value={t.id}>{t.term_name.replace("_", " ")} {t.year}</option>))}
                     </select>
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Student
-                    </label>
-                    <select
-                      value={selectedStudentId}
-                      onChange={(e) => setSelectedStudentId(e.target.value)}
-                      disabled={!canLoad || students.length === 0}
-                      className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50"
-                    >
-                      <option value="">
-                        {canLoad
-                          ? students.length
-                            ? "Select student"
-                            : "No students"
-                          : "Select grade + term"}
-                      </option>
-                      {students.map((s) => (
-                        <option
-                          key={s.registration_id}
-                          value={s.registration_id}
-                        >
-                          {fmtName(s)}
-                        </option>
-                      ))}
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Student</label>
+                    <select value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500">
+                      {students.map((s) => (<option key={s.registration_id} value={s.registration_id}>{fmtName(s)}</option>))}
                     </select>
                   </div>
                 </div>
-
                 {selectedStudent && (
                   <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
                     <div className="text-sm text-gray-600">
-                      <span>
-                        Student:{" "}
-                        <span className="font-semibold text-gray-900">
-                          {fmtName(selectedStudent)}
-                        </span>
-                      </span>
+                      <span>Student: <span className="font-semibold text-gray-900">{fmtName(selectedStudent)}</span></span>
                       <span className="mx-2">•</span>
-                      <span>
-                        Class:{" "}
-                        <span className="font-semibold text-gray-900">
-                          {selectedGrade?.grade_name || "—"}
-                        </span>
-                      </span>
+                      <span>Class: <span className="font-semibold text-gray-900">{selectedGrade?.grade_name || "—"}</span></span>
                       <span className="mx-2">•</span>
-                      <span>
-                        Term:{" "}
-                        <span className="font-semibold text-gray-900">
-                          {termLabel(selectedTerm)}
-                        </span>
-                      </span>
+                      <span>Term: <span className="font-semibold text-gray-900">{termLabel(selectedTerm)}</span></span>
                     </div>
                     <div className="flex gap-2">
-                      <button
-                        onClick={autoFillAllComments}
-                        disabled={!selectedStudent || noSessions}
-                        className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 disabled:text-gray-400"
-                      >
-                        <Wand2 className="w-4 h-4" />
-                        Auto
+                      <button onClick={autoFillAllComments} className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800">
+                        <Wand2 className="w-4 h-4" /> Auto
                       </button>
-                      <button
-                        onClick={clearAllComments}
-                        disabled={!selectedStudent || noSessions}
-                        className="text-sm text-red-600 hover:text-red-800 disabled:text-gray-400"
-                      >
-                        Clear
-                      </button>
+                      <button onClick={clearAllComments} className="text-sm text-red-600 hover:text-red-800">Clear</button>
                     </div>
                   </div>
                 )}
               </div>
 
-              {errorMsg && (
-                <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                  {errorMsg}
-                </div>
-              )}
+              {errorMsg && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{errorMsg}</div>}
             </div>
 
-            {/* Main Content */}
-            {!selectedStudent ? (
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
-                <div className="mx-auto mb-6 h-20 w-20 rounded-full bg-gray-100 flex items-center justify-center">
-                  <User className="h-10 w-10 text-gray-400" />
+            {/* Performance Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div><p className="text-sm text-gray-500">Overall %</p><p className="text-2xl font-bold text-gray-900 mt-1">{overall.pct.toFixed(1)}%</p></div>
+                  <div className="p-2 bg-blue-50 rounded-lg"><BarChart3 className="h-6 w-6 text-blue-600" /></div>
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  Select Student
-                </h3>
-                <p className="text-gray-600 max-w-md mx-auto">
-                  Choose a grade, term, and student to generate report.
-                </p>
               </div>
-            ) : noSessions ? (
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
-                <div className="mx-auto mb-6 h-20 w-20 rounded-full bg-amber-100 flex items-center justify-center">
-                  <FileText className="h-10 w-10 text-amber-600" />
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  No Exams
-                </h3>
-                <p className="text-gray-600 max-w-md mx-auto mb-6">
-                  Create exam sessions for this term.
-                </p>
-                <button
-                  onClick={() => router.push("/academics/exam-sessions")}
-                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700"
-                >
-                  Create Exams
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {/* Performance Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {/* Overall Percentage */}
-                  <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-gray-500">Overall %</p>
-                        <p className="text-2xl font-bold text-gray-900 mt-1">
-                          {overall.pct.toFixed(1)}%
-                        </p>
-                      </div>
-                      <div className="p-2 bg-blue-50 rounded-lg">
-                        <BarChart3 className="h-6 w-6 text-blue-600" />
-                      </div>
+              <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-500">{isLowerPrimaryClass ? "Average Mark" : "Division"}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      {isLowerPrimaryClass ? <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-blue-100 text-blue-700">{overall.pct.toFixed(1)}%</span> : <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold text-white ${aggregateAndDivision.pill}`}>{aggregateAndDivision.division}</span>}
                     </div>
                   </div>
+                  <div className="p-2 bg-emerald-50 rounded-lg"><Award className="h-6 w-6 text-emerald-600" /></div>
+                </div>
+              </div>
+              {!isLowerPrimaryClass && (
+                <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div><p className="text-sm text-gray-500">Aggregates</p><p className="text-2xl font-bold text-gray-900">{aggregateAndDivision.aggregate}</p><p className="text-xs text-gray-500 mt-1">Best 4: {aggregateAndDivision.best4Grades.join(", ")}</p></div>
+                    <div className="p-2 bg-purple-50 rounded-lg"><Hash className="h-6 w-6 text-purple-600" /></div>
+                  </div>
+                </div>
+              )}
+              <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div><p className="text-sm text-gray-500">Best Subject</p><p className="text-lg font-semibold text-gray-900 mt-1 truncate">{performanceAnalysis.bestSubject}</p><div className="flex items-center gap-2 mt-1"><span className={`text-xs font-medium px-2 py-0.5 rounded ${gradePillClass(performanceAnalysis.bestSubjectGrade)}`}>{performanceAnalysis.bestSubjectGrade}</span></div></div>
+                  <div className="p-2 bg-green-50 rounded-lg"><Trophy className="h-6 w-6 text-green-600" /></div>
+                </div>
+              </div>
+            </div>
 
-                  {/* Division / Average Mark */}
-                  <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-gray-500">
-                          {isLowerPrimaryClass ? "Average Mark" : "Division"}
-                        </p>
-                        <div className="flex items-center gap-2 mt-1">
-                          {isLowerPrimaryClass ? (
-                            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold bg-blue-100 text-blue-700">
-                              {overall.pct.toFixed(1)}%
-                            </span>
-                          ) : (
-                            <span
-                              className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold text-white ${aggregateAndDivision.pill}`}
-                            >
-                              {aggregateAndDivision.division}
-                            </span>
-                          )}
+            {/* Report Card */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
+              <div className="print-page">
+                <div className="print-inner">
+                  {/* Header */}
+                  <div className="flex items-center justify-between mb-0 pb-4 border-b">
+                    <div className="flex items-center gap-4">
+                      {school.school_badge ? (
+                        <img src={school.school_badge} alt="School" width={100} height={100} className="object-contain" />
+                      ) : (
+                        <div className="h-20 w-20 rounded-lg bg-blue-100 flex items-center justify-center">
+                          <School className="h-10 w-10 text-blue-600" />
                         </div>
-                      </div>
-                      <div className="p-2 bg-emerald-50 rounded-lg">
-                        <Award className="h-6 w-6 text-emerald-600" />
+                      )}
+                      <div>
+                        <h2 className="text-xl font-bold text-gray-900">{school.school_name}</h2>
+                        <p className="text-xs text-gray-600">
+                          {school.location && <span className="mr-3">{school.location}</span>}
+                          {school.contact_number && <span>📞 {school.contact_number}</span>}
+                        </p>
                       </div>
                     </div>
-                  </div>
-
-                  {/* Total Aggregates - Only show for upper primary */}
-                  {!isLowerPrimaryClass && (
-                    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm text-gray-500">Aggregates</p>
-                          <div className="flex items-end gap-2 mt-1">
-                            <p className="text-2xl font-bold text-gray-900">
-                              {aggregateAndDivision.aggregate}
-                            </p>
-                            <p className="text-xs text-gray-600 mb-1">Total</p>
+                    <div className="text-center justify-center">
+                      <div className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">STUDENT REPORT CARD</div>
+                      <p className="text-sm font-bold text-gray-900 mt-1">{termLabel(selectedTerm)}</p>
+                      {selectedStudent.payment_code && (
+                        <div className="mt-1">
+                          <div className="flex items-center justify-center gap-2">
+                            <span className="text-xs font-semibold text-gray-600">Payment Code:</span>
+                            <span className="text-sm font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">{selectedStudent.payment_code}</span>
+                            <button onClick={copyPaymentCode} className="text-gray-400 hover:text-blue-600 transition-colors" title="Copy payment code">
+                              <Copy className="w-3 h-3" />
+                            </button>
                           </div>
-                          <p className="text-xs text-gray-500 mt-1">
-                            Best 4:{" "}
-                            {aggregateAndDivision.best4Grades.join(", ")}
-                          </p>
                         </div>
-                        <div className="p-2 bg-purple-50 rounded-lg">
-                          <Hash className="h-6 w-6 text-purple-600" />
-                        </div>
-                      </div>
+                      )}
                     </div>
-                  )}
-
-                  {/* Best Subject */}
-                  <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-gray-500">Best Subject</p>
-                        <p className="text-lg font-semibold text-gray-900 mt-1 truncate">
-                          {performanceAnalysis.bestSubject}
-                        </p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span
-                            className={`text-xs font-medium px-2 py-0.5 rounded ${gradePillClass(performanceAnalysis.bestSubjectGrade)}`}
-                          >
-                            {performanceAnalysis.bestSubjectGrade}
-                          </span>
+                    <div>
+                      {selectedStudent.profile_picture_url ? (
+                        <div className="w-20 h-20 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0">
+                          <img src={selectedStudent.profile_picture_url} alt="Student" className="w-full h-full object-cover" />
                         </div>
-                      </div>
-                      <div className="p-2 bg-green-50 rounded-lg">
-                        <Trophy className="h-6 w-6 text-green-600" />
+                      ) : (
+                        <div className="w-20 h-20 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center flex-shrink-0">
+                          <User className="h-10 w-10 text-gray-400" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Student Info */}
+                  <div className="mb-0 border border-gray-200 rounded-lg bg-white">
+                    <div className="flex items-center justify-between p-3 gap-4">
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className="flex items-center gap-4 flex-wrap">
+                          <p className="text-sm font-bold text-gray-900">{fmtName(selectedStudent)}</p>
+                          <div className="flex items-center gap-3 text-xs text-gray-600">
+                            <span>ID: <span className="font-semibold">{selectedStudent.registration_id}</span></span>
+                            <span>LIN: <span className="font-semibold">{selectedStudent.lin_id || "—"}</span></span>
+                            {selectedStudent.gender && <span>Gender: <span className="font-semibold">{selectedStudent.gender}</span></span>}
+                            <span>Class: <span className="font-semibold">{selectedGrade?.grade_name || "—"}</span></span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Subjects Summary */}
-                  <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm text-gray-500">Subjects</p>
-                        <p className="text-lg font-bold text-gray-900 mt-1">
-                          {subjectRowsForStudent.length} total
-                        </p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-xs text-emerald-600">
-                            <CheckCircle className="inline w-3 h-3 mr-1" />
-                            {performanceAnalysis.subjectsAboveAverage} above avg
-                          </span>
-                          <span className="text-xs text-rose-600">
-                            <AlertCircle className="inline w-3 h-3 mr-1" />
-                            {performanceAnalysis.subjectsBelowAverage} below avg
-                          </span>
-                        </div>
-                      </div>
-                      <div className="p-2 bg-amber-50 rounded-lg">
-                        <Layers className="h-6 w-6 text-amber-600" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                  {/* Subjects Table */}
+                  <div className="mb-0 space-y-0">
+                    {sessions.map((sess, sessionIndex) => {
+                      const totalAgg = subjectRowsForStudent.reduce((acc, r) => { const ps = r.perSession.find(p => p.sessionId === sess.id); const mark = ps?.total ?? 0; const gradeNum = mark ? unebSubjectGrade(mark) : 0; return acc + (gradeNum ?? 0); }, 0);
+                      const totalMarksForSession = subjectRowsForStudent.reduce((acc, r) => { const ps = r.perSession.find(p => p.sessionId === sess.id); return acc + (ps?.total ?? 0); }, 0);
+                      const studentTotals = students.map((s) => { const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map(); const total = subjectsForGrade.reduce((acc, sub) => { const totalsForSess = sMapForStudent.get(sess.id) ?? new Map(); return acc + Number(totalsForSess.get(sub.id) ?? 0); }, 0); return { id: s.registration_id, total }; });
+                      studentTotals.sort((a, b) => b.total - a.total);
+                      const rank = studentTotals.findIndex(s => s.id === selectedStudent?.registration_id) + 1;
+                      const outOf = studentTotals.length;
 
-                {/* Report Card */}
-                <div className="bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
-                  <div className="print-page">
-                    <div className="print-inner">
-                      {/* Header */}
-                      <div className="flex items-center justify-between mb-0 pb-4 border-b">
-                        <div className="flex items-center gap-4">
-                          {school.school_badge ? (
-                            <img
-                              src={school.school_badge}
-                              alt="School"
-                              width={100}
-                              height={100}
-                              className="object-contain"
-                            />
-                          ) : (
-                            <div className="h-20 w-20 rounded-lg bg-blue-100 flex items-center justify-center">
-                              <School className="h-10 w-10 text-blue-600" />
-                            </div>
-                          )}
-                          <div>
-                            <h2 className="text-xl  font-bold text-gray-900">
-                              {school.school_name}
-                            </h2>
-                            <p className="text-xs text-gray-600">
-                              {school.location && (
-                                <span className="mr-3">{school.location}</span>
-                              )}
-                              {school.contact_number && (
-                                <span>📞 {school.contact_number}</span>
-                              )}
+                      return (
+                        <div key={sess.id} className={`border border-gray-200 ${sessionIndex === 0 ? 'rounded-t-lg' : ''} ${sessionIndex === sessions.length - 1 ? 'rounded-b-lg' : ''} ${sessionIndex !== 0 ? 'border-t-0' : ''} overflow-hidden`}>
+                          <div className="bg-gray-100 px-0 py-0 border-b">
+                            <p className="text-sm text-center font-bold text-gray-900 py-1">
+                              {sess.exam_type === "BOT" ? "BEGINNING OF TERM" : sess.exam_type === "MOT" ? "MID OF TERM" : "END OF TERM"}
                             </p>
                           </div>
-                          
-                        </div>
-                        
-
-                        <div className="text-center justify-center">
-                          <div className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">
-                            STUDENT REPORT CARD
-                          </div>
-                          <p className="text-sm font-bold text-gray-900 mt-1">
-                            {termLabel(selectedTerm)}
-                          </p>
-                          {/* Payment Code Section - START */}
-                          {selectedStudent.payment_code && (
-                            <div className="mt-1">
-                              <div className="flex items-center justify-center gap-2">
-                                <span className="text-xs font-semibold text-gray-600">
-                                  Payment Code:
-                                </span>
-                                <span className="text-sm font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">
-                                  {selectedStudent.payment_code}
-                                </span>
-                                <button
-                                  onClick={copyPaymentCode}
-                                  className="text-gray-400 hover:text-blue-600 transition-colors"
-                                  title="Copy payment code"
-                                >
-                                  <Copy className="w-3 h-3" />
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                          {/* Payment Code Section - END */}
-                        </div>
-                        <div>
-                          {selectedStudent.profile_picture_url ? (
-                            <div className="w-20 h-20 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0">
-                              <img
-                                src={selectedStudent.profile_picture_url}
-                                alt="Student"
-                                className="w-full h-full object-cover"
-                              />
-                            </div>
-                          ) : (
-                            <div className="w-20 h-20 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center flex-shrink-0">
-                              <User className="h-10 w-10 text-gray-400" />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Student Info - Added Payment Code here as well */}
-                      <div className="mb-0 border border-gray-200 rounded-lg bg-white">
-                        <div className="flex items-center justify-between p-3 gap-4">
-                          <div className="flex items-center gap-3 flex-1">
-                            <div className="flex items-center gap-4 flex-wrap">
-                              <p className="text-sm font-bold text-gray-900">
-                                {fmtName(selectedStudent)}
-                              </p>
-                              <div className="flex items-center gap-3 text-xs text-gray-600">
-                                <span>
-                                  ID:{" "}
-                                  <span className="font-semibold">
-                                    {selectedStudent.registration_id}
-                                  </span>
-                                </span>
-                                <span>
-                                  LIN:{" "}
-                                  <span className="font-semibold">
-                                    {selectedStudent.lin_id || "—"}
-                                  </span>
-                                </span>
-                                {selectedStudent.gender && (
-                                  <span>
-                                    Gender:{" "}
-                                    <span className="font-semibold">
-                                      {selectedStudent.gender}
-                                    </span>
-                                  </span>
+                          <table className="w-full text-xs border-collapse">
+                            <thead className="bg-gray-50 p-0 mt-0">
+                              <tr>
+                                <th className="border p-1 text-left pl-2">Subject</th>
+                                <th className="border p-0 text-center">Full Marks</th>
+                                <th className="border p-0 text-center">Mark Obtained</th>
+                                {!isLowerPrimaryClass ? (
+                                  <>
+                                    <th className="border p-0 text-center">Grade</th>
+                                    <th className="border p-0 text-center">Agg</th>
+                                  </>
+                                ) : (
+                                  <th className="border p-0 text-center">Rank</th>
                                 )}
-                                <span>
-                                  Class:{" "}
-                                  <span className="font-semibold">
-                                    {selectedGrade?.grade_name || "—"}
-                                  </span>
-                                </span>
-                                {/* Payment Code in student info - START */}
-                                {/* {selectedStudent.payment_code && (
-                                  <span className="flex items-center gap-1">
-                                    <span>Payment Code:</span>
-                                    <span className="font-mono font-semibold text-blue-700">
-                                      {selectedStudent.payment_code}
-                                    </span>
-                                  </span>
-                                )} */}
-                                {/* Payment Code in student info - END */}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Subjects Table */}
-                      <div className="mb-0 space-y-0">
-                        {sessions.map((sess) => {
-                          // TOTAL AGG PER SESSION
-                          const totalAgg = subjectRowsForStudent.reduce(
-                            (acc, r) => {
-                              const ps = r.perSession.find(
-                                (p) => p.sessionId === sess.id,
-                              );
-                              const mark = ps?.total ?? 0;
-                              const gradeNum = mark
-                                ? unebSubjectGrade(mark)
-                                : 0;
-                              return acc + (gradeNum ?? 0);
-                            },
-                            0,
-                          );
-
-                          // TOTAL MARKS PER SESSION
-                          const totalMarks = subjectRowsForStudent.reduce(
-                            (acc, r) => {
-                              const ps = r.perSession.find(
-                                (p) => p.sessionId === sess.id,
-                              );
-                              return acc + (ps?.total ?? 0);
-                            },
-                            0,
-                          );
-                          const studentTotals = students.map((s) => {
-                            const sMapForStudent =
-                              totalsByStudentSessionSubject.get(
-                                s.registration_id,
-                              ) ?? new Map();
-                            const total = subjectsForGrade.reduce(
-                              (acc, sub) => {
-                                const totalsForSess =
-                                  sMapForStudent.get(sess.id) ?? new Map();
+                                <th className="border pl-2 text-left">Subject Teacher Remark</th>
+                                <th className="border p-0 text-center">Initials</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {subjectRowsForStudent.map((r) => {
+                                const ps = r.perSession.find(p => p.sessionId === sess.id);
+                                const full = 100;
+                                const mark = ps?.total ?? 0;
+                                const gradeNum = mark !== null ? unebSubjectGrade(mark) : null;
+                                const gradeText = gradeNum ? unebGradeText(gradeNum) : "—";
+                                const autoComment = mark !== null ? getSubjectComment(gradeText, mark) : "";
+                                const agg = gradeNum ?? "";
+                                const subjectPosition = isLowerPrimaryClass ? getSubjectPosition(r.subject_id, sess.id, selectedStudent.registration_id) : null;
                                 return (
-                                  acc + Number(totalsForSess.get(sub.id) ?? 0)
+                                  <tr key={`${sess.id}-${r.subject_id}`}>
+                                    <td className="border p-1 font-medium pl-2">{r.subject_name}</td>
+                                    <td className="border p-0 text-center">{full}</td>
+                                    <td className="border p-0 text-center">{mark}</td>
+                                    {!isLowerPrimaryClass ? (
+                                      <>
+                                        <td className="border p-0 text-center font-semibold">{gradeText}</td>
+                                        <td className="border p-0 text-center font-semibold">{agg}</td>
+                                      </>
+                                    ) : (
+                                      <td className="border p-0 text-center font-semibold">{subjectPosition}</td>
+                                    )}
+                                    <td className="border pl-2">
+                                      <textarea 
+                                        value={isEditing ? (subjectComments[r.subject_id] ?? "") : autoComment} 
+                                        onChange={(e) => setSubjectComments(prev => ({ ...prev, [r.subject_id]: e.target.value }))} 
+                                        disabled={!isEditing} 
+                                        className="w-full bg-transparent outline-none resize-none" 
+                                        rows={1} 
+                                      />
+                                    </td>
+                                    <td className="border p-1 text-center">{subjectTeacherById[r.subject_id] || "—"}</td>
+                                  </tr>
                                 );
-                              },
-                              0,
-                            );
-
-                            return {
-                              id: s.registration_id,
-                              total,
-                            };
-                          });
-
-                          // sort by performance (highest first)
-                          studentTotals.sort((a, b) => b.total - a.total);
-
-                          // find current student's position
-                          const rank =
-                            studentTotals.findIndex(
-                              (s) => s.id === selectedStudent?.registration_id,
-                            ) + 1;
-
-                          const outOf = studentTotals.length;
-
-                          return (
-                            <div
-                              key={sess.id}
-                              className="border border-gray-200 rounded-lg overflow-hidden"
-                            >
-                              {/* Section Title */}
-                              <div className="bg-gray-100 px-0 py-0 border-b">
-                                <p className="text-sm text-center font-bold text-gray-900">
-                                  {sess.exam_type === "BOT"
-                                    ? "BEGINNING OF TERM"
-                                    : sess.exam_type === "MOT"
-                                      ? "MID OF TERM"
-                                      : "END OF TERM"}
-                                </p>
-                              </div>
-
-                              {/* Table - Different columns for Lower Primary */}
-                              <table className="w-full text-xs border-collapse">
-                                <thead className="bg-gray-50 p-0 mt-0">
-                                  <tr className="mt-0  pl-4">
-                                    <th className="border p-1 text-left">
-                                      Subject
-                                    </th>
-                                    <th className="border p-0 text-center">
-                                      Full Marks
-                                    </th>
-                                    <th className="border p-0 text-center">
-                                      Mark Obtained
-                                    </th>
-                                    {!isLowerPrimaryClass ? (
-                                      <>
-                                        <th className="border p-0 text-center">
-                                          Grade
-                                        </th>
-                                        <th className="border p-0 text-center">
-                                          Agg
-                                        </th>
-                                      </>
-                                    ) : (
-                                      <th className="border p-0 text-center">
-                                        Rank in subject 
-                                      </th>
-                                    )}
-                                    <th className="border pl-2 text-left">
-                                      Subject Teacher Remark
-                                    </th>
-                                    <th className="border p-0 text-center">
-                                      Initials
-                                    </th>
-                                  </tr>
-                                </thead>
-
-                                <tbody>
-                                  {subjectRowsForStudent.map((r) => {
-                                    const ps = r.perSession.find(
-                                      (p) => p.sessionId === sess.id,
-                                    );
-
-                                    const full = 100;
-                                    const mark = ps?.total ?? 0;
-
-                                    const gradeNum =
-                                      mark !== null
-                                        ? unebSubjectGrade(mark)
-                                        : null;
-
-                                    const gradeText = gradeNum
-                                      ? unebGradeText(gradeNum)
-                                      : "—";
-
-                                    const autoComment =
-                                      mark !== null
-                                        ? getSubjectComment(gradeText, mark)
-                                        : "";
-
-                                    const agg = gradeNum ?? "";
-
-                                    // Calculate subject position for lower primary
-                                    const subjectPosition = isLowerPrimaryClass
-                                      ? getSubjectPosition(
-                                          r.subject_id,
-                                          sess.id,
-                                          selectedStudent.registration_id,
-                                        )
-                                      : null;
-
-                                    return (
-                                      <tr key={`${sess.id}-${r.subject_id}`}>
-                                        <td className="border p-1 font-medium">
-                                          {r.subject_name}
-                                        </td>
-                                        <td className="border p-0 text-center">
-                                          {full}
-                                        </td>
-                                        <td className="border p-0 text-center">
-                                          {mark}
-                                        </td>
-                                        {!isLowerPrimaryClass ? (
-                                          <>
-                                            <td className="border p-0 text-center font-semibold">
-                                              {gradeText}
-                                            </td>
-                                            <td className="border p-0 text-center font-semibold">
-                                              {agg}
-                                            </td>
-                                          </>
-                                        ) : (
-                                          <td className="border p-0 text-center font-semibold">
-                                            {subjectPosition}
-                                          </td>
-                                        )}
-                                        <td className="border pl-2">
-                                          <textarea
-                                            value={
-                                              isEditing
-                                                ? (subjectComments[
-                                                    r.subject_id
-                                                  ] ?? "")
-                                                : autoComment
-                                            }
-                                            onChange={(e) =>
-                                              setSubjectComments((prev) => ({
-                                                ...prev,
-                                                [r.subject_id]: e.target.value,
-                                              }))
-                                            }
-                                            disabled={!isEditing}
-                                            className="w-full bg-transparent outline-none resize-none"
-                                            rows={1}
-                                          />
-                                        </td>
-                                        <td className="border p-1 text-center">
-                                          {subjectTeacherById[r.subject_id] ||
-                                            "—"}
-                                        </td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-
-                                <tfoot>
-                                  <tr className="font-bold bg-gray-100 p-1">
-                                    <td className="text-left p-1 font-semi-bold">
-                                      Total
-                                    </td>
-                                    <td className="text-center">
-                                      {subjectRowsForStudent.length * 100}
-                                    </td>
-                                    <td className="text-center">
-                                      {totalMarks}
-                                    </td>
-                                    {!isLowerPrimaryClass ? (
-                                      <>
-                                        <td className="text-center">—</td>
-                                        <td className="text-center">
-                                          {totalAgg}
-                                        </td>
-                                      </>
-                                    ) : (
-                                      <td className="text-center">—</td>
-                                    )}
-                                    <td colSpan={2} className="text-right pr-4">
-                                      Position: {rank} /{outOf}
-                                      &nbsp;&nbsp;|&nbsp;&nbsp;
-                                      {isLowerPrimaryClass ? (
-                                        <>Class Average: {overall.pct.toFixed(1)}%</>
-                                      ) : (
-                                        <>
-                                          DIV: {aggregateAndDivision.division}
-                                        </>
-                                      )}
-                                    </td>
-                                  </tr>
-                                </tfoot>
-                              </table>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* comments */}
-                      <div className="space-y-0 mt-0">
-                        <div className="border border-gray-200 rounded-lg p-2.5">
-                          <div className="flex items-center justify-between mb-0">
-                            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                              Class Teacher
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              Class Performance Comment
-                            </p>
-                          </div>
-                          <textarea
-                            value={classTeacherComment}
-                            onChange={(e) =>
-                              setClassTeacherComment(e.target.value)
-                            }
-                            disabled={!isEditing}
-                            className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
-                            placeholder="Class teacher's performance comment..."
-                            rows={2}
-                          />
-                          <div className="mt-2 pt-2 border-t border-gray-100">
-                            <p className="text-xs text-gray-500">
-                              Signature: ________________
-                            </p>
-                          </div>
+                              })}
+                            </tbody>
+                            <tfoot>
+                              <tr className="font-bold bg-gray-100">
+                                <td className="text-left p-1 font-semi-bold pl-2">Total</td>
+                                <td className="text-center">{subjectRowsForStudent.length * 100}</td>
+                                <td className="text-center">{totalMarksForSession}</td>
+                                {!isLowerPrimaryClass ? (
+                                  <>
+                                    <td className="text-center">—</td>
+                                    <td className="text-center">{totalAgg}</td>
+                                  </>
+                                ) : (
+                                  <td className="text-center">—</td>
+                                )}
+                                <td colSpan={2} className="text-right pr-4">
+                                  Position: {rank}/{outOf} | {isLowerPrimaryClass ? `Class Average: ${overall.pct.toFixed(1)}%` : `DIV: ${aggregateAndDivision.division}`}
+                                </td>
+                              </tr>
+                            </tfoot>
+                          </table>
                         </div>
+                      );
+                    })}
+                  </div>
 
-                        <div className="border border-gray-200 rounded-lg p-3">
-                          <div className="flex items-center justify-between mb-0">
-                            <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                              Head Teacher
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              School Performance Comment
-                            </p>
-                          </div>
-                          <textarea
-                            value={headTeacherComment}
-                            onChange={(e) =>
-                              setHeadTeacherComment(e.target.value)
-                            }
-                            disabled={!isEditing}
-                            className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 placeholder:text-gray-400 whitespace-pre-wrap break-words resize-none"
-                            placeholder="Head teacher's performance comment..."
-                            rows={2}
-                          />
-                          <div className="mt-0 pt-0 border-t border-gray-100">
-                            <p className="text-xs text-gray-500">
-                              Signature: ________________
-                            </p>
-                          </div>
-                          <p className="text-sm font-semibold text-green-700 text-center">
-                            Next Term Begins on {nextTermStartDate}
-                          </p>
-                        </div>
+                  {/* Comments */}
+                  <div className="space-y-0 mt-1">
+                    <div className="border border-gray-200 rounded-lg p-2.5">
+                      <div className="flex items-center justify-between mb-0">
+                        <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Class Teacher</p>
+                        <p className="text-xs text-gray-500">Class Performance Comment</p>
                       </div>
-
-                      {/* Footer */}
-                      <div className="pt-4 mt-0 border-t border-gray-200">
-                        <div className="flex items-center justify-between text-xs text-gray-500">
-                          <div></div>
-                          <div className="text-right"></div>
-                        </div>
+                      <textarea
+                        value={classTeacherComment}
+                        onChange={(e) => setClassTeacherComment(e.target.value)}
+                        disabled={!isEditing}
+                        className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 resize-none"
+                        rows={2}
+                      />
+                      <div className="mt-2 pt-2 border-t border-gray-100">
+                        <p className="text-xs text-gray-500">Signature: ________________</p>
                       </div>
+                    </div>
+                    <div className="border border-gray-200 rounded-lg p-3 mt-1">
+                      <div className="flex items-center justify-between mb-0">
+                        <p className="text-xs font-semibold text-gray-700 uppercase tracking-wider">Head Teacher</p>
+                        <p className="text-xs text-gray-500">School Performance Comment</p>
+                      </div>
+                      <textarea
+                        value={headTeacherComment}
+                        onChange={(e) => setHeadTeacherComment(e.target.value)}
+                        disabled={!isEditing}
+                        className="w-full bg-transparent text-sm text-gray-700 outline-none disabled:text-gray-600 resize-none"
+                        rows={2}
+                      />
+                      <div className="mt-0 pt-0 border-t border-gray-100">
+                        <p className="text-xs text-gray-500">Signature: ________________</p>
+                      </div>
+                      <p className="text-sm font-semibold text-green-700 text-center">Next Term Begins on {nextTermStartDate}</p>
                     </div>
                   </div>
                 </div>
               </div>
-            )}
+            </div>
           </div>
         </main>
       </div>
-
       <PrintCSS />
     </div>
   );
@@ -2213,76 +1658,19 @@ function PrintCSS() {
         margin: 0 auto;
         overflow: hidden;
       }
-
-      .print-inner {
-        padding: 3mm 6mm 4mm 6mm;
-        box-sizing: border-box;
-      }
-
-      @page {
-        size: A4 portrait;
-        margin: 0mm;
-      }
-
+      .print-inner { padding: 3mm 6mm 4mm 6mm; box-sizing: border-box; }
+      @page { size: A4 portrait; margin: 0mm; }
       @media print {
-        * {
-          -webkit-print-color-adjust: exact !important;
-          print-color-adjust: exact !important;
-        }
-
-        html,
-        body {
-          margin: 0 !important;
-          padding: 0 !important;
-          background: #fff !important;
-          width: 210mm !important;
-          min-height: 297mm !important;
-        }
-
-        body * {
-          visibility: hidden;
-        }
-
-        .print-page,
-        .print-page * {
-          visibility: visible;
-        }
-
-        .print-page {
-          position: absolute;
-          left: 0;
-          top: 0;
-          width: 210mm !important;
-          height: 297mm !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          border: none !important;
-          box-shadow: none !important;
-          page-break-after: avoid !important;
-          page-break-inside: avoid !important;
-        }
-
-        .no-print {
-          display: none !important;
-        }
-
-        textarea {
-          border: none !important;
-          background: transparent !important;
-          resize: none !important;
-          overflow: hidden !important;
-          color: #000 !important;
-        }
+        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; width: 210mm !important; min-height: 297mm !important; }
+        body * { visibility: hidden; }
+        .print-page, .print-page * { visibility: visible; }
+        .print-page { position: absolute; left: 0; top: 0; width: 210mm !important; height: 297mm !important; margin: 0 !important; padding: 0 !important; border: none !important; box-shadow: none !important; page-break-after: avoid !important; page-break-inside: avoid !important; }
+        .no-print { display: none !important; }
+        textarea { border: none !important; background: transparent !important; resize: none !important; overflow: hidden !important; color: #000 !important; }
       }
-
       @media screen {
-        .print-page {
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-          border-radius: 8px;
-          background: white;
-          margin: 0 auto;
-          overflow: auto;
-        }
+        .print-page { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); border-radius: 8px; background: white; margin: 0 auto; overflow: auto; }
       }
     `}</style>
   );

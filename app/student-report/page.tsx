@@ -309,12 +309,12 @@ function getSubjectComment(gradeText: string, pct: number): string {
     D1: ["Excellent work.", "Excellent.", "Excellent."],
     D2: ["Very good performance.", "Very good performance."],
     C3: ["Good Attempt.", "Good Attempt.", "Good Attempt."],
-    C4: ["Promsing."],
-    C5: [ "Aim higher."],
+    C4: ["Promising."],
+    C5: ["Aim higher."],
     C6: ["More effort."],
     P7: ["More Effort Needed."],
     P8: ["Next time."],
-    F9:["Next time"]
+    F9: ["Next time"]
   };
   const comments = shortComments[gradeText as keyof typeof shortComments] || shortComments.C3;
   return pickStable(comments, `${gradeText}${pct}`);
@@ -322,7 +322,6 @@ function getSubjectComment(gradeText: string, pct: number): string {
 
 function getClassTeacherComment(pct: number, studentName: string): string {
   const band = perfBand(pct);
-    console.log('Generating class teacher comment for:', studentName, 'with pct:', pct, 'band:', band);
 
   const templates: Record<string, string[]> = {
     excellent: [
@@ -361,8 +360,8 @@ function getHeadTeacherComment(pct: number, division: string): string {
     excellent: ["Excellent achievement. Top performance in class.", "Outstanding student. Sets a good example."],
     very_good: ["Very good performance. Maintain high standards.", "Strong academic showing. Keep it up."],
     good: ["Satisfactory performance. Room for improvement.", "Average results. Could do better with more effort."],
-    fair:  ["Satisfactory performance. Room for improvement.", "Average results. Could do better with more effort."],
-    poor:  ["Satisfactory performance. Room for improvement.", "Average results. Could do better with more effort."],
+    fair: ["Satisfactory performance. Room for improvement.", "Average results. Could do better with more effort."],
+    poor: ["Satisfactory performance. Room for improvement.", "Average results. Could do better with more effort."],
   };
   return pickStable(templates[band] || templates.good, `${division}${pct}`);
 }
@@ -434,6 +433,42 @@ function getNextTermDate(currentTerm: TermExamRow | null, allTerms: TermExamRow[
     }
   }
   return nextTerm ? formatDate(nextTerm.start_date) : null;
+}
+
+// Helper function to calculate rankings with proper tie handling
+function calculateRankings<T>(
+  items: T[],
+  scoreExtractor: (item: T) => number,
+  targetId: string,
+  idExtractor: (item: T) => string
+): { rank: number; outOf: number } {
+  if (items.length === 0) return { rank: 0, outOf: 0 };
+  
+  // Sort by score descending
+  const sorted = [...items].sort((a, b) => scoreExtractor(b) - scoreExtractor(a));
+  
+  let currentRank = 1;
+  let i = 0;
+  let targetRank = sorted.length;
+  
+  while (i < sorted.length) {
+    const currentScore = scoreExtractor(sorted[i]);
+    let tieCount = 0;
+    
+    // Count all students with this score
+    while (i + tieCount < sorted.length && scoreExtractor(sorted[i + tieCount]) === currentScore) {
+      if (idExtractor(sorted[i + tieCount]) === targetId) {
+        targetRank = currentRank;
+      }
+      tieCount++;
+    }
+    
+    // Move to next rank group, skipping positions based on tie count
+    currentRank += tieCount;
+    i += tieCount;
+  }
+  
+  return { rank: targetRank, outOf: sorted.length };
 }
 
 // ============ MAIN COMPONENT ============
@@ -679,15 +714,17 @@ export default function StudentReportPage() {
   }, [results, questionToSessionSubject]);
 
   const getSubjectPosition = (subjectId: number, sessionId: number, studentId: string): number => {
-    const allStudentScores: Array<{ studentId: string; score: number }> = [];
-    for (const student of students) {
-      const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
-      const totalsForSess = sMap.get(sessionId) ?? new Map();
-      const total = Number(totalsForSess.get(subjectId) ?? 0);
-      allStudentScores.push({ studentId: student.registration_id, score: total });
-    }
-    allStudentScores.sort((a, b) => b.score - a.score);
-    return allStudentScores.findIndex((s) => s.studentId === studentId) + 1;
+    const ranking = calculateRankings(
+      students,
+      (student) => {
+        const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
+        const totalsForSess = sMap.get(sessionId) ?? new Map();
+        return Number(totalsForSess.get(subjectId) ?? 0);
+      },
+      studentId,
+      (student) => student.registration_id
+    );
+    return ranking.rank;
   };
 
   const subjectRowsForStudent = useMemo(() => {
@@ -710,10 +747,6 @@ export default function StudentReportPage() {
       return { subject_id: sub.id, subject_name: sub.name, perSession, termPct, grade_text: txt, pill: gradePillClass(txt), colorClass: gradeColor(termPct), unebGrade };
     });
   }, [selectedStudent, subjectsForGrade, sessions, totalsByStudentSessionSubject, possibleBySessionSubject]);
-
-  // Add this after subjectRowsForStudent useMemo
-// Calculate per-session averages for lower primary
-
 
   const overall = useMemo(() => {
     if (!selectedStudent) return { pct: 0 };
@@ -746,17 +779,26 @@ export default function StudentReportPage() {
 
   const position = useMemo(() => {
     if (!selectedGrade || !selectedTerm || !selectedStudent) return { rank: "-", outOf: "-" };
-    const studentTotals = students.map((s) => {
-      let total = 0;
-      for (const r of subjectRowsForStudent) {
-        total += r.perSession.reduce((a, p) => a + p.total, 0);
-      }
-      return { id: s.registration_id, total };
-    });
-    studentTotals.sort((a, b) => b.total - a.total);
-    const idx = studentTotals.findIndex((s) => s.id === selectedStudent.registration_id);
-    return { rank: idx + 1, outOf: studentTotals.length };
-  }, [students, selectedStudent, subjectRowsForStudent]);
+    
+    const ranking = calculateRankings(
+      students,
+      (student) => {
+        let total = 0;
+        const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
+        for (const sess of sessions) {
+          const totalsForSess = sMap.get(sess.id) ?? new Map();
+          for (const sub of subjectsForGrade) {
+            total += Number(totalsForSess.get(sub.id) ?? 0);
+          }
+        }
+        return total;
+      },
+      selectedStudent.registration_id,
+      (student) => student.registration_id
+    );
+    
+    return { rank: ranking.rank === 0 ? "-" : ranking.rank, outOf: ranking.outOf };
+  }, [students, selectedStudent, sessions, subjectsForGrade, totalsByStudentSessionSubject]);
 
   // Load saved comments
   useEffect(() => {
@@ -800,7 +842,7 @@ export default function StudentReportPage() {
     const studentName = fmtName(selectedStudent);
     const div = aggregateAndDivision.division || "—";
     const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
-    setClassTeacherComment(getClassTeacherComment(pct,  studentName));
+    setClassTeacherComment(getClassTeacherComment(pct, studentName));
     setHeadTeacherComment(getHeadTeacherComment(pct, div));
   }, [selectedStudentId, overall.pct, aggregateAndDivision.division]);
 
@@ -817,7 +859,7 @@ export default function StudentReportPage() {
     const studentName = fmtName(selectedStudent);
     const div = aggregateAndDivision.division || "—";
     const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
-    setClassTeacherComment(getClassTeacherComment(pct,  studentName));
+    setClassTeacherComment(getClassTeacherComment(pct, studentName));
     setHeadTeacherComment(getHeadTeacherComment(pct, div));
     tinyToast("Auto-filled comments");
   };
@@ -888,6 +930,12 @@ export default function StudentReportPage() {
       const frameDoc = printFrame.contentWindow?.document;
       if (!frameDoc) return;
 
+      const isLowerPrimaryClass = selectedGrade && isLowerPrimary(selectedGrade.grade_name);
+      // Use different padding for upper primary vs lower primary
+      const printInnerPadding = !isLowerPrimaryClass 
+        ? "padding: 14mm 14mm 10mm 14mm;" 
+        : "padding: 3mm 6mm 4mm 6mm;";
+
       frameDoc.open();
       frameDoc.write(`
         <!DOCTYPE html>
@@ -906,7 +954,7 @@ export default function StudentReportPage() {
               background: white;
             }
             .report-page:last-child { page-break-after: auto; }
-            .report-inner { padding: 10mm 15mm; }
+            .report-inner { ${printInnerPadding} box-sizing: border-box; }
             @page { size: A4; margin: 0; }
             @media print {
               body { margin: 0; padding: 0; }
@@ -982,17 +1030,35 @@ export default function StudentReportPage() {
 
       // Generate report for each student
       for (const student of students) {
-        // Calculate student-specific data
+        // Calculate student-specific totals with proper tie handling
         const studentTotalsOverall = students.map((s) => {
           let total = 0;
-          for (const r of subjectRowsForStudent) {
-            total += r.perSession.reduce((a, p) => a + p.total, 0);
+          const sMap = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
+          for (const sess of sessions) {
+            const totalsForSess = sMap.get(sess.id) ?? new Map();
+            for (const sub of subjectsForGrade) {
+              total += Number(totalsForSess.get(sub.id) ?? 0);
+            }
           }
           return { id: s.registration_id, total };
         });
-        studentTotalsOverall.sort((a, b) => b.total - a.total);
-        const rankOverall = studentTotalsOverall.findIndex(s => s.id === student.registration_id) + 1;
-        const outOfOverall = studentTotalsOverall.length;
+        
+        const overallRanking = calculateRankings(
+          students,
+          (s) => {
+            let total = 0;
+            const sMap = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
+            for (const sess of sessions) {
+              const totalsForSess = sMap.get(sess.id) ?? new Map();
+              for (const sub of subjectsForGrade) {
+                total += Number(totalsForSess.get(sub.id) ?? 0);
+              }
+            }
+            return total;
+          },
+          student.registration_id,
+          (s) => s.registration_id
+        );
 
         frameDoc.write(`
           <div class="report-page">
@@ -1050,81 +1116,155 @@ export default function StudentReportPage() {
               
               <!-- Subjects Table -->
               <div class="mb-0 space-y-0">
-                ${sessions.map((sess, sessionIndex) => {
-                  const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
-                  const totalMarksForSession = subjectRowsForStudent.reduce((acc, r) => { 
-                    const ps = r.perSession.find(p => p.sessionId === sess.id); 
-                    return acc + (ps?.total ?? 0); 
-                  }, 0);
-                  
-                  const studentTotals = students.map((s) => { 
-                    const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map(); 
-                    const total = subjectsForGrade.reduce((acc, sub) => { 
-                      const totalsForSess = sMapForStudent.get(sess.id) ?? new Map(); 
-                      return acc + Number(totalsForSess.get(sub.id) ?? 0); 
-                    }, 0); 
-                    return { id: s.registration_id, total }; 
-                  });
-                  studentTotals.sort((a, b) => b.total - a.total);
-                  const rank = studentTotals.findIndex(s => s.id === student.registration_id) + 1;
-                  const outOf = studentTotals.length;
+        `);
 
-                  return `
-                    <div class="border border-gray-200 ${sessionIndex === 0 ? 'rounded-t-lg' : ''} ${sessionIndex === sessions.length - 1 ? 'rounded-b-lg' : ''} ${sessionIndex !== 0 ? 'border-t-0' : ''} overflow-hidden">
-                      <div class="bg-gray-100 px-0 py-0 border-b">
-                        <p class="text-sm text-center font-bold text-gray-900 py-1">
-                          ${sess.exam_type === "BOT" ? "BEGINNING OF TERM" : sess.exam_type === "MOT" ? "MID OF TERM" : "END OF TERM"}
-                        </p>
-                      </div>
-                      <table class="w-full text-xs border-collapse">
-                        <thead class="bg-gray-50 p-0 mt-0">
-                          <tr>
-                            <th class="border p-1 text-left pl-2">Subject</th>
-                            <th class="border p-0 text-center">Full Marks</th>
-                            <th class="border p-0 text-center">Mark Obtained</th>
-                            ${!isLowerPrimaryClass ? '<th class="border p-0 text-center">Grade</th><th class="border p-0 text-center">Agg</th>' : '<th class="border p-0 text-center">Rank</th>'}
-                            <th class="border pl-2 text-left">Subject Teacher Remark</th>
-                            <th class="border p-0 text-center">Initials</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          ${subjectRowsForStudent.map((r) => {
-                            const ps = r.perSession.find(p => p.sessionId === sess.id);
-                            const full = 100;
-                            const mark = ps?.total ?? 0;
-                            const gradeNum = mark !== null ? unebSubjectGrade(mark) : null;
-                            const gradeText = gradeNum ? unebGradeText(gradeNum) : "—";
-                            const autoComment = mark !== null ? getSubjectComment(gradeText, mark) : "";
-                            const agg = gradeNum ?? "";
-                            const subjectPosition = isLowerPrimaryClass ? getSubjectPosition(r.subject_id, sess.id, student.registration_id) : null;
-                            
-                            return `
-                              <tr>
-                                <td class="border p-1 font-medium pl-2">${r.subject_name}</td>
-                                <td class="border p-0 text-center">${full}</td>
-                                <td class="border p-0 text-center">${mark}</td>
-                                ${!isLowerPrimaryClass ? `<td class="border p-0 text-center font-semibold">${gradeText}</td><td class="border p-0 text-center font-semibold">${agg}</td>` : `<td class="border p-0 text-center font-semibold">${subjectPosition}</td>`}
-                                <td class="border pl-2">${autoComment}</td>
-                                <td class="border p-1 text-center">${subjectTeacherById[r.subject_id] || "—"}</td>
-                              </tr>
-                            `;
-                          }).join('')}
-                        </tbody>
-                        <tfoot>
-                          <tr class="font-bold bg-gray-100">
-                            <td class="text-left p-1 font-semi-bold pl-2">Total</td>
-                            <td class="text-center">${subjectRowsForStudent.length * 100}</td>
-                            <td class="text-center">${totalMarksForSession}</td>
-                            ${!isLowerPrimaryClass ? '<td class="text-center">—</td><td class="text-center">—</td>' : '<td class="text-center">—</td>'}
-                            <td colspan="2" class="text-right pr-4">
-                              Position: ${rank}/${outOf}
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  `;
-                }).join('')}
+        for (const sess of sessions) {
+          // Calculate session totals for all students with proper tie handling
+          const studentSessionTotals = students.map((s) => {
+            const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
+            const totalsForSess = sMapForStudent.get(sess.id) ?? new Map();
+            let total = 0;
+            for (const sub of subjectsForGrade) {
+              total += Number(totalsForSess.get(sub.id) ?? 0);
+            }
+            return { id: s.registration_id, total };
+          });
+          
+          const sessionRanking = calculateRankings(
+            students,
+            (s) => {
+              const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
+              const totalsForSess = sMapForStudent.get(sess.id) ?? new Map();
+              let total = 0;
+              for (const sub of subjectsForGrade) {
+                total += Number(totalsForSess.get(sub.id) ?? 0);
+              }
+              return total;
+            },
+            student.registration_id,
+            (s) => s.registration_id
+          );
+          
+          // Calculate class average for this session (for lower primary)
+          let sessionClassAverage = 0;
+          if (isLowerPrimaryClass) {
+            let totalAllStudents = 0;
+            let studentCount = 0;
+            for (const s of students) {
+              const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
+              const totalsForSess = sMapForStudent.get(sess.id) ?? new Map();
+              let studentTotal = 0;
+              for (const sub of subjectsForGrade) {
+                studentTotal += Number(totalsForSess.get(sub.id) ?? 0);
+              }
+              if (studentTotal > 0) {
+                totalAllStudents += studentTotal;
+                studentCount++;
+              }
+            }
+            const possibleTotal = subjectsForGrade.length * 100;
+            sessionClassAverage = studentCount > 0 ? (totalAllStudents / studentCount / possibleTotal) * 100 : 0;
+          }
+          
+          // Calculate student's subject scores for this session
+          const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
+          const totalsForSess = sMap.get(sess.id) ?? new Map();
+          
+          let sessionTotalMarks = 0;
+          for (const sub of subjectsForGrade) {
+            sessionTotalMarks += Number(totalsForSess.get(sub.id) ?? 0);
+          }
+          
+          frameDoc.write(`
+            <div class="border border-gray-200 rounded-lg overflow-hidden mb-2">
+              <div class="bg-gray-100 px-0 py-0 border-b">
+                <p class="text-sm text-center font-bold text-gray-900 py-1">
+                  ${sess.exam_type === "BOT" ? "BEGINNING OF TERM" : sess.exam_type === "MOT" ? "MID OF TERM" : "END OF TERM"}
+                </p>
+              </div>
+              <table class="w-full text-xs border-collapse">
+                <thead class="bg-gray-50 p-0 mt-0">
+                  <tr>
+                    <th class="border p-1 text-left pl-2">Subject</th>
+                    <th class="border p-0 text-center">Full Marks</th>
+                    <th class="border p-0 text-center">Mark Obtained</th>
+                    ${!isLowerPrimaryClass ? '<th class="border p-0 text-center">Grade</th><th class="border p-0 text-center">Agg</th>' : '<th class="border p-0 text-center">Rank</th>'}
+                    <th class="border pl-2 text-left">Subject Teacher Remark</th>
+                    <th class="border p-0 text-center">Initials</th>
+                  </tr>
+                </thead>
+                <tbody>
+          `);
+          
+          for (const sub of subjectsForGrade) {
+            const mark = Number(totalsForSess.get(sub.id) ?? 0);
+            const gradeNum = mark ? unebSubjectGrade(mark) : null;
+            const gradeText = gradeNum ? unebGradeText(gradeNum) : "—";
+            const agg = gradeNum ?? "";
+            
+            let subjectPosition = null;
+            if (isLowerPrimaryClass) {
+              const subjectRanking = calculateRankings(
+                students,
+                (s) => {
+                  const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
+                  const totalsForSessInner = sMapForStudent.get(sess.id) ?? new Map();
+                  return Number(totalsForSessInner.get(sub.id) ?? 0);
+                },
+                student.registration_id,
+                (s) => s.registration_id
+              );
+              subjectPosition = subjectRanking.rank;
+            }
+            
+            frameDoc.write(`
+              <tr>
+                <td class="border p-1 font-medium pl-2">${sub.name}</td>
+                <td class="border p-0 text-center">100</td>
+                <td class="border p-0 text-center">${mark}</td>
+                ${!isLowerPrimaryClass ? 
+                  `<td class="border p-0 text-center font-semibold">${gradeText}</td>
+                   <td class="border p-0 text-center font-semibold">${agg}</td>` : 
+                  `<td class="border p-0 text-center font-semibold">${subjectPosition}</td>`
+                }
+                <td class="border pl-2">${getSubjectComment(gradeText, mark)}</td>
+                <td class="border p-1 text-center">${subjectTeacherById[sub.id] || "—"}</td>
+              </tr>
+            `);
+          }
+          
+          frameDoc.write(`
+                </tbody>
+                <tfoot>
+                  <tr class="font-bold bg-gray-100">
+                    <td class="text-left p-1 font-semi-bold pl-2">Total</td>
+                    <td class="text-center">${subjectsForGrade.length * 100}</td>
+                    <td class="text-center">${sessionTotalMarks}</td>
+                    ${!isLowerPrimaryClass ? '<td class="text-center">—</td><td class="text-center">—</td>' : '<td class="text-center">—</td>'}
+                    <td colspan="2" class="text-right pr-4">
+                      Position: ${sessionRanking.rank}/${sessionRanking.outOf}
+                      ${isLowerPrimaryClass ? ` | Class Avg: ${sessionClassAverage.toFixed(1)}%` : ''}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          `);
+        }
+        
+        // Calculate overall student average
+        let totalMarksOverall = 0;
+        const sMapOverall = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
+        for (const sess of sessions) {
+          const totalsForSess = sMapOverall.get(sess.id) ?? new Map();
+          for (const sub of subjectsForGrade) {
+            totalMarksOverall += Number(totalsForSess.get(sub.id) ?? 0);
+          }
+        }
+        const totalPossible = subjectsForGrade.length * sessions.length * 100;
+        const overallPct = totalPossible > 0 ? (totalMarksOverall / totalPossible) * 100 : 0;
+        
+        frameDoc.write(`
               </div>
               
               <!-- Comments -->
@@ -1134,7 +1274,7 @@ export default function StudentReportPage() {
                     <p class="text-xs font-semibold text-gray-700 uppercase tracking-wider">Class Teacher</p>
                     <p class="text-xs text-gray-500">Class Performance Comment</p>
                   </div>
-                  <textarea class="w-full bg-transparent text-sm text-gray-700 outline-none resize-none" rows="2" disabled>${classTeacherComment}</textarea>
+                  <textarea class="w-full bg-transparent text-sm text-gray-700 outline-none resize-none" rows="2" disabled>${getClassTeacherComment(overallPct, student.first_name)}</textarea>
                   <div class="mt-2 pt-2 border-t border-gray-100">
                     <p class="text-xs text-gray-500">Signature: ________________</p>
                   </div>
@@ -1144,7 +1284,7 @@ export default function StudentReportPage() {
                     <p class="text-xs font-semibold text-gray-700 uppercase tracking-wider">Head Teacher</p>
                     <p class="text-xs text-gray-500">School Performance Comment</p>
                   </div>
-                  <textarea class="w-full bg-transparent text-sm text-gray-700 outline-none resize-none" rows="2" disabled>${headTeacherComment}</textarea>
+                  <textarea class="w-full bg-transparent text-sm text-gray-700 outline-none resize-none" rows="2" disabled>${getHeadTeacherComment(overallPct, "Division")}</textarea>
                   <div class="mt-0 pt-0 border-t border-gray-100">
                     <p class="text-xs text-gray-500">Signature: ________________</p>
                   </div>
@@ -1468,7 +1608,7 @@ export default function StudentReportPage() {
             {/* Report Card */}
             <div className="bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
               <div className="print-page">
-                <div className="print-inner">
+                <div className="print-inner" style={!isLowerPrimaryClass ? { padding: "14mm 14mm 10mm 14mm", boxSizing: "border-box" } : { padding: "3mm 6mm 4mm 6mm", boxSizing: "border-box" }}>
                   {/* Header */}
                   <div className="flex items-center justify-between mb-0 pb-4 border-b">
                     <div className="flex items-center gap-4">
@@ -1537,10 +1677,43 @@ export default function StudentReportPage() {
                     {sessions.map((sess, sessionIndex) => {
                       const totalAgg = subjectRowsForStudent.reduce((acc, r) => { const ps = r.perSession.find(p => p.sessionId === sess.id); const mark = ps?.total ?? 0; const gradeNum = mark ? unebSubjectGrade(mark) : 0; return acc + (gradeNum ?? 0); }, 0);
                       const totalMarksForSession = subjectRowsForStudent.reduce((acc, r) => { const ps = r.perSession.find(p => p.sessionId === sess.id); return acc + (ps?.total ?? 0); }, 0);
-                      const studentTotals = students.map((s) => { const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map(); const total = subjectsForGrade.reduce((acc, sub) => { const totalsForSess = sMapForStudent.get(sess.id) ?? new Map(); return acc + Number(totalsForSess.get(sub.id) ?? 0); }, 0); return { id: s.registration_id, total }; });
-                      studentTotals.sort((a, b) => b.total - a.total);
-                      const rank = studentTotals.findIndex(s => s.id === selectedStudent?.registration_id) + 1;
-                      const outOf = studentTotals.length;
+                      
+                      // Calculate session ranking for this student
+                      const sessionRanking = calculateRankings(
+                        students,
+                        (s) => {
+                          const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
+                          const totalsForSess = sMapForStudent.get(sess.id) ?? new Map();
+                          let total = 0;
+                          for (const sub of subjectsForGrade) {
+                            total += Number(totalsForSess.get(sub.id) ?? 0);
+                          }
+                          return total;
+                        },
+                        selectedStudent.registration_id,
+                        (s) => s.registration_id
+                      );
+                      
+                      // Calculate class average for this session (for lower primary)
+                      let sessionClassAverage = 0;
+                      if (isLowerPrimaryClass) {
+                        let totalAllStudents = 0;
+                        let studentCount = 0;
+                        for (const student of students) {
+                          const sMapForStudent = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
+                          const totalsForSess = sMapForStudent.get(sess.id) ?? new Map();
+                          let studentTotal = 0;
+                          for (const sub of subjectsForGrade) {
+                            studentTotal += Number(totalsForSess.get(sub.id) ?? 0);
+                          }
+                          if (studentTotal > 0) {
+                            totalAllStudents += studentTotal;
+                            studentCount++;
+                          }
+                        }
+                        const possibleTotal = subjectsForGrade.length * 100;
+                        sessionClassAverage = studentCount > 0 ? (totalAllStudents / studentCount / possibleTotal) * 100 : 0;
+                      }
 
                       return (
                         <div key={sess.id} className={`border border-gray-200 ${sessionIndex === 0 ? 'rounded-t-lg' : ''} ${sessionIndex === sessions.length - 1 ? 'rounded-b-lg' : ''} ${sessionIndex !== 0 ? 'border-t-0' : ''} overflow-hidden`}>
@@ -1618,7 +1791,9 @@ export default function StudentReportPage() {
                                   <td className="text-center">—</td>
                                 )}
                                 <td colSpan={2} className="text-right pr-4">
-                                  Position: {rank}/{outOf} | {isLowerPrimaryClass ? `Class Average: ${overall.pct.toFixed(1)}%` : `DIV: ${aggregateAndDivision.division}`}
+                                  Position: {sessionRanking.rank}/{sessionRanking.outOf}
+                                  {isLowerPrimaryClass && ` | Class Avg: ${sessionClassAverage.toFixed(1)}%`}
+                                  {!isLowerPrimaryClass && ` | DIV: ${aggregateAndDivision.division}`}
                                 </td>
                               </tr>
                             </tfoot>
@@ -1670,12 +1845,16 @@ export default function StudentReportPage() {
           </div>
         </main>
       </div>
-      <PrintCSS />
+      <PrintCSS isLowerPrimary={isLowerPrimaryClass ?? false} />
     </div>
   );
 }
 
-function PrintCSS() {
+function PrintCSS({ isLowerPrimary }: { isLowerPrimary: boolean }) {
+  const printInnerPadding = !isLowerPrimary 
+    ? "padding: 14mm 14mm 10mm 14mm;" 
+    : "padding: 3mm 6mm 4mm 6mm;";
+    
   return (
     <style jsx global>{`
       .print-page {
@@ -1685,7 +1864,7 @@ function PrintCSS() {
         margin: 0 auto;
         overflow: hidden;
       }
-      .print-inner { padding: 3mm 6mm 4mm 6mm; box-sizing: border-box; }
+      .print-inner { ${printInnerPadding} box-sizing: border-box; }
       @page { size: A4 portrait; margin: 0mm; }
       @media print {
         * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }

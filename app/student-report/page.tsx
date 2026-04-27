@@ -101,21 +101,18 @@ interface QuestionRow {
   grade_id: number;
   subject_id: number | null;
   exam_type_id: number;
+  question_number?: string;
 }
 
 interface ExamResultRow {
   id: number;
   student_id: string;
+  registration_id?: string;
   question_id: number | null;
   grade_id: number;
   exam_session_id: number | null;
   score: number;
-}
-
-interface TeacherJoinRow {
-  initials: string | null;
-  first_name: string | null;
-  last_name: string | null;
+  percentage?: number;
 }
 
 interface TeacherInfo {
@@ -151,6 +148,14 @@ interface PerformanceAnalysis {
   improvementCount: number;
   subjectsAboveAverage: number;
   subjectsBelowAverage: number;
+}
+
+interface SessionDivision {
+  aggregate: number;
+  division: string;
+  pill: string;
+  best4Grades: string[];
+  hasF9: boolean;
 }
 
 // ============ HELPER FUNCTIONS ============
@@ -239,10 +244,10 @@ function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
   } else if (agg >= 33 && agg <= 36) {
     baseDivision = "U";
   } else {
-    baseDivision = "U"; // Default for invalid aggregates
+    baseDivision = "U";
   }
 
-  // F9 demotion logic: demote only if the student has an F9 in any subject
+  // F9 demotion logic: demote only Divisions 1-3
   if (hasF9) {
     if (baseDivision === "Division 1") {
       return "Division 2";
@@ -250,50 +255,12 @@ function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
       return "Division 3";
     } else if (baseDivision === "Division 3") {
       return "Division 4";
-    } else if (baseDivision === "Division 4") {
-      // Students in Division 4 with F9 remain in Division 4 (not demoted to U)
-      return "Division 4";
-    } else if (baseDivision === "U") {
-      // Students already in U remain in U
-      return "U";
     }
+    // Division 4 and U remain unchanged
   }
 
   return baseDivision;
 }
-
-// Division calculation with F9 demotion logic
-// function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
-//   let baseDivision = "";
-
-//   if (agg >= 4 && agg <= 12) {
-//     baseDivision = "Division 1";
-//   } else if (agg >= 13 && agg <= 24) {
-//     baseDivision = "Division 2";
-//   } else if (agg >= 25 && agg <= 28) {
-//     baseDivision = "Division 3";
-//   } else if (agg >= 29 && agg <= 32) {
-//     baseDivision = "Division 4";
-//   } else if (agg >= 33 && agg <= 36) {
-//     baseDivision = "U";
-//   } else {
-//     baseDivision = "U";
-//   }
-
-//   if (hasF9) {
-//     if (baseDivision === "Division 1") {
-//       return "Division 2";
-//     } else if (baseDivision === "Division 2") {
-//       return "Division 3";
-//     } else if (baseDivision === "Division 3") {
-//       return "Division 4";
-//     } else {
-//       return baseDivision;
-//     }
-//   }
-
-//   return baseDivision;
-// }
 
 function gradePillClass(txt: string) {
   if (txt.startsWith("D"))
@@ -482,7 +449,6 @@ function calculateRankings<T>(
 ): { rank: number; outOf: number } {
   if (items.length === 0) return { rank: 0, outOf: 0 };
   
-  // Sort by score descending
   const sorted = [...items].sort((a, b) => scoreExtractor(b) - scoreExtractor(a));
   
   let currentRank = 1;
@@ -493,7 +459,6 @@ function calculateRankings<T>(
     const currentScore = scoreExtractor(sorted[i]);
     let tieCount = 0;
     
-    // Count all students with this score
     while (i + tieCount < sorted.length && scoreExtractor(sorted[i + tieCount]) === currentScore) {
       if (idExtractor(sorted[i + tieCount]) === targetId) {
         targetRank = currentRank;
@@ -501,12 +466,56 @@ function calculateRankings<T>(
       tieCount++;
     }
     
-    // Move to next rank group, skipping positions based on tie count
     currentRank += tieCount;
     i += tieCount;
   }
   
   return { rank: targetRank, outOf: sorted.length };
+}
+
+// Calculate session-specific aggregate and division
+function calculateSessionAggregateAndDivision(
+  sessionId: number,
+  student: StudentRow,
+  subjectsForGrade: SubjectRow[],
+  totalsByStudentSessionSubject: Map<string, Map<number, Map<number, number>>>,
+  isLowerPrimary: boolean
+): SessionDivision {
+  if (isLowerPrimary) {
+    return { aggregate: 0, division: "—", pill: divisionPillClass("U"), best4Grades: [], hasF9: false };
+  }
+  
+  const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
+  const totalsForSess = sMap.get(sessionId) ?? new Map();
+  
+  // Get grades for all subjects in this session
+  const gradesArr: number[] = [];
+  let hasF9 = false;
+  
+  for (const sub of subjectsForGrade) {
+    const mark = Number(totalsForSess.get(sub.id) ?? 0);
+    if (mark > 0) {
+      const grade = unebSubjectGrade(mark);
+      gradesArr.push(grade);
+      if (grade === 9) hasF9 = true;
+    }
+  }
+  
+  // Sort grades (best first) and take top 4
+  const sortedGrades = [...gradesArr].sort((a, b) => a - b);
+  const best4 = sortedGrades.slice(0, 4);
+  const aggregate = best4.reduce((a, g) => a + g, 0);
+  
+  // Calculate division based on aggregate and F9 status
+  const division = unebDivisionFromAggregate(aggregate, hasF9);
+  
+  return {
+    aggregate,
+    division,
+    pill: divisionPillClass(division),
+    best4Grades: best4.map(g => unebGradeText(g)),
+    hasF9
+  };
 }
 
 // ============ MAIN COMPONENT ============
@@ -529,7 +538,7 @@ export default function StudentReportPage() {
   const [selectedGradeId, setSelectedGradeId] = useState("");
   const [selectedTermId, setSelectedTermId] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("");
-  const [subjectComments, setSubjectComments] = useState<Record<number, string>>({});
+  const [subjectComments, setSubjectComments] = useState<Record<string, string>>({}); // Key: `${sessionId}_${subjectId}`
   const [classTeacherComment, setClassTeacherComment] = useState("");
   const [headTeacherComment, setHeadTeacherComment] = useState("");
   const [subjectTeacherById, setSubjectTeacherById] = useState<Record<number, string>>({});
@@ -635,22 +644,55 @@ export default function StudentReportPage() {
       try {
         const gradeId = Number(selectedGradeId);
         const termId = Number(selectedTermId);
-        const sessionIds = examSessionsForTerm.map((s) => s.id);
-        const studentsRes = await supabase.from("students").select("registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code").eq("school_id", school.id).eq("current_grade_id", gradeId).order("first_name");
+        
+        // Load students
+        const studentsRes = await supabase
+          .from("students")
+          .select("registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code")
+          .eq("school_id", school.id)
+          .eq("current_grade_id", gradeId)
+          .order("first_name");
+        
         if (studentsRes.error) throw studentsRes.error;
-        const questionsRes = sessionIds.length === 0 ? { data: [], error: null } : await supabase.from("assessment_question").select("id, max_score, grade_id, subject_id, exam_type_id").eq("school_id", school.id).eq("grade_id", gradeId).eq("term_exam_id", termId).in("exam_type_id", sessionIds);
+        const studentsList = (studentsRes.data ?? []) as StudentRow[];
+        setStudents(studentsList);
+        
+        // Load ALL questions for this term and grade
+        const questionsRes = await supabase
+          .from("assessment_question")
+          .select("*")
+          .eq("school_id", school.id)
+          .eq("grade_id", gradeId)
+          .eq("term_exam_id", termId);
+        
         if ((questionsRes as any).error) throw (questionsRes as any).error;
         const qRows = ((questionsRes as any).data ?? []) as QuestionRow[];
-        const qIds = qRows.map((q) => q.id);
-        const resultsRes = qIds.length === 0 ? { data: [], error: null } : await supabase.from("assessment_examresult").select("id, student_id, question_id, grade_id, exam_session_id, score").eq("school_id", school.id).eq("grade_id", gradeId).in("exam_session_id", sessionIds).in("question_id", qIds);
-        if ((resultsRes as any).error) throw (resultsRes as any).error;
-        setStudents((studentsRes.data ?? []) as StudentRow[]);
         setQuestions(qRows);
-        setResults(((resultsRes as any).data ?? []) as ExamResultRow[]);
-        if (!selectedStudentId && studentsRes.data && studentsRes.data.length > 0) {
-          setSelectedStudentId(studentsRes.data[0].registration_id);
+        
+        // Load ALL results for this grade/term
+        const qIds = qRows.map((q) => q.id);
+        let resultsData: ExamResultRow[] = [];
+        
+        if (qIds.length > 0) {
+          const { data: rawResults, error: resultsError } = await supabase
+            .from("assessment_examresult")
+            .select("*")
+            .eq("school_id", school.id)
+            .eq("grade_id", gradeId)
+            .in("question_id", qIds);
+          
+          if (resultsError) throw resultsError;
+          resultsData = (rawResults || []) as ExamResultRow[];
         }
+        
+        setResults(resultsData);
+        
+        if (!selectedStudentId && studentsList.length > 0) {
+          setSelectedStudentId(studentsList[0].registration_id);
+        }
+        
       } catch (e: any) {
+        console.error("Error loading data:", e);
         setErrorMsg(e.message || "Failed to load data.");
         setStudents([]);
         setQuestions([]);
@@ -659,7 +701,7 @@ export default function StudentReportPage() {
         setLoading(false);
       }
     })();
-  }, [school?.id, canLoad, selectedGradeId, selectedTermId, examSessionsForTerm.length]);
+  }, [school?.id, canLoad, selectedGradeId, selectedTermId]);
 
   const selectedStudent = useMemo(() => selectedStudentId ? students.find((s) => s.registration_id === selectedStudentId) ?? null : null, [students, selectedStudentId]);
 
@@ -718,38 +760,50 @@ export default function StudentReportPage() {
       const sess = Number(q.exam_type_id);
       if (!map.has(sess)) map.set(sess, new Map());
       const mm = map.get(sess)!;
-      mm.set(subjectId, (mm.get(subjectId) ?? 0) + Number(q.max_score ?? 0));
+      mm.set(subjectId, 100);
     }
     return map;
-  }, [questions]);
-
-  const questionToSessionSubject = useMemo(() => {
-    const m = new Map<number, { sessionId: number; subjectId: number }>();
-    for (const q of questions) {
-      const subjectId = Number(q.subject_id ?? 0);
-      if (!subjectId) continue;
-      m.set(q.id, { sessionId: Number(q.exam_type_id), subjectId });
-    }
-    return m;
   }, [questions]);
 
   const totalsByStudentSessionSubject = useMemo(() => {
     const map = new Map<string, Map<number, Map<number, number>>>();
+    
     for (const r of results) {
       if (!r.question_id || !r.exam_session_id) continue;
-      const meta = questionToSessionSubject.get(Number(r.question_id));
-      if (!meta) continue;
+      
       const studentId = r.student_id;
+      
+      const studentExists = students.some(s => s.registration_id === studentId);
+      if (!studentExists) continue;
+      
+      const question = questions.find(q => q.id === Number(r.question_id));
+      if (!question) continue;
+      
+      const subjectId = Number(question.subject_id ?? 0);
+      if (!subjectId) continue;
+      
       const sessionId = Number(r.exam_session_id);
-      const subjectId = meta.subjectId;
+      
       if (!map.has(studentId)) map.set(studentId, new Map());
       const bySess = map.get(studentId)!;
       if (!bySess.has(sessionId)) bySess.set(sessionId, new Map());
       const bySub = bySess.get(sessionId)!;
-      bySub.set(subjectId, (bySub.get(subjectId) ?? 0) + Number(r.score ?? 0));
+      
+      let score = 0;
+      if (r.percentage !== undefined && r.percentage !== null) {
+        score = Number(r.percentage);
+      } else {
+        score = Number(r.score ?? 0);
+        const maxScore = question.max_score || 100;
+        score = (score / maxScore) * 100;
+      }
+      
+      score = Math.min(100, Math.max(0, score));
+      bySub.set(subjectId, score);
     }
+    
     return map;
-  }, [results, questionToSessionSubject]);
+  }, [results, questions, students]);
 
   const getSubjectPosition = (subjectId: number, sessionId: number, studentId: string): number => {
     const ranking = calculateRankings(
@@ -772,8 +826,8 @@ export default function StudentReportPage() {
       const perSession = sessions.map((sess) => {
         const totalsForSess = sMap.get(sess.id) ?? new Map();
         const total = Number(totalsForSess.get(sub.id) ?? 0);
-        const possible = Number((possibleBySessionSubject.get(sess.id)?.get(sub.id) ?? 0) as number);
-        const pct = possible > 0 ? (total / possible) * 100 : 0;
+        const possible = 100;
+        const pct = total;
         return { sessionId: sess.id, exam_type: sess.exam_type, total, possible, pct };
       });
       const valid = perSession.filter((x) => x.possible > 0);
@@ -784,7 +838,7 @@ export default function StudentReportPage() {
       const txt = unebGradeText(unebGrade);
       return { subject_id: sub.id, subject_name: sub.name, perSession, termPct, grade_text: txt, pill: gradePillClass(txt), colorClass: gradeColor(termPct), unebGrade };
     });
-  }, [selectedStudent, subjectsForGrade, sessions, totalsByStudentSessionSubject, possibleBySessionSubject]);
+  }, [selectedStudent, subjectsForGrade, sessions, totalsByStudentSessionSubject]);
 
   const overall = useMemo(() => {
     if (!selectedStudent) return { pct: 0 };
@@ -806,15 +860,6 @@ export default function StudentReportPage() {
   const performanceAnalysis = useMemo(() => analyzePerformance(subjectRowsForStudent), [subjectRowsForStudent]);
   const canEditComments = useMemo(() => profile?.role === "ADMIN" || profile?.role === "TEACHER" || profile?.role === "ACADEMIC", [profile?.role]);
 
-  const totalMarks = useMemo(() => {
-    if (!selectedStudent) return 0;
-    let total = 0;
-    for (const r of subjectRowsForStudent) {
-      total += r.perSession.reduce((acc, s) => acc + s.total, 0);
-    }
-    return total;
-  }, [selectedStudent, subjectRowsForStudent]);
-
   const position = useMemo(() => {
     if (!selectedGrade || !selectedTerm || !selectedStudent) return { rank: "-", outOf: "-" };
     
@@ -823,13 +868,18 @@ export default function StudentReportPage() {
       (student) => {
         let total = 0;
         const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
+        let count = 0;
         for (const sess of sessions) {
           const totalsForSess = sMap.get(sess.id) ?? new Map();
           for (const sub of subjectsForGrade) {
-            total += Number(totalsForSess.get(sub.id) ?? 0);
+            const mark = Number(totalsForSess.get(sub.id) ?? 0);
+            if (mark > 0) {
+              total += mark;
+              count++;
+            }
           }
         }
-        return total;
+        return count > 0 ? total / count : 0;
       },
       selectedStudent.registration_id,
       (student) => student.registration_id
@@ -859,20 +909,27 @@ export default function StudentReportPage() {
     localStorage.setItem(key, JSON.stringify({ subjectComments, classTeacherComment, headTeacherComment }));
   }, [school?.id, selectedStudentId, selectedGradeId, selectedTermId, subjectComments, classTeacherComment, headTeacherComment]);
 
-  // Auto-generate subject comments
+  // Auto-generate subject comments per session
   useEffect(() => {
-    if (!selectedStudent || subjectRowsForStudent.length === 0) return;
+    if (!selectedStudent || subjectRowsForStudent.length === 0 || sessions.length === 0) return;
     setSubjectComments((prev) => {
       const next = { ...prev };
-      for (const r of subjectRowsForStudent) {
-        const existing = (next[r.subject_id] ?? "").trim();
-        if (!existing) {
-          next[r.subject_id] = getSubjectComment(r.grade_text, Math.round(r.termPct));
+      for (const sess of sessions) {
+        for (const r of subjectRowsForStudent) {
+          const key = `${sess.id}_${r.subject_id}`;
+          const existing = (next[key] ?? "").trim();
+          if (!existing) {
+            const ps = r.perSession.find(p => p.sessionId === sess.id);
+            const mark = ps?.total ?? 0;
+            const gradeNum = mark > 0 ? unebSubjectGrade(mark) : null;
+            const gradeText = gradeNum ? unebGradeText(gradeNum) : "—";
+            next[key] = mark > 0 ? getSubjectComment(gradeText, mark) : "Not attempted";
+          }
         }
       }
       return next;
     });
-  }, [selectedStudentId, subjectRowsForStudent]);
+  }, [selectedStudentId, subjectRowsForStudent, sessions]);
 
   // Auto-generate class and head teacher comments
   useEffect(() => {
@@ -888,9 +945,16 @@ export default function StudentReportPage() {
   const autoFillAllComments = () => {
     if (!selectedStudent) return;
     setSubjectComments(() => {
-      const next: Record<number, string> = {};
-      for (const r of subjectRowsForStudent) {
-        next[r.subject_id] = getSubjectComment(r.grade_text, Math.round(r.termPct));
+      const next: Record<string, string> = {};
+      for (const sess of sessions) {
+        for (const r of subjectRowsForStudent) {
+          const key = `${sess.id}_${r.subject_id}`;
+          const ps = r.perSession.find(p => p.sessionId === sess.id);
+          const mark = ps?.total ?? 0;
+          const gradeNum = mark > 0 ? unebSubjectGrade(mark) : null;
+          const gradeText = gradeNum ? unebGradeText(gradeNum) : "—";
+          next[key] = mark > 0 ? getSubjectComment(gradeText, mark) : "Not attempted";
+        }
       }
       return next;
     });
@@ -920,16 +984,15 @@ export default function StudentReportPage() {
     try {
       const gradeId = Number(selectedGradeId);
       const termId = Number(selectedTermId);
-      const sessionIds = examSessionsForTerm.map((s) => s.id);
       const [studentsRes, questionsRes] = await Promise.all([
-        supabase.from("students").select("registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code").eq("school_id", school.id).eq("current_grade_id", gradeId).order("first_name"),
-        sessionIds.length === 0 ? { data: [], error: null } : supabase.from("assessment_question").select("id, max_score, grade_id, subject_id, exam_type_id").eq("school_id", school.id).eq("grade_id", gradeId).eq("term_exam_id", termId).in("exam_type_id", sessionIds),
+        supabase.from("students").select("*").eq("school_id", school.id).eq("current_grade_id", gradeId).order("first_name"),
+        supabase.from("assessment_question").select("*").eq("school_id", school.id).eq("grade_id", gradeId).eq("term_exam_id", termId),
       ]);
       if (studentsRes.error) throw studentsRes.error;
       if ((questionsRes as any).error) throw (questionsRes as any).error;
       const qRows = ((questionsRes as any).data ?? []) as QuestionRow[];
       const qIds = qRows.map((q) => q.id);
-      const resultsRes = qIds.length === 0 ? { data: [], error: null } : await supabase.from("assessment_examresult").select("id, student_id, question_id, grade_id, exam_session_id, score").eq("school_id", school.id).eq("grade_id", gradeId).in("exam_session_id", sessionIds).in("question_id", qIds);
+      const resultsRes = qIds.length === 0 ? { data: [], error: null } : await supabase.from("assessment_examresult").select("*").eq("school_id", school.id).eq("grade_id", gradeId).in("question_id", qIds);
       if ((resultsRes as any).error) throw (resultsRes as any).error;
       setStudents((studentsRes.data ?? []) as StudentRow[]);
       setQuestions(qRows);
@@ -969,7 +1032,6 @@ export default function StudentReportPage() {
       if (!frameDoc) return;
 
       const isLowerPrimaryClass = selectedGrade && isLowerPrimary(selectedGrade.grade_name);
-      // Use different padding for upper primary vs lower primary
       const printInnerPadding = !isLowerPrimaryClass 
         ? "padding: 14mm 14mm 10mm 14mm;" 
         : "padding: 3mm 6mm 4mm 6mm;";
@@ -1066,42 +1128,26 @@ export default function StudentReportPage() {
         <body>
       `);
 
-      // Generate report for each student
       for (const student of students) {
-        // Calculate student-specific totals with proper tie handling
-        const studentTotalsOverall = students.map((s) => {
-          let total = 0;
-          const sMap = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
-          for (const sess of sessions) {
-            const totalsForSess = sMap.get(sess.id) ?? new Map();
-            for (const sub of subjectsForGrade) {
-              total += Number(totalsForSess.get(sub.id) ?? 0);
+        const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
+        
+        let totalMarksOverall = 0;
+        let totalSubjects = 0;
+        for (const sess of sessions) {
+          const totalsForSess = sMap.get(sess.id) ?? new Map();
+          for (const sub of subjectsForGrade) {
+            const mark = Number(totalsForSess.get(sub.id) ?? 0);
+            if (mark > 0) {
+              totalMarksOverall += mark;
+              totalSubjects++;
             }
           }
-          return { id: s.registration_id, total };
-        });
-        
-        const overallRanking = calculateRankings(
-          students,
-          (s) => {
-            let total = 0;
-            const sMap = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
-            for (const sess of sessions) {
-              const totalsForSess = sMap.get(sess.id) ?? new Map();
-              for (const sub of subjectsForGrade) {
-                total += Number(totalsForSess.get(sub.id) ?? 0);
-              }
-            }
-            return total;
-          },
-          student.registration_id,
-          (s) => s.registration_id
-        );
+        }
+        const overallPct = totalSubjects > 0 ? totalMarksOverall / totalSubjects : 0;
 
         frameDoc.write(`
           <div class="report-page">
             <div class="report-inner">
-              <!-- Header -->
               <div class="flex items-center justify-between mb-0 pb-4 border-b">
                 <div class="flex items-center gap-4">
                   ${school?.school_badge ? 
@@ -1118,14 +1164,6 @@ export default function StudentReportPage() {
                 <div class="text-center">
                   <div class="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">STUDENT REPORT CARD</div>
                   <p class="text-sm font-bold text-gray-900 mt-1">${termLabel(selectedTerm)}</p>
-                  ${student.payment_code ? `
-                    <div class="mt-1">
-                      <div class="flex items-center justify-center gap-2">
-                        <span class="text-xs font-semibold text-gray-600">Payment Code:</span>
-                        <span class="text-sm font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">${student.payment_code}</span>
-                      </div>
-                    </div>
-                  ` : ''}
                 </div>
                 <div>
                   ${student.profile_picture_url ? 
@@ -1135,7 +1173,6 @@ export default function StudentReportPage() {
                 </div>
               </div>
               
-              <!-- Student Info -->
               <div class="mb-0 border border-gray-200 rounded-lg bg-white">
                 <div class="flex items-center justify-between p-3 gap-4">
                   <div class="flex items-center gap-3 flex-1">
@@ -1152,66 +1189,51 @@ export default function StudentReportPage() {
                 </div>
               </div>
               
-              <!-- Subjects Table -->
               <div class="mb-0 space-y-0">
         `);
 
         for (const sess of sessions) {
-          // Calculate session totals for all students with proper tie handling
-          const studentSessionTotals = students.map((s) => {
-            const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
-            const totalsForSess = sMapForStudent.get(sess.id) ?? new Map();
-            let total = 0;
-            for (const sub of subjectsForGrade) {
-              total += Number(totalsForSess.get(sub.id) ?? 0);
+          const totalsForSess = sMap.get(sess.id) ?? new Map();
+          let sessionTotalMarks = 0;
+          let sessionSubjectCount = 0;
+          
+          for (const sub of subjectsForGrade) {
+            const mark = Number(totalsForSess.get(sub.id) ?? 0);
+            if (mark > 0) {
+              sessionTotalMarks += mark;
+              sessionSubjectCount++;
             }
-            return { id: s.registration_id, total };
-          });
+          }
+          const sessionAvg = sessionSubjectCount > 0 ? sessionTotalMarks / sessionSubjectCount : 0;
+          
+          // Calculate session division
+          const sessionDivision = calculateSessionAggregateAndDivision(
+            sess.id,
+            student,
+            subjectsForGrade,
+            totalsByStudentSessionSubject,
+            isLowerPrimaryClass
+          );
           
           const sessionRanking = calculateRankings(
             students,
             (s) => {
               const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
-              const totalsForSess = sMapForStudent.get(sess.id) ?? new Map();
+              const totalsForSessInner = sMapForStudent.get(sess.id) ?? new Map();
               let total = 0;
+              let count = 0;
               for (const sub of subjectsForGrade) {
-                total += Number(totalsForSess.get(sub.id) ?? 0);
+                const mark = Number(totalsForSessInner.get(sub.id) ?? 0);
+                if (mark > 0) {
+                  total += mark;
+                  count++;
+                }
               }
-              return total;
+              return count > 0 ? total / count : 0;
             },
             student.registration_id,
             (s) => s.registration_id
           );
-          
-          // Calculate class average for this session (for lower primary)
-          let sessionClassAverage = 0;
-          if (isLowerPrimaryClass) {
-            let totalAllStudents = 0;
-            let studentCount = 0;
-            for (const s of students) {
-              const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
-              const totalsForSess = sMapForStudent.get(sess.id) ?? new Map();
-              let studentTotal = 0;
-              for (const sub of subjectsForGrade) {
-                studentTotal += Number(totalsForSess.get(sub.id) ?? 0);
-              }
-              if (studentTotal > 0) {
-                totalAllStudents += studentTotal;
-                studentCount++;
-              }
-            }
-            const possibleTotal = subjectsForGrade.length * 100;
-            sessionClassAverage = studentCount > 0 ? (totalAllStudents / studentCount / possibleTotal) * 100 : 0;
-          }
-          
-          // Calculate student's subject scores for this session
-          const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
-          const totalsForSess = sMap.get(sess.id) ?? new Map();
-          
-          let sessionTotalMarks = 0;
-          for (const sub of subjectsForGrade) {
-            sessionTotalMarks += Number(totalsForSess.get(sub.id) ?? 0);
-          }
           
           frameDoc.write(`
             <div class="border border-gray-200 rounded-lg overflow-hidden mb-2">
@@ -1236,7 +1258,7 @@ export default function StudentReportPage() {
           
           for (const sub of subjectsForGrade) {
             const mark = Number(totalsForSess.get(sub.id) ?? 0);
-            const gradeNum = mark ? unebSubjectGrade(mark) : null;
+            const gradeNum = mark > 0 ? unebSubjectGrade(mark) : null;
             const gradeText = gradeNum ? unebGradeText(gradeNum) : "—";
             const agg = gradeNum ?? "";
             
@@ -1255,17 +1277,21 @@ export default function StudentReportPage() {
               subjectPosition = subjectRanking.rank;
             }
             
+            const commentKey = `${sess.id}_${sub.id}`;
+            const savedComment = subjectComments[commentKey];
+            const autoComment = mark > 0 ? getSubjectComment(gradeText, mark) : "Not attempted";
+            
             frameDoc.write(`
               <tr>
                 <td class="border p-1 font-medium pl-2">${sub.name}</td>
                 <td class="border p-0 text-center">100</td>
-                <td class="border p-0 text-center">${mark}</td>
+                <td class="border p-0 text-center">${Math.round(mark)}</td>
                 ${!isLowerPrimaryClass ? 
                   `<td class="border p-0 text-center font-semibold">${gradeText}</td>
                    <td class="border p-0 text-center font-semibold">${agg}</td>` : 
                   `<td class="border p-0 text-center font-semibold">${subjectPosition}</td>`
                 }
-                <td class="border pl-2">${getSubjectComment(gradeText, mark)}</td>
+                <td class="border pl-2">${savedComment || autoComment}</td>
                 <td class="border p-1 text-center">${subjectTeacherById[sub.id] || "—"}</td>
               </tr>
             `);
@@ -1276,12 +1302,22 @@ export default function StudentReportPage() {
                 <tfoot>
                   <tr class="font-bold bg-gray-100">
                     <td class="text-left p-1 font-semi-bold pl-2">Total</td>
-                    <td class="text-center">${subjectsForGrade.length * 100}</td>
-                    <td class="text-center">${sessionTotalMarks}</td>
-                    ${!isLowerPrimaryClass ? '<td class="text-center">—</td><td class="text-center">—</td>' : '<td class="text-center">—</td>'}
+                    <td class="text-center">100%</td>
+                    <td class="text-center">${Math.round(sessionAvg)}%</td>
+                    ${!isLowerPrimaryClass ? 
+                      `<td colspan="2" class="text-center">
+                        <div class="flex items-center justify-center gap-2">
+                          <span class="text-xs">Agg: ${sessionDivision.aggregate}</span>
+                          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold text-white ${sessionDivision.pill}">
+                            ${sessionDivision.division}
+                          </span>
+                          ${sessionDivision.hasF9 ? '<span class="text-xs text-red-600" title="Has F9 grade">⚠️ F9</span>' : ''}
+                        </div>
+                       </td>` : 
+                      `<td class="text-center">—</td>`
+                    }
                     <td colspan="2" class="text-right pr-4">
                       Position: ${sessionRanking.rank}/${sessionRanking.outOf}
-                      ${isLowerPrimaryClass ? ` | Class Avg: ${sessionClassAverage.toFixed(1)}%` : ''}
                     </td>
                   </tr>
                 </tfoot>
@@ -1290,22 +1326,9 @@ export default function StudentReportPage() {
           `);
         }
         
-        // Calculate overall student average
-        let totalMarksOverall = 0;
-        const sMapOverall = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
-        for (const sess of sessions) {
-          const totalsForSess = sMapOverall.get(sess.id) ?? new Map();
-          for (const sub of subjectsForGrade) {
-            totalMarksOverall += Number(totalsForSess.get(sub.id) ?? 0);
-          }
-        }
-        const totalPossible = subjectsForGrade.length * sessions.length * 100;
-        const overallPct = totalPossible > 0 ? (totalMarksOverall / totalPossible) * 100 : 0;
-        
         frameDoc.write(`
               </div>
               
-              <!-- Comments -->
               <div class="space-y-0 mt-1">
                 <div class="border border-gray-200 rounded-lg p-2.5">
                   <div class="flex items-center justify-between mb-0">
@@ -1386,7 +1409,6 @@ export default function StudentReportPage() {
 
   const isLowerPrimaryClass = selectedGrade && isLowerPrimary(selectedGrade.grade_name);
 
-  // If no student selected or no exams, show appropriate messages
   if (!selectedStudent) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -1713,45 +1735,48 @@ export default function StudentReportPage() {
                   {/* Subjects Table */}
                   <div className="mb-0 space-y-0">
                     {sessions.map((sess, sessionIndex) => {
-                      const totalAgg = subjectRowsForStudent.reduce((acc, r) => { const ps = r.perSession.find(p => p.sessionId === sess.id); const mark = ps?.total ?? 0; const gradeNum = mark ? unebSubjectGrade(mark) : 0; return acc + (gradeNum ?? 0); }, 0);
-                      const totalMarksForSession = subjectRowsForStudent.reduce((acc, r) => { const ps = r.perSession.find(p => p.sessionId === sess.id); return acc + (ps?.total ?? 0); }, 0);
+                      const sMap = totalsByStudentSessionSubject.get(selectedStudent.registration_id) ?? new Map();
+                      const totalsForSess = sMap.get(sess.id) ?? new Map();
                       
-                      // Calculate session ranking for this student
+                      let sessionTotalMarks = 0;
+                      let sessionSubjectCount = 0;
+                      for (const sub of subjectsForGrade) {
+                        const mark = Number(totalsForSess.get(sub.id) ?? 0);
+                        if (mark > 0) {
+                          sessionTotalMarks += mark;
+                          sessionSubjectCount++;
+                        }
+                      }
+                      const sessionAvg = sessionSubjectCount > 0 ? sessionTotalMarks / sessionSubjectCount : 0;
+                      
+                      // Calculate session-specific division
+                      const sessionDivision = calculateSessionAggregateAndDivision(
+                        sess.id,
+                        selectedStudent,
+                        subjectsForGrade,
+                        totalsByStudentSessionSubject,
+                        isLowerPrimaryClass
+                      );
+                      
                       const sessionRanking = calculateRankings(
                         students,
                         (s) => {
                           const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
-                          const totalsForSess = sMapForStudent.get(sess.id) ?? new Map();
+                          const totalsForSessInner = sMapForStudent.get(sess.id) ?? new Map();
                           let total = 0;
+                          let count = 0;
                           for (const sub of subjectsForGrade) {
-                            total += Number(totalsForSess.get(sub.id) ?? 0);
+                            const mark = Number(totalsForSessInner.get(sub.id) ?? 0);
+                            if (mark > 0) {
+                              total += mark;
+                              count++;
+                            }
                           }
-                          return total;
+                          return count > 0 ? total / count : 0;
                         },
                         selectedStudent.registration_id,
                         (s) => s.registration_id
                       );
-                      
-                      // Calculate class average for this session (for lower primary)
-                      let sessionClassAverage = 0;
-                      if (isLowerPrimaryClass) {
-                        let totalAllStudents = 0;
-                        let studentCount = 0;
-                        for (const student of students) {
-                          const sMapForStudent = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
-                          const totalsForSess = sMapForStudent.get(sess.id) ?? new Map();
-                          let studentTotal = 0;
-                          for (const sub of subjectsForGrade) {
-                            studentTotal += Number(totalsForSess.get(sub.id) ?? 0);
-                          }
-                          if (studentTotal > 0) {
-                            totalAllStudents += studentTotal;
-                            studentCount++;
-                          }
-                        }
-                        const possibleTotal = subjectsForGrade.length * 100;
-                        sessionClassAverage = studentCount > 0 ? (totalAllStudents / studentCount / possibleTotal) * 100 : 0;
-                      }
 
                       return (
                         <div key={sess.id} className={`border border-gray-200 ${sessionIndex === 0 ? 'rounded-t-lg' : ''} ${sessionIndex === sessions.length - 1 ? 'rounded-b-lg' : ''} ${sessionIndex !== 0 ? 'border-t-0' : ''} overflow-hidden`}>
@@ -1783,28 +1808,33 @@ export default function StudentReportPage() {
                                 const ps = r.perSession.find(p => p.sessionId === sess.id);
                                 const full = 100;
                                 const mark = ps?.total ?? 0;
-                                const gradeNum = mark !== null ? unebSubjectGrade(mark) : null;
+                                const gradeNum = mark > 0 ? unebSubjectGrade(mark) : null;
                                 const gradeText = gradeNum ? unebGradeText(gradeNum) : "—";
-                                const autoComment = mark !== null ? getSubjectComment(gradeText, mark) : "";
+                                const commentKey = `${sess.id}_${r.subject_id}`;
+                                const savedComment = subjectComments[commentKey];
+                                const autoComment = mark > 0 ? getSubjectComment(gradeText, mark) : "Not attempted";
                                 const agg = gradeNum ?? "";
-                                const subjectPosition = isLowerPrimaryClass ? getSubjectPosition(r.subject_id, sess.id, selectedStudent.registration_id) : null;
+                                const subjectPosition = isLowerPrimaryClass && mark > 0 
+                                  ? getSubjectPosition(r.subject_id, sess.id, selectedStudent.registration_id) 
+                                  : null;
+                                
                                 return (
                                   <tr key={`${sess.id}-${r.subject_id}`}>
                                     <td className="border p-1 font-medium pl-2">{r.subject_name}</td>
                                     <td className="border p-0 text-center">{full}</td>
-                                    <td className="border p-0 text-center">{mark}</td>
+                                    <td className="border p-0 text-center">{mark > 0 ? Math.round(mark) : "-"}</td>
                                     {!isLowerPrimaryClass ? (
                                       <>
-                                        <td className="border p-0 text-center font-semibold">{gradeText}</td>
-                                        <td className="border p-0 text-center font-semibold">{agg}</td>
+                                        <td className="border p-0 text-center font-semibold">{mark > 0 ? gradeText : "-"}</td>
+                                        <td className="border p-0 text-center font-semibold">{mark > 0 ? agg : "-"}</td>
                                       </>
                                     ) : (
-                                      <td className="border p-0 text-center font-semibold">{subjectPosition}</td>
+                                      <td className="border p-0 text-center font-semibold">{mark > 0 ? subjectPosition : "-"}</td>
                                     )}
                                     <td className="border pl-2">
                                       <textarea 
-                                        value={isEditing ? (subjectComments[r.subject_id] ?? "") : autoComment} 
-                                        onChange={(e) => setSubjectComments(prev => ({ ...prev, [r.subject_id]: e.target.value }))} 
+                                        value={savedComment ?? autoComment} 
+                                        onChange={(e) => setSubjectComments(prev => ({ ...prev, [commentKey]: e.target.value }))} 
                                         disabled={!isEditing} 
                                         className="w-full bg-transparent outline-none resize-none" 
                                         rows={1} 
@@ -1818,20 +1848,23 @@ export default function StudentReportPage() {
                             <tfoot>
                               <tr className="font-bold bg-gray-100">
                                 <td className="text-left p-1 font-semi-bold pl-2">Total</td>
-                                <td className="text-center">{subjectRowsForStudent.length * 100}</td>
-                                <td className="text-center">{totalMarksForSession}</td>
+                                <td className="text-center">100%</td>
+                                <td className="text-center">{Math.round(sessionAvg)}%</td>
                                 {!isLowerPrimaryClass ? (
-                                  <>
-                                    <td className="text-center">—</td>
-                                    <td className="text-center">{totalAgg}</td>
-                                  </>
+                                  <td colSpan={2} className="text-center">
+                                    <div className="flex items-center justify-center gap-2">
+                                      <span className="text-xs">Agg: {sessionDivision.aggregate}</span>
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold text-white ${sessionDivision.pill}`}>
+                                        {sessionDivision.division}
+                                      </span>
+                                 
+                                    </div>
+                                  </td>
                                 ) : (
                                   <td className="text-center">—</td>
                                 )}
                                 <td colSpan={2} className="text-right pr-4">
                                   Position: {sessionRanking.rank}/{sessionRanking.outOf}
-                                  {isLowerPrimaryClass && ` | Class Avg: ${sessionClassAverage.toFixed(1)}%`}
-                                  {!isLowerPrimaryClass && ` | DIV: ${aggregateAndDivision.division}`}
                                 </td>
                               </tr>
                             </tfoot>

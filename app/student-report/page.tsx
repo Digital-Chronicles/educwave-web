@@ -239,9 +239,10 @@ function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
   } else if (agg >= 33 && agg <= 36) {
     baseDivision = "U";
   } else {
-    baseDivision = "U";
+    baseDivision = "U"; // Default for invalid aggregates
   }
 
+  // F9 demotion logic: demote only if the student has an F9 in any subject
   if (hasF9) {
     if (baseDivision === "Division 1") {
       return "Division 2";
@@ -249,13 +250,50 @@ function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
       return "Division 3";
     } else if (baseDivision === "Division 3") {
       return "Division 4";
-    } else {
-      return baseDivision;
+    } else if (baseDivision === "Division 4") {
+      // Students in Division 4 with F9 remain in Division 4 (not demoted to U)
+      return "Division 4";
+    } else if (baseDivision === "U") {
+      // Students already in U remain in U
+      return "U";
     }
   }
 
   return baseDivision;
 }
+
+// Division calculation with F9 demotion logic
+// function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
+//   let baseDivision = "";
+
+//   if (agg >= 4 && agg <= 12) {
+//     baseDivision = "Division 1";
+//   } else if (agg >= 13 && agg <= 24) {
+//     baseDivision = "Division 2";
+//   } else if (agg >= 25 && agg <= 28) {
+//     baseDivision = "Division 3";
+//   } else if (agg >= 29 && agg <= 32) {
+//     baseDivision = "Division 4";
+//   } else if (agg >= 33 && agg <= 36) {
+//     baseDivision = "U";
+//   } else {
+//     baseDivision = "U";
+//   }
+
+//   if (hasF9) {
+//     if (baseDivision === "Division 1") {
+//       return "Division 2";
+//     } else if (baseDivision === "Division 2") {
+//       return "Division 3";
+//     } else if (baseDivision === "Division 3") {
+//       return "Division 4";
+//     } else {
+//       return baseDivision;
+//     }
+//   }
+
+//   return baseDivision;
+// }
 
 function gradePillClass(txt: string) {
   if (txt.startsWith("D"))

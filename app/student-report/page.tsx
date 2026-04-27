@@ -1850,7 +1850,9 @@ export default function StudentReportPage() {
                               <tr className="font-bold bg-gray-100">
                                 <td className="text-left p-1 font-semi-bold pl-2">Total</td>
                                 <td className="text-center">100%</td>
+                                <td className="text-center">{Math.round(sessionTotalMarks)}</td>
                                 <td className="text-center">{Math.round(sessionAvg)}%</td>
+
                                 {!isLowerPrimaryClass ? (
                                   <td colSpan={2} className="text-center">
                                     <div className="flex items-center justify-center gap-2">

@@ -1750,6 +1750,7 @@ export default function StudentReportPage() {
                       const sessionAvg = sessionSubjectCount > 0 ? sessionTotalMarks / sessionSubjectCount : 0;
                       
                       // Calculate session-specific division
+                      const isLowerPrimaryClass = selectedGrade ? isLowerPrimary(selectedGrade.grade_name) : false;
                       const sessionDivision = calculateSessionAggregateAndDivision(
                         sess.id,
                         selectedStudent,
@@ -1854,7 +1855,7 @@ export default function StudentReportPage() {
                                   <td colSpan={2} className="text-center">
                                     <div className="flex items-center justify-center gap-2">
                                       <span className="text-xs">Agg: {sessionDivision.aggregate}</span>
-                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold text-white ${sessionDivision.pill}`}>
+                                      <span className={`inline-flex items-center px-2 py-0 rounded-full text-xs font-semibold text-white ${sessionDivision.pill}`}>
                                         {sessionDivision.division}
                                       </span>
                                  

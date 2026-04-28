@@ -1910,7 +1910,7 @@ export default function StudentReportPage() {
                                 )}
                                 <th className="border pl-2 text-left">Subject Teacher Remark</th>
                                 <th className="border p-0 text-center">Initials</th>
-                              </table>
+                              </tr>
                             </thead>
                             <tbody>
                               {subjectRowsForStudent.map((r) => {

@@ -1757,7 +1757,9 @@ useEffect(() => {
                         </div>
                       )}
                       <div>
-                        <h2 className="text-xl font-bold text-gray-900">{school.school_name}</h2>
+                        <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-900 truncate max-w-full">
+  {school.school_name}
+</h2>
                         <p className="text-xs text-gray-600">
                           {school.location && <span className="mr-3">{school.location}</span>}
                           {school.contact_number && <span>📞 {school.contact_number}</span>}
@@ -1768,14 +1770,11 @@ useEffect(() => {
                       <div className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">STUDENT REPORT CARD</div>
                       <p className="text-sm font-bold text-gray-900 mt-1">{termLabel(selectedTerm)}</p>
                       {selectedStudent.payment_code && (
-                        <div className="mt-1">
+                        <div className="mt-0">
                           <div className="flex items-center justify-center gap-2">
                             <span className="text-xs font-semibold text-gray-600">Payment Code:</span>
                             <span className="text-sm font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">{selectedStudent.payment_code}</span>
-                            <button onClick={copyPaymentCode} className="text-gray-400 hover:text-blue-600 transition-colors" title="Copy payment code">
-                              <Copy className="w-3 h-3" />
-                            </button>
-                          </div>
+                         </div>
                         </div>
                       )}
                     </div>
@@ -1803,6 +1802,7 @@ useEffect(() => {
                             <span>LIN: <span className="font-semibold">{selectedStudent.lin_id || "—"}</span></span>
                             {selectedStudent.gender && <span>Gender: <span className="font-semibold">{selectedStudent.gender}</span></span>}
                             <span>Class: <span className="font-semibold">{selectedGrade?.grade_name || "—"}</span></span>
+                            
                           </div>
                         </div>
                       </div>

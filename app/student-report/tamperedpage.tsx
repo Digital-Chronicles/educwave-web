@@ -29,6 +29,10 @@ import {
   FileText,
   Copy,
   Users,
+  Plus,
+  Minus,
+  MoveUp,
+  MoveDown,
 } from "lucide-react";
 
 // ============ TYPES ============
@@ -150,14 +154,6 @@ interface PerformanceAnalysis {
   subjectsBelowAverage: number;
 }
 
-interface SessionDivision {
-  aggregate: number;
-  division: string;
-  pill: string;
-  best4Grades: string[];
-  hasF9: boolean;
-}
-
 // ============ HELPER FUNCTIONS ============
 const fmtName = (s: StudentRow) =>
   `${s.first_name ?? ""} ${s.last_name ?? ""}`.trim();
@@ -247,7 +243,6 @@ function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
     baseDivision = "U";
   }
 
-  // F9 demotion logic: demote only Divisions 1-3
   if (hasF9) {
     if (baseDivision === "Division 1") {
       return "Division 2";
@@ -256,7 +251,6 @@ function unebDivisionFromAggregate(agg: number, hasF9: boolean): string {
     } else if (baseDivision === "Division 3") {
       return "Division 4";
     }
-    // Division 4 and U remain unchanged
   }
 
   return baseDivision;
@@ -287,28 +281,6 @@ function gradeColor(pct: number) {
   return "text-rose-600";
 }
 
-function stableHash(input: string) {
-  let h = 2166136261;
-  for (let i = 0; i < input.length; i++) {
-    h ^= input.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return Math.abs(h);
-}
-
-function pickStable(list: string[], key: string) {
-  if (!list.length) return "";
-  return list[stableHash(key) % list.length];
-}
-
-function perfBand(pct: number) {
-  if (pct >= 85) return "excellent";
-  if (pct >= 70) return "very_good";
-  if (pct >= 60) return "good";
-  if (pct >= 50) return "fair";
-  return "poor";
-}
-
 function getSubjectComment(gradeText: string, pct: number): string {
   const shortComments: Record<string, string[]> = {
     D1: ["Excellent work.", "Excellent.", "Excellent."],
@@ -322,53 +294,23 @@ function getSubjectComment(gradeText: string, pct: number): string {
     F9: ["Next time"]
   };
   const comments = shortComments[gradeText as keyof typeof shortComments] || shortComments.C3;
-  return pickStable(comments, `${gradeText}${pct}`);
+  return comments[0] || "";
 }
 
 function getClassTeacherComment(pct: number, studentName: string): string {
-  const band = perfBand(pct);
-
-  const templates: Record<string, string[]> = {
-    excellent: [
-      `${studentName} has performed excellently. Keep shining!`,
-      `Outstanding performance by ${studentName}. Very proud!`,
-      `Excellent work throughout the term. ${studentName} is a star!`,
-    ],
-    very_good: [
-      `${studentName} performed very well. Good job!`,
-      `Good consistent performance. Well done ${studentName}!`,
-      `Strong work ethic demonstrated. Keep it up ${studentName}!`,
-    ],
-    good: [
-      `${studentName}'s performance was satisfactory. Could do better.`,
-      `Average performance with room for improvement.`,
-      `Fair effort shown throughout. Aim higher next term.`,
-    ],
-    fair: [
-      `${studentName}'s performance was satisfactory. Could do better.`,
-      `Average performance with room for improvement.`,
-      `Fair effort shown throughout. Aim higher next term.`,
-    ],
-    poor: [
-      `${studentName}'s performance was satisfactory. Could do better.`,
-      `Average performance with room for improvement.`,
-      `Fair effort shown throughout. Aim higher next term.`,
-    ],
-  };
-
-  return pickStable(templates[band] || templates.good, `${studentName}${pct}`);
+  if (pct >= 85) return `${studentName} has performed excellently. Keep shining!`;
+  if (pct >= 70) return `${studentName} performed very well. Good job!`;
+  if (pct >= 60) return `${studentName}'s performance was satisfactory. Could do better.`;
+  if (pct >= 50) return `${studentName}'s performance was satisfactory. Could do better.`;
+  return `${studentName}'s performance was satisfactory. Could do better.`;
 }
 
 function getHeadTeacherComment(pct: number, division: string): string {
-  const band = perfBand(pct);
-  const templates: Record<string, string[]> = {
-    excellent: ["Excellent achievement. Top performance in class.", "Outstanding student. Sets a good example."],
-    very_good: ["Very good performance. Maintain high standards.", "Strong academic showing. Keep it up."],
-    good: ["Satisfactory performance. Room for improvement.", "Average results. Could do better with more effort."],
-    fair: ["Satisfactory performance. Room for improvement.", "Average results. Could do better with more effort."],
-    poor: ["Satisfactory performance. Room for improvement.", "Average results. Could do better with more effort."],
-  };
-  return pickStable(templates[band] || templates.good, `${division}${pct}`);
+  if (pct >= 85) return "Excellent achievement. Top performance in class.";
+  if (pct >= 70) return "Very good performance. Maintain high standards.";
+  if (pct >= 60) return "Satisfactory performance. Room for improvement.";
+  if (pct >= 50) return "Satisfactory performance. Room for improvement.";
+  return "Satisfactory performance. Room for improvement.";
 }
 
 function tinyToast(message: string) {
@@ -379,8 +321,8 @@ function tinyToast(message: string) {
   setTimeout(() => el.remove(), 2000);
 }
 
-function buildLocalKey(schoolId: string, gradeId: string, termId: string, studentId: string) {
-  return `report_comments::${schoolId}::${gradeId}::${termId}::${studentId}`;
+function buildLocalKey(schoolId: string, gradeId: string, termId: string) {
+  return `report_data::${schoolId}::${gradeId}::${termId}`;
 }
 
 function analyzePerformance(subjectRows: SubjectRowWithDetails[]): PerformanceAnalysis {
@@ -473,51 +415,6 @@ function calculateRankings<T>(
   return { rank: targetRank, outOf: sorted.length };
 }
 
-// Calculate session-specific aggregate and division
-function calculateSessionAggregateAndDivision(
-  sessionId: number,
-  student: StudentRow,
-  subjectsForGrade: SubjectRow[],
-  totalsByStudentSessionSubject: Map<string, Map<number, Map<number, number>>>,
-  isLowerPrimary: boolean
-): SessionDivision {
-  if (isLowerPrimary) {
-    return { aggregate: 0, division: "—", pill: divisionPillClass("U"), best4Grades: [], hasF9: false };
-  }
-  
-  const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
-  const totalsForSess = sMap.get(sessionId) ?? new Map();
-  
-  // Get grades for all subjects in this session
-  const gradesArr: number[] = [];
-  let hasF9 = false;
-  
-  for (const sub of subjectsForGrade) {
-    const mark = Number(totalsForSess.get(sub.id) ?? 0);
-    if (mark > 0) {
-      const grade = unebSubjectGrade(mark);
-      gradesArr.push(grade);
-      if (grade === 9) hasF9 = true;
-    }
-  }
-  
-  // Sort grades (best first) and take top 4
-  const sortedGrades = [...gradesArr].sort((a, b) => a - b);
-  const best4 = sortedGrades.slice(0, 4);
-  const aggregate = best4.reduce((a, g) => a + g, 0);
-  
-  // Calculate division based on aggregate and F9 status
-  const division = unebDivisionFromAggregate(aggregate, hasF9);
-  
-  return {
-    aggregate,
-    division,
-    pill: divisionPillClass(division),
-    best4Grades: best4.map(g => unebGradeText(g)),
-    hasF9
-  };
-}
-
 // ============ MAIN COMPONENT ============
 export default function StudentReportPage() {
   const router = useRouter();
@@ -538,11 +435,18 @@ export default function StudentReportPage() {
   const [selectedGradeId, setSelectedGradeId] = useState("");
   const [selectedTermId, setSelectedTermId] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("");
-  const [subjectComments, setSubjectComments] = useState<Record<string, string>>({}); // Key: `${sessionId}_${subjectId}`
+  
+  // Store all editable data per student: key = `${studentId}_${sessionId}_${subjectId}`
+  const [editableMarks, setEditableMarks] = useState<Record<string, number>>({});
+  
+  // Store editable positions per student per session: key = `${studentId}_${sessionId}`
+  const [editablePositions, setEditablePositions] = useState<Record<string, number>>({});
+  
+  const [subjectComments, setSubjectComments] = useState<Record<string, string>>({});
   const [classTeacherComment, setClassTeacherComment] = useState("");
   const [headTeacherComment, setHeadTeacherComment] = useState("");
   const [subjectTeacherById, setSubjectTeacherById] = useState<Record<number, string>>({});
-  const [isEditing, setIsEditing] = useState(false);
+  const [isEditing, setIsEditing] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [nextTermStartDate, setNextTermStartDate] = useState<string | null>(null);
 
@@ -645,7 +549,6 @@ export default function StudentReportPage() {
         const gradeId = Number(selectedGradeId);
         const termId = Number(selectedTermId);
         
-        // Load students
         const studentsRes = await supabase
           .from("students")
           .select("registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code")
@@ -657,7 +560,6 @@ export default function StudentReportPage() {
         const studentsList = (studentsRes.data ?? []) as StudentRow[];
         setStudents(studentsList);
         
-        // Load ALL questions for this term and grade
         const questionsRes = await supabase
           .from("assessment_question")
           .select("*")
@@ -669,7 +571,6 @@ export default function StudentReportPage() {
         const qRows = ((questionsRes as any).data ?? []) as QuestionRow[];
         setQuestions(qRows);
         
-        // Load ALL results for this grade/term
         const qIds = qRows.map((q) => q.id);
         let resultsData: ExamResultRow[] = [];
         
@@ -752,105 +653,66 @@ export default function StudentReportPage() {
     })();
   }, [school?.id, selectedGradeId]);
 
-  const possibleBySessionSubject = useMemo(() => {
-    const map = new Map<number, Map<number, number>>();
-    for (const q of questions) {
-      const subjectId = Number(q.subject_id ?? 0);
+  // Build totals from editable marks (per student)
+  const totalsByStudentSessionSubject = useMemo(() => {
+    const map = new Map<string, Map<number, Map<number, number>>>();
+    
+    // First, load original results as base
+    for (const r of results) {
+      if (!r.question_id || !r.exam_session_id) continue;
+      
+      const studentId = r.registration_id || r.student_id;
+      const studentExists = students.some(s => s.registration_id === studentId);
+      if (!studentExists) continue;
+      
+      const question = questions.find(q => q.id === Number(r.question_id));
+      if (!question) continue;
+      
+      const subjectId = Number(question.subject_id ?? 0);
       if (!subjectId) continue;
-      const sess = Number(q.exam_type_id);
-      if (!map.has(sess)) map.set(sess, new Map());
-      const mm = map.get(sess)!;
-      mm.set(subjectId, 100);
+      
+      const sessionId = Number(r.exam_session_id);
+      
+      if (!map.has(studentId)) map.set(studentId, new Map());
+      const bySess = map.get(studentId)!;
+      if (!bySess.has(sessionId)) bySess.set(sessionId, new Map());
+      const bySub = bySess.get(sessionId)!;
+      
+      let score = 0;
+      if (r.percentage !== undefined && r.percentage !== null) {
+        score = Number(r.percentage);
+      } else {
+        score = Number(r.score ?? 0);
+        const maxScore = question.max_score || 100;
+        score = (score / maxScore) * 100;
+      }
+      
+      score = Math.min(100, Math.max(0, score));
+      bySub.set(subjectId, score);
     }
+    
+    // Override with editable marks for each student
+    for (const student of students) {
+      const studentId = student.registration_id;
+      for (const [key, mark] of Object.entries(editableMarks)) {
+        // Key format: `${studentId}_${sessionId}_${subjectId}`
+        const parts = key.split('_');
+        if (parts.length === 3 && parts[0] === studentId) {
+          const sessionId = parseInt(parts[1]);
+          const subjectId = parseInt(parts[2]);
+          
+          if (!map.has(studentId)) map.set(studentId, new Map());
+          const bySess = map.get(studentId)!;
+          if (!bySess.has(sessionId)) bySess.set(sessionId, new Map());
+          const bySub = bySess.get(sessionId)!;
+          bySub.set(subjectId, mark);
+        }
+      }
+    }
+    
     return map;
-  }, [questions]);
+  }, [results, questions, students, editableMarks]);
 
-  // const totalsByStudentSessionSubject = useMemo(() => {
-  //   const map = new Map<string, Map<number, Map<number, number>>>();
-    
-  //   for (const r of results) {
-  //     if (!r.question_id || !r.exam_session_id) continue;
-      
-  //     const studentId = r.student_id;
-      
-  //     const studentExists = students.some(s => s.registration_id === studentId);
-  //     if (!studentExists) continue;
-      
-  //     const question = questions.find(q => q.id === Number(r.question_id));
-  //     if (!question) continue;
-      
-  //     const subjectId = Number(question.subject_id ?? 0);
-  //     if (!subjectId) continue;
-      
-  //     const sessionId = Number(r.exam_session_id);
-      
-  //     if (!map.has(studentId)) map.set(studentId, new Map());
-  //     const bySess = map.get(studentId)!;
-  //     if (!bySess.has(sessionId)) bySess.set(sessionId, new Map());
-  //     const bySub = bySess.get(sessionId)!;
-      
-  //     let score = 0;
-  //     if (r.percentage !== undefined && r.percentage !== null) {
-  //       score = Number(r.percentage);
-  //     } else {
-  //       score = Number(r.score ?? 0);
-  //       const maxScore = question.max_score || 100;
-  //       score = (score / maxScore) * 100;
-  //     }
-      
-  //     score = Math.min(100, Math.max(0, score));
-  //     bySub.set(subjectId, score);
-  //   }
-    
-  //   return map;
-  // }, [results, questions, students]);
-
-
-
-  // Fix the totalsByStudentSessionSubject calculation
-const totalsByStudentSessionSubject = useMemo(() => {
-  const map = new Map<string, Map<number, Map<number, number>>>();
-  
-  for (const r of results) {
-    if (!r.question_id || !r.exam_session_id) continue;
-    
-    // Use registration_id consistently
-    const studentId = r.registration_id || r.student_id;
-    
-    // Check if student exists by registration_id
-    const studentExists = students.some(s => s.registration_id === studentId);
-    if (!studentExists) continue;
-    
-    const question = questions.find(q => q.id === Number(r.question_id));
-    if (!question) continue;
-    
-    const subjectId = Number(question.subject_id ?? 0);
-    if (!subjectId) continue;
-    
-    const sessionId = Number(r.exam_session_id);
-    
-    if (!map.has(studentId)) map.set(studentId, new Map());
-    const bySess = map.get(studentId)!;
-    if (!bySess.has(sessionId)) bySess.set(sessionId, new Map());
-    const bySub = bySess.get(sessionId)!;
-    
-    let score = 0;
-    if (r.percentage !== undefined && r.percentage !== null) {
-      score = Number(r.percentage);
-    } else {
-      score = Number(r.score ?? 0);
-      const maxScore = question.max_score || 100;
-      score = (score / maxScore) * 100;
-    }
-    
-    score = Math.min(100, Math.max(0, score));
-    
-    // Store the score for this student/session/subject
-    bySub.set(subjectId, score);
-  }
-  
-  return map;
-}, [results, questions, students]);
   const getSubjectPosition = (subjectId: number, sessionId: number, studentId: string): number => {
     const ranking = calculateRankings(
       students,
@@ -904,65 +766,97 @@ const totalsByStudentSessionSubject = useMemo(() => {
   }, [selectedStudent, subjectRowsForStudent]);
 
   const performanceAnalysis = useMemo(() => analyzePerformance(subjectRowsForStudent), [subjectRowsForStudent]);
-  const canEditComments = useMemo(() => profile?.role === "ADMIN" || profile?.role === "TEACHER" || profile?.role === "ACADEMIC", [profile?.role]);
+  const canEditComments = true;
 
-  const position = useMemo(() => {
-    if (!selectedGrade || !selectedTerm || !selectedStudent) return { rank: "-", outOf: "-" };
+  const getPositionForSession = (sessionId: number, studentId: string): { rank: number; outOf: number } => {
+    // Check if there's an editable position for this student and session
+    const positionKey = `${studentId}_${sessionId}`;
+    if (isEditing && editablePositions[positionKey] !== undefined) {
+      return { rank: editablePositions[positionKey], outOf: students.length };
+    }
     
-    const ranking = calculateRankings(
+    // Otherwise calculate based on marks
+    return calculateRankings(
       students,
       (student) => {
         let total = 0;
         const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
+        const totalsForSess = sMap.get(sessionId) ?? new Map();
         let count = 0;
-        for (const sess of sessions) {
-          const totalsForSess = sMap.get(sess.id) ?? new Map();
-          for (const sub of subjectsForGrade) {
-            const mark = Number(totalsForSess.get(sub.id) ?? 0);
-            if (mark > 0) {
-              total += mark;
-              count++;
-            }
+        for (const sub of subjectsForGrade) {
+          const mark = Number(totalsForSess.get(sub.id) ?? 0);
+          if (mark > 0) {
+            total += mark;
+            count++;
           }
         }
         return count > 0 ? total / count : 0;
       },
-      selectedStudent.registration_id,
+      studentId,
       (student) => student.registration_id
     );
-    
-    return { rank: ranking.rank === 0 ? "-" : ranking.rank, outOf: ranking.outOf };
-  }, [students, selectedStudent, sessions, subjectsForGrade, totalsByStudentSessionSubject]);
+  };
 
-  // Load saved comments
+  // Load saved data from localStorage
   useEffect(() => {
-    if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId) return;
-    const key = buildLocalKey(school.id, selectedGradeId, selectedTermId, selectedStudent.registration_id);
+    if (!school?.id || !selectedGradeId || !selectedTermId) return;
+    const key = buildLocalKey(school.id, selectedGradeId, selectedTermId);
     try {
       const raw = localStorage.getItem(key);
       if (!raw) return;
       const parsed = JSON.parse(raw) as any;
-      if (parsed?.subjectComments) setSubjectComments(parsed.subjectComments);
-      if (typeof parsed?.classTeacherComment === "string") setClassTeacherComment(parsed.classTeacherComment);
-      if (typeof parsed?.headTeacherComment === "string") setHeadTeacherComment(parsed.headTeacherComment);
+      if (parsed?.editableMarks) setEditableMarks(parsed.editableMarks);
+      if (parsed?.editablePositions) setEditablePositions(parsed.editablePositions);
+      if (parsed?.subjectComments) setSubjectComments(parsed.subjectComments || {});
+      if (parsed?.classTeacherComments) {
+        // Load class teacher comments per student
+        const studentKey = selectedStudentId;
+        if (studentKey && parsed.classTeacherComments[studentKey]) {
+          setClassTeacherComment(parsed.classTeacherComments[studentKey]);
+        }
+      }
+      if (parsed?.headTeacherComments) {
+        const studentKey = selectedStudentId;
+        if (studentKey && parsed.headTeacherComments[studentKey]) {
+          setHeadTeacherComment(parsed.headTeacherComments[studentKey]);
+        }
+      }
     } catch { }
-  }, [school?.id, selectedStudentId, selectedGradeId, selectedTermId]);
+  }, [school?.id, selectedGradeId, selectedTermId, selectedStudentId]);
 
-  // Save comments
+  // Save all data to localStorage
   useEffect(() => {
-    if (!school?.id || !selectedStudent || !selectedGradeId || !selectedTermId) return;
-    const key = buildLocalKey(school.id, selectedGradeId, selectedTermId, selectedStudent.registration_id);
-    localStorage.setItem(key, JSON.stringify({ subjectComments, classTeacherComment, headTeacherComment }));
-  }, [school?.id, selectedStudentId, selectedGradeId, selectedTermId, subjectComments, classTeacherComment, headTeacherComment]);
+    if (!school?.id || !selectedGradeId || !selectedTermId) return;
+    const key = buildLocalKey(school.id, selectedGradeId, selectedTermId);
+    
+    // Load existing data first
+    let existingData: any = {};
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) existingData = JSON.parse(raw);
+    } catch { }
+    
+    // Update with new data
+    const newData = {
+      ...existingData,
+      editableMarks,
+      editablePositions,
+      subjectComments: { ...existingData.subjectComments, ...subjectComments },
+      classTeacherComments: { ...existingData.classTeacherComments, [selectedStudentId]: classTeacherComment },
+      headTeacherComments: { ...existingData.headTeacherComments, [selectedStudentId]: headTeacherComment },
+    };
+    
+    localStorage.setItem(key, JSON.stringify(newData));
+  }, [school?.id, selectedGradeId, selectedTermId, selectedStudentId, editableMarks, editablePositions, subjectComments, classTeacherComment, headTeacherComment]);
 
-  // Auto-generate subject comments per session
+  // Auto-generate subject comments for the current student only
   useEffect(() => {
     if (!selectedStudent || subjectRowsForStudent.length === 0 || sessions.length === 0) return;
     setSubjectComments((prev) => {
       const next = { ...prev };
       for (const sess of sessions) {
         for (const r of subjectRowsForStudent) {
-          const key = `${sess.id}_${r.subject_id}`;
+          const key = `${selectedStudent.registration_id}_${sess.id}_${r.subject_id}`;
           const existing = (next[key] ?? "").trim();
           if (!existing) {
             const ps = r.perSession.find(p => p.sessionId === sess.id);
@@ -975,57 +869,43 @@ const totalsByStudentSessionSubject = useMemo(() => {
       }
       return next;
     });
-  }, [selectedStudentId, subjectRowsForStudent, sessions]);
+  }, [selectedStudent, subjectRowsForStudent, sessions]);
 
-  // Auto-generate class and head teacher comments
+  // Auto-generate class and head teacher comments for current student
   useEffect(() => {
     if (!selectedStudent) return;
     const studentName = fmtName(selectedStudent);
     const div = aggregateAndDivision.division || "—";
     const pct = Number.isFinite(overall.pct) ? overall.pct : 0;
-    setClassTeacherComment(getClassTeacherComment(pct, studentName));
-    setHeadTeacherComment(getHeadTeacherComment(pct, div));
+    if (!classTeacherComment) setClassTeacherComment(getClassTeacherComment(pct, studentName));
+    if (!headTeacherComment) setHeadTeacherComment(getHeadTeacherComment(pct, div));
   }, [selectedStudentId, overall.pct, aggregateAndDivision.division]);
 
-
-  // Debug effect to check data loading
-useEffect(() => {
-  if (selectedStudent && questions.length > 0 && results.length > 0) {
-    console.log("=== DEBUG: Data Loading ===");
-    console.log("Selected Student:", selectedStudent.registration_id);
-    console.log("Questions count:", questions.length);
-    console.log("Results count:", results.length);
-    console.log("Results sample:", results.slice(0, 3));
-    
-    // Check results for this student
-    const studentResults = results.filter(r => 
-      r.registration_id === selectedStudent.registration_id || 
-      r.student_id === selectedStudent.registration_id
-    );
-    console.log(`Results for ${selectedStudent.registration_id}:`, studentResults.length);
-    
-    if (studentResults.length === 0) {
-      console.warn("No results found for this student!");
-    }
-    
-    // Check subject matching
-    console.log("Subjects for grade:", subjectsForGrade.map(s => ({ id: s.id, name: s.name })));
-    console.log("Questions with subject mapping:", questions.map(q => ({ 
-      id: q.id, 
-      subject_id: q.subject_id,
-      exam_type_id: q.exam_type_id,
-      max_score: q.max_score
-    })));
-  }
-}, [selectedStudent, questions, results, subjectsForGrade]);
   // ============ ACTION HANDLERS ============
+  const handleMarkChange = (sessionId: number, subjectId: number, value: string) => {
+    if (!selectedStudent) return;
+    const numValue = parseFloat(value);
+    if (isNaN(numValue)) return;
+    const clampedValue = Math.min(100, Math.max(0, numValue));
+    const key = `${selectedStudent.registration_id}_${sessionId}_${subjectId}`;
+    setEditableMarks(prev => ({ ...prev, [key]: clampedValue }));
+  };
+
+  const handlePositionChange = (sessionId: number, value: string) => {
+    if (!selectedStudent) return;
+    const numValue = parseInt(value);
+    if (isNaN(numValue)) return;
+    const key = `${selectedStudent.registration_id}_${sessionId}`;
+    setEditablePositions(prev => ({ ...prev, [key]: numValue }));
+  };
+
   const autoFillAllComments = () => {
     if (!selectedStudent) return;
-    setSubjectComments(() => {
-      const next: Record<string, string> = {};
+    setSubjectComments((prev) => {
+      const next = { ...prev };
       for (const sess of sessions) {
         for (const r of subjectRowsForStudent) {
-          const key = `${sess.id}_${r.subject_id}`;
+          const key = `${selectedStudent.registration_id}_${sess.id}_${r.subject_id}`;
           const ps = r.perSession.find(p => p.sessionId === sess.id);
           const mark = ps?.total ?? 0;
           const gradeNum = mark > 0 ? unebSubjectGrade(mark) : null;
@@ -1041,6 +921,38 @@ useEffect(() => {
     setClassTeacherComment(getClassTeacherComment(pct, studentName));
     setHeadTeacherComment(getHeadTeacherComment(pct, div));
     tinyToast("Auto-filled comments");
+  };
+
+  const resetMarksForCurrentStudent = () => {
+    if (!selectedStudent) return;
+    // Remove all editable marks for the current student
+    const newMarks = { ...editableMarks };
+    Object.keys(newMarks).forEach(key => {
+      if (key.startsWith(selectedStudent.registration_id)) {
+        delete newMarks[key];
+      }
+    });
+    setEditableMarks(newMarks);
+    
+    // Also reset positions for current student
+    const newPositions = { ...editablePositions };
+    Object.keys(newPositions).forEach(key => {
+      if (key.startsWith(selectedStudent.registration_id)) {
+        delete newPositions[key];
+      }
+    });
+    setEditablePositions(newPositions);
+    
+    tinyToast(`Reset marks and positions for ${fmtName(selectedStudent)}`);
+  };
+
+  const resetAllData = () => {
+    setEditableMarks({});
+    setEditablePositions({});
+    setSubjectComments({});
+    setClassTeacherComment("");
+    setHeadTeacherComment("");
+    tinyToast("Reset all edited data");
   };
 
   const clearAllComments = () => {
@@ -1089,367 +1001,9 @@ useEffect(() => {
     }
   };
 
-  // ============ BATCH PRINT FUNCTION ============
-  const printAllClassReports = async () => {
-    if (!selectedGrade || !selectedTerm || students.length === 0) {
-      tinyToast("Please select a grade and term first");
-      return;
-    }
-
-    setBatchPrinting(true);
-    try {
-      const printFrame = document.createElement('iframe');
-      printFrame.style.position = 'absolute';
-      printFrame.style.width = '0px';
-      printFrame.style.height = '0px';
-      printFrame.style.border = '0';
-      document.body.appendChild(printFrame);
-
-      const frameDoc = printFrame.contentWindow?.document;
-      if (!frameDoc) return;
-
-      const isLowerPrimaryClass = selectedGrade && isLowerPrimary(selectedGrade.grade_name);
-      const printInnerPadding = !isLowerPrimaryClass 
-        ? "padding: 14mm 14mm 10mm 14mm;" 
-        : "padding: 3mm 6mm 4mm 6mm;";
-
-      frameDoc.open();
-      frameDoc.write(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>${selectedGrade.grade_name} - ${termLabel(selectedTerm)} Reports</title>
-          <meta charset="UTF-8">
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: Arial, sans-serif; background: white; }
-            .report-page {
-              width: 210mm;
-              min-height: 297mm;
-              page-break-after: always;
-              position: relative;
-              background: white;
-            }
-            .report-page:last-child { page-break-after: auto; }
-            .report-inner { ${printInnerPadding} box-sizing: border-box; }
-            @page { size: A4; margin: 0; }
-            @media print {
-              body { margin: 0; padding: 0; }
-              .report-page { page-break-after: always; }
-            }
-            .flex { display: flex; }
-            .items-center { align-items: center; }
-            .justify-between { justify-content: space-between; }
-            .justify-center { justify-content: center; }
-            .gap-4 { gap: 1rem; }
-            .gap-2 { gap: 0.5rem; }
-            .gap-3 { gap: 0.75rem; }
-            .mb-0 { margin-bottom: 0; }
-            .mt-1 { margin-top: 0.25rem; }
-            .mt-2 { margin-top: 0.5rem; }
-            .pb-4 { padding-bottom: 1rem; }
-            .pt-2 { padding-top: 0.5rem; }
-            .pl-2 { padding-left: 0.5rem; }
-            .pr-4 { padding-right: 1rem; }
-            .p-1 { padding: 0.25rem; }
-            .p-2 { padding: 0.5rem; }
-            .p-3 { padding: 0.75rem; }
-            .px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
-            .py-0 { padding-top: 0; padding-bottom: 0; }
-            .py-1 { padding-top: 0.25rem; padding-bottom: 0.25rem; }
-            .border { border: 1px solid #e5e7eb; }
-            .border-b { border-bottom: 1px solid #e5e7eb; }
-            .border-t { border-top: 1px solid #e5e7eb; }
-            .rounded-lg { border-radius: 0.5rem; }
-            .rounded-t-lg { border-top-left-radius: 0.5rem; border-top-right-radius: 0.5rem; }
-            .rounded-b-lg { border-bottom-left-radius: 0.5rem; border-bottom-right-radius: 0.5rem; }
-            .bg-white { background-color: white; }
-            .bg-gray-50 { background-color: #f9fafb; }
-            .bg-gray-100 { background-color: #f3f4f6; }
-            .bg-blue-50 { background-color: #eff6ff; }
-            .bg-blue-100 { background-color: #dbeafe; }
-            .text-left { text-align: left; }
-            .text-center { text-align: center; }
-            .text-right { text-align: right; }
-            .text-xs { font-size: 0.75rem; }
-            .text-sm { font-size: 0.875rem; }
-            .text-xl { font-size: 1.25rem; }
-            .font-bold { font-weight: 700; }
-            .font-semibold { font-weight: 600; }
-            .font-medium { font-weight: 500; }
-            .font-mono { font-family: monospace; }
-            .text-gray-400 { color: #9ca3af; }
-            .text-gray-500 { color: #6b7280; }
-            .text-gray-600 { color: #4b5563; }
-            .text-gray-700 { color: #374151; }
-            .text-gray-900 { color: #111827; }
-            .text-blue-600 { color: #2563eb; }
-            .text-blue-700 { color: #1d4ed8; }
-            .text-green-700 { color: #15803d; }
-            .w-full { width: 100%; }
-            .w-20 { width: 5rem; }
-            .h-20 { height: 5rem; }
-            .h-10 { height: 2.5rem; }
-            .w-10 { width: 2.5rem; }
-            .overflow-hidden { overflow: hidden; }
-            .object-contain { object-fit: contain; }
-            .object-cover { object-fit: cover; }
-            .flex-shrink-0 { flex-shrink: 0; }
-            .flex-wrap { flex-wrap: wrap; }
-            table { width: 100%; border-collapse: collapse; }
-            th, td { border: 1px solid #e5e7eb; padding: 0.5rem; text-align: center; }
-            th { background-color: #f9fafb; font-weight: 600; }
-            textarea { border: none; background: transparent; resize: none; width: 100%; font-family: inherit; font-size: 0.875rem; }
-          </style>
-        </head>
-        <body>
-      `);
-
-      for (const student of students) {
-        const sMap = totalsByStudentSessionSubject.get(student.registration_id) ?? new Map();
-        
-        let totalMarksOverall = 0;
-        let totalSubjects = 0;
-        for (const sess of sessions) {
-          const totalsForSess = sMap.get(sess.id) ?? new Map();
-          for (const sub of subjectsForGrade) {
-            const mark = Number(totalsForSess.get(sub.id) ?? 0);
-            if (mark > 0) {
-              totalMarksOverall += mark;
-              totalSubjects++;
-            }
-          }
-        }
-        const overallPct = totalSubjects > 0 ? totalMarksOverall / totalSubjects : 0;
-
-        frameDoc.write(`
-          <div class="report-page">
-            <div class="report-inner">
-              <div class="flex items-center justify-between mb-0 pb-4 border-b">
-                <div class="flex items-center gap-4">
-                  ${school?.school_badge ? 
-                    `<img src="${school.school_badge}" alt="School" width="100" height="100" class="object-contain" />` : 
-                    `<div class="h-20 w-20 rounded-lg bg-blue-100 flex items-center justify-center">
-                      <svg class="h-10 w-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l9-5-9-5-9 5 9 5z"></path></svg>
-                    </div>`
-                  }
-                  <div>
-                    <h2 class="text-xl font-bold text-gray-900">${school?.school_name || ''}</h2>
-                    <p class="text-xs text-gray-600">${school?.location ? `<span class="mr-3">${school.location}</span>` : ''}${school?.contact_number ? `<span>📞 ${school.contact_number}</span>` : ''}</p>
-                  </div>
-                </div>
-                <div class="text-center">
-                  <div class="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">STUDENT REPORT CARD</div>
-                  <p class="text-sm font-bold text-gray-900 mt-1">${termLabel(selectedTerm)}</p>
-                </div>
-                <div>
-                  ${student.profile_picture_url ? 
-                    `<div class="w-20 h-20 rounded-lg overflow-hidden border border-gray-200"><img src="${student.profile_picture_url}" alt="Student" class="w-full h-full object-cover" /></div>` : 
-                    `<div class="w-20 h-20 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center"><svg class="h-10 w-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg></div>`
-                  }
-                </div>
-              </div>
-              
-              <div class="mb-0 border border-gray-200 rounded-lg bg-white">
-                <div class="flex items-center justify-between p-3 gap-4">
-                  <div class="flex items-center gap-3 flex-1">
-                    <div class="flex items-center gap-4 flex-wrap">
-                      <p class="text-sm font-bold text-gray-900">${student.first_name} ${student.last_name}</p>
-                      <div class="flex items-center gap-3 text-xs text-gray-600">
-                        <span>ID: <span class="font-semibold">${student.registration_id}</span></span>
-                        <span>LIN: <span class="font-semibold">${student.lin_id || "—"}</span></span>
-                        ${student.gender ? `<span>Gender: <span class="font-semibold">${student.gender}</span></span>` : ''}
-                        <span>Class: <span class="font-semibold">${selectedGrade?.grade_name || "—"}</span></span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              <div class="mb-0 space-y-0">
-        `);
-
-        for (const sess of sessions) {
-          const totalsForSess = sMap.get(sess.id) ?? new Map();
-          let sessionTotalMarks = 0;
-          let sessionSubjectCount = 0;
-          
-          for (const sub of subjectsForGrade) {
-            const mark = Number(totalsForSess.get(sub.id) ?? 0);
-            if (mark > 0) {
-              sessionTotalMarks += mark;
-              sessionSubjectCount++;
-            }
-          }
-          const sessionAvg = sessionSubjectCount > 0 ? sessionTotalMarks / sessionSubjectCount : 0;
-          
-          // Calculate session division
-          const sessionDivision = calculateSessionAggregateAndDivision(
-            sess.id,
-            student,
-            subjectsForGrade,
-            totalsByStudentSessionSubject,
-            isLowerPrimaryClass
-          );
-          
-          const sessionRanking = calculateRankings(
-            students,
-            (s) => {
-              const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
-              const totalsForSessInner = sMapForStudent.get(sess.id) ?? new Map();
-              let total = 0;
-              let count = 0;
-              for (const sub of subjectsForGrade) {
-                const mark = Number(totalsForSessInner.get(sub.id) ?? 0);
-                if (mark > 0) {
-                  total += mark;
-                  count++;
-                }
-              }
-              return count > 0 ? total / count : 0;
-            },
-            student.registration_id,
-            (s) => s.registration_id
-          );
-          
-          frameDoc.write(`
-            <div class="border border-gray-200 rounded-lg overflow-hidden mb-2">
-              <div class="bg-gray-100 px-0 py-0 border-b">
-                <p class="text-sm text-center font-bold text-gray-900 py-1">
-                  ${sess.exam_type === "BOT" ? "BEGINNING OF TERM" : sess.exam_type === "MOT" ? "MID OF TERM" : "END OF TERM"}
-                </p>
-              </div>
-              <table class="w-full text-xs border-collapse">
-                <thead class="bg-gray-50 p-0 mt-0">
-                  <tr>
-                    <th class="border p-1 text-left pl-2">Subject</th>
-                    <th class="border p-0 text-center">Full Marks</th>
-                    <th class="border p-0 text-center">Mark Obtained</th>
-                    ${!isLowerPrimaryClass ? '<th class="border p-0 text-center">Grade</th><th class="border p-0 text-center">Agg</th>' : '<th class="border p-0 text-center">Rank</th>'}
-                    <th class="border pl-2 text-left">Subject Teacher Remark</th>
-                    <th class="border p-0 text-center">Initials</th>
-                  </tr>
-                </thead>
-                <tbody>
-          `);
-          
-          for (const sub of subjectsForGrade) {
-            const mark = Number(totalsForSess.get(sub.id) ?? 0);
-            const gradeNum = mark > 0 ? unebSubjectGrade(mark) : null;
-            const gradeText = gradeNum ? unebGradeText(gradeNum) : "—";
-            const agg = gradeNum ?? "";
-            
-            let subjectPosition = null;
-            if (isLowerPrimaryClass) {
-              const subjectRanking = calculateRankings(
-                students,
-                (s) => {
-                  const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
-                  const totalsForSessInner = sMapForStudent.get(sess.id) ?? new Map();
-                  return Number(totalsForSessInner.get(sub.id) ?? 0);
-                },
-                student.registration_id,
-                (s) => s.registration_id
-              );
-              subjectPosition = subjectRanking.rank;
-            }
-            
-            const commentKey = `${sess.id}_${sub.id}`;
-            const savedComment = subjectComments[commentKey];
-            const autoComment = mark > 0 ? getSubjectComment(gradeText, mark) : "Not attempted";
-            
-            frameDoc.write(`
-              <tr>
-                <td class="border p-1 font-medium pl-2">${sub.name}</td>
-                <td class="border p-0 text-center">100</td>
-                <td class="border p-0 text-center">${Math.round(mark)}</td>
-                ${!isLowerPrimaryClass ? 
-                  `<td class="border p-0 text-center font-semibold">${gradeText}</td>
-                   <td class="border p-0 text-center font-semibold">${agg}</td>` : 
-                  `<td class="border p-0 text-center font-semibold">${subjectPosition}</td>`
-                }
-                <td class="border pl-2">${savedComment || autoComment}</td>
-                <td class="border p-1 text-center">${subjectTeacherById[sub.id] || "—"}</td>
-              </tr>
-            `);
-          }
-          
-          frameDoc.write(`
-                </tbody>
-                <tfoot>
-                  <tr class="font-bold bg-gray-100">
-                    <td class="text-left p-1 font-semi-bold pl-2">Total</td>
-                    <td class="text-center">100%</td>
-                    <td class="text-center">${Math.round(sessionAvg)}%</td>
-                    ${!isLowerPrimaryClass ? 
-                      `<td colspan="2" class="text-center">
-                        <div class="flex items-center justify-center gap-2">
-                          <span class="text-xs">Agg: ${sessionDivision.aggregate}</span>
-                          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold text-white ${sessionDivision.pill}">
-                            ${sessionDivision.division}
-                          </span>
-                          ${sessionDivision.hasF9 ? '<span class="text-xs text-red-600" title="Has F9 grade">⚠️ F9</span>' : ''}
-                        </div>
-                       </td>` : 
-                      `<td class="text-center">—</td>`
-                    }
-                    <td colspan="2" class="text-right pr-4">
-                      Position: ${sessionRanking.rank}/${sessionRanking.outOf}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          `);
-        }
-        
-        frameDoc.write(`
-              </div>
-              
-              <div class="space-y-0 mt-1">
-                <div class="border border-gray-200 rounded-lg p-2.5">
-                  <div class="flex items-center justify-between mb-0">
-                    <p class="text-xs font-semibold text-gray-700 uppercase tracking-wider">Class Teacher</p>
-                    <p class="text-xs text-gray-500">Class Performance Comment</p>
-                  </div>
-                  <textarea class="w-full bg-transparent text-sm text-gray-700 outline-none resize-none" rows="2" disabled>${getClassTeacherComment(overallPct, student.first_name)}</textarea>
-                  <div class="mt-2 pt-2 border-t border-gray-100">
-                    <p class="text-xs text-gray-500">Signature: ________________</p>
-                  </div>
-                </div>
-                <div class="border border-gray-200 rounded-lg p-3 mt-1">
-                  <div class="flex items-center justify-between mb-0">
-                    <p class="text-xs font-semibold text-gray-700 uppercase tracking-wider">Head Teacher</p>
-                    <p class="text-xs text-gray-500">School Performance Comment</p>
-                  </div>
-                  <textarea class="w-full bg-transparent text-sm text-gray-700 outline-none resize-none" rows="2" disabled>${getHeadTeacherComment(overallPct, "Division")}</textarea>
-                  <div class="mt-0 pt-0 border-t border-gray-100">
-                    <p class="text-xs text-gray-500">Signature: ________________</p>
-                  </div>
-                  <p class="text-sm font-semibold text-green-700 text-center">Next Term Begins on ${nextTermStartDate}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        `);
-      }
-
-      frameDoc.write(`</body></html>`);
-      frameDoc.close();
-
-      setTimeout(() => {
-        printFrame.contentWindow?.focus();
-        printFrame.contentWindow?.print();
-        setTimeout(() => document.body.removeChild(printFrame), 1000);
-      }, 500);
-
-      tinyToast(`Preparing ${students.length} reports for printing...`);
-    } catch (error) {
-      console.error('Batch print error:', error);
-      tinyToast('Error generating batch reports');
-    } finally {
-      setBatchPrinting(false);
-    }
+  const toggleEdit = () => {
+    setIsEditing(!isEditing);
+    tinyToast(isEditing ? "Edit mode disabled" : "Edit mode enabled");
   };
 
   if (authChecking || loading) {
@@ -1504,14 +1058,6 @@ useEffect(() => {
                     <button onClick={handleRefresh} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm text-gray-700">
                       <RefreshCw className="w-4 h-4" />
                       Refresh
-                    </button>
-                    <button disabled className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-gray-200 text-gray-500 cursor-not-allowed">
-                      <Printer className="w-4 h-4" />
-                      Print Single
-                    </button>
-                    <button disabled className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-gray-200 text-gray-500 cursor-not-allowed">
-                      <Users className="w-4 h-4" />
-                      Print All
                     </button>
                   </div>
                 </div>
@@ -1622,7 +1168,7 @@ useEffect(() => {
     );
   }
 
-  // MAIN RENDER WITH SINGLE REPORT CARD
+  // MAIN RENDER WITH EDITABLE MARKS AND POSITIONS
   return (
     <div className="min-h-screen bg-gray-50">
       <Navbar />
@@ -1636,24 +1182,32 @@ useEffect(() => {
                   <h1 className="text-2xl font-bold text-gray-900">Student Report Card</h1>
                   <p className="text-gray-600 mt-1">Academic performance report</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button onClick={handleRefresh} disabled={refreshing} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm text-gray-700">
                     <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
                     Refresh
                   </button>
                   {canEditComments && (
-                    <button onClick={() => setIsEditing(!isEditing)} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm text-gray-700">
+                    <button onClick={toggleEdit} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-sm text-gray-700">
                       {isEditing ? <Save className="w-4 h-4" /> : <Edit className="w-4 h-4" />}
-                      {isEditing ? "Save" : "Edit"}
+                      {isEditing ? "Disable Edit" : "Enable Edit"}
                     </button>
+                  )}
+                  {isEditing && (
+                    <>
+                      <button onClick={resetMarksForCurrentStudent} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-red-200 bg-red-50 hover:bg-red-100 text-sm text-red-700">
+                        <RefreshCw className="w-4 h-4" />
+                        Reset Student
+                      </button>
+                      <button onClick={resetAllData} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-orange-200 bg-orange-50 hover:bg-orange-100 text-sm text-orange-700">
+                        <RefreshCw className="w-4 h-4" />
+                        Reset All
+                      </button>
+                    </>
                   )}
                   <button onClick={printReport} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700">
                     <Printer className="w-4 h-4" />
                     Print Single
-                  </button>
-                  <button onClick={printAllClassReports} disabled={batchPrinting} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-green-600 text-white hover:bg-green-700">
-                    {batchPrinting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
-                    Print All ({students.length})
                   </button>
                 </div>
               </div>
@@ -1686,7 +1240,7 @@ useEffect(() => {
                   </div>
                 </div>
                 {selectedStudent && (
-                  <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
+                  <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between flex-wrap gap-2">
                     <div className="text-sm text-gray-600">
                       <span>Student: <span className="font-semibold text-gray-900">{fmtName(selectedStudent)}</span></span>
                       <span className="mx-2">•</span>
@@ -1696,9 +1250,9 @@ useEffect(() => {
                     </div>
                     <div className="flex gap-2">
                       <button onClick={autoFillAllComments} className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800">
-                        <Wand2 className="w-4 h-4" /> Auto
+                        <Wand2 className="w-4 h-4" /> Auto Comments
                       </button>
-                      <button onClick={clearAllComments} className="text-sm text-red-600 hover:text-red-800">Clear</button>
+                      <button onClick={clearAllComments} className="text-sm text-red-600 hover:text-red-800">Clear Comments</button>
                     </div>
                   </div>
                 )}
@@ -1826,36 +1380,8 @@ useEffect(() => {
                       }
                       const sessionAvg = sessionSubjectCount > 0 ? sessionTotalMarks / sessionSubjectCount : 0;
                       
-                      // Calculate session-specific division
-                      const isLowerPrimaryClass = selectedGrade ? isLowerPrimary(selectedGrade.grade_name) : false;
-                      const sessionDivision = calculateSessionAggregateAndDivision(
-                        sess.id,
-                        selectedStudent,
-                        subjectsForGrade,
-                        totalsByStudentSessionSubject,
-                        isLowerPrimaryClass
-                      );
+                      const positionData = getPositionForSession(sess.id, selectedStudent.registration_id);
                       
-                      const sessionRanking = calculateRankings(
-                        students,
-                        (s) => {
-                          const sMapForStudent = totalsByStudentSessionSubject.get(s.registration_id) ?? new Map();
-                          const totalsForSessInner = sMapForStudent.get(sess.id) ?? new Map();
-                          let total = 0;
-                          let count = 0;
-                          for (const sub of subjectsForGrade) {
-                            const mark = Number(totalsForSessInner.get(sub.id) ?? 0);
-                            if (mark > 0) {
-                              total += mark;
-                              count++;
-                            }
-                          }
-                          return count > 0 ? total / count : 0;
-                        },
-                        selectedStudent.registration_id,
-                        (s) => s.registration_id
-                      );
-
                       return (
                         <div key={sess.id} className={`border border-gray-200 ${sessionIndex === 0 ? 'rounded-t-lg' : ''} ${sessionIndex === sessions.length - 1 ? 'rounded-b-lg' : ''} ${sessionIndex !== 0 ? 'border-t-0' : ''} overflow-hidden`}>
                           <div className="bg-gray-100 px-0 py-0 border-b">
@@ -1885,10 +1411,13 @@ useEffect(() => {
                               {subjectRowsForStudent.map((r) => {
                                 const ps = r.perSession.find(p => p.sessionId === sess.id);
                                 const full = 100;
-                                const mark = ps?.total ?? 0;
+                                const originalMark = ps?.total ?? 0;
+                                const markKey = `${selectedStudent.registration_id}_${sess.id}_${r.subject_id}`;
+                                const editedMark = editableMarks[markKey];
+                                const mark = isEditing && editedMark !== undefined ? editedMark : originalMark;
                                 const gradeNum = mark > 0 ? unebSubjectGrade(mark) : null;
                                 const gradeText = gradeNum ? unebGradeText(gradeNum) : "—";
-                                const commentKey = `${sess.id}_${r.subject_id}`;
+                                const commentKey = `${selectedStudent.registration_id}_${sess.id}_${r.subject_id}`;
                                 const savedComment = subjectComments[commentKey];
                                 const autoComment = mark > 0 ? getSubjectComment(gradeText, mark) : "Not attempted";
                                 const agg = gradeNum ?? "";
@@ -1900,7 +1429,21 @@ useEffect(() => {
                                   <tr key={`${sess.id}-${r.subject_id}`}>
                                     <td className="border p-1 font-medium pl-2">{r.subject_name}</td>
                                     <td className="border p-0 text-center">{full}</td>
-                                    <td className="border p-0 text-center">{mark > 0 ? Math.round(mark) : "-"}</td>
+                                    <td className="border p-0 text-center">
+                                      {isEditing ? (
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max="100"
+                                          step="1"
+                                          value={Math.round(mark)}
+                                          onChange={(e) => handleMarkChange(sess.id, r.subject_id, e.target.value)}
+                                          className="w-16 text-center border border-gray-300 rounded px-1 py-0.5 text-xs focus:ring-1 focus:ring-blue-500"
+                                        />
+                                      ) : (
+                                        <span className="font-semibold">{Math.round(mark)}</span>
+                                      )}
+                                    </td>
                                     {!isLowerPrimaryClass ? (
                                       <>
                                         <td className="border p-0 text-center font-semibold">{mark > 0 ? gradeText : "-"}</td>
@@ -1927,24 +1470,44 @@ useEffect(() => {
                               <tr className="font-bold bg-gray-100">
                                 <td className="text-left p-1 font-semi-bold pl-2">Total</td>
                                 <td className="text-center">100%</td>
-                                <td className="text-center">{Math.round(sessionTotalMarks)}</td>
-                                <td className="text-center">{Math.round(sessionAvg)}%</td>
-
+                                <td className="text-center font-bold">
+                                  {isEditing ? (
+                                    <span className="text-blue-600">{Math.round(sessionTotalMarks)}</span>
+                                  ) : (
+                                    <span>{Math.round(sessionTotalMarks)}</span>
+                                  )}
+                                </td>
+                                <td className="text-center font-bold">
+                                  {isEditing ? (
+                                    <span className="text-blue-600">{Math.round(sessionAvg)}%</span>
+                                  ) : (
+                                    <span>{Math.round(sessionAvg)}%</span>
+                                  )}
+                                </td>
                                 {!isLowerPrimaryClass ? (
                                   <td colSpan={2} className="text-center">
-                                    <div className="flex items-center justify-center gap-2">
-                                      <span className="text-xs">Agg: {sessionDivision.aggregate}</span>
-                                      <span className={`inline-flex items-center px-2 py-0 rounded-full text-xs font-semibold text-white ${sessionDivision.pill}`}>
-                                        {sessionDivision.division}
-                                      </span>
-                                 
-                                    </div>
+                                    {isEditing ? (
+                                      <div className="flex items-center justify-center gap-2">
+                                        <input
+                                          type="number"
+                                          min="1"
+                                          max={students.length}
+                                          step="1"
+                                          value={positionData.rank}
+                                          onChange={(e) => handlePositionChange(sess.id, e.target.value)}
+                                          className="w-16 text-center border border-gray-300 rounded px-1 py-0.5 text-xs focus:ring-1 focus:ring-blue-500"
+                                        />
+                                        <span className="text-xs">/ {students.length}</span>
+                                      </div>
+                                    ) : (
+                                      <span>Position: {positionData.rank}/{positionData.outOf}</span>
+                                    )}
                                   </td>
                                 ) : (
                                   <td className="text-center">—</td>
                                 )}
                                 <td colSpan={2} className="text-right pr-4">
-                                  Position: {sessionRanking.rank}/{sessionRanking.outOf}
+                                  {!isLowerPrimaryClass && !isEditing && `Position: ${positionData.rank}/${positionData.outOf}`}
                                 </td>
                               </tr>
                             </tfoot>
@@ -2024,7 +1587,8 @@ function PrintCSS({ isLowerPrimary }: { isLowerPrimary: boolean }) {
         .print-page, .print-page * { visibility: visible; }
         .print-page { position: absolute; left: 0; top: 0; width: 210mm !important; height: 297mm !important; margin: 0 !important; padding: 0 !important; border: none !important; box-shadow: none !important; page-break-after: avoid !important; page-break-inside: avoid !important; }
         .no-print { display: none !important; }
-        textarea { border: none !important; background: transparent !important; resize: none !important; overflow: hidden !important; color: #000 !important; }
+        textarea, input { border: none !important; background: transparent !important; resize: none !important; overflow: hidden !important; color: #000 !important; }
+        input { text-align: center !important; }
       }
       @media screen {
         .print-page { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); border-radius: 8px; background: white; margin: 0 auto; overflow: auto; }

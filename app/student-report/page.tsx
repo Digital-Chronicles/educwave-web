@@ -1910,6 +1910,7 @@ useEffect(() => {
                                       <td className="border p-0 text-center font-semibold">{mark > 0 ? subjectPosition : "-"}</td>
                                     )}
                                     <td className="border pl-2">
+                                      
                                       <textarea 
                                         value={savedComment ?? autoComment} 
                                         onChange={(e) => setSubjectComments(prev => ({ ...prev, [commentKey]: e.target.value }))} 

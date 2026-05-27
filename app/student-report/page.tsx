@@ -106,12 +106,14 @@ interface QuestionRow {
 
 interface ExamResultRow {
   id: number;
-  student_id: string;
+  student_id: string;   
   registration_id?: string;
   question_id: number | null;
+  subject_id?: number | null;
   grade_id: number;
   exam_session_id: number | null;
   score: number;
+  max_possible?: number | null;
   percentage?: number;
 }
 
@@ -383,6 +385,36 @@ function buildLocalKey(schoolId: string, gradeId: string, termId: string, studen
   return `report_comments::${schoolId}::${gradeId}::${termId}::${studentId}`;
 }
 
+async function fetchAllExamResultsForQuestions(
+  schoolId: string,
+  gradeId: number,
+  questionIds: number[]
+): Promise<ExamResultRow[]> {
+  const rows: ExamResultRow[] = [];
+  const pageSize = 1000;
+
+  for (let from = 0; ; from += pageSize) {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from("assessment_examresult")
+      .select("id, student_id, question_id, grade_id, subject_id, exam_session_id, score, max_possible, percentage")
+      .eq("school_id", schoolId)
+      .eq("grade_id", gradeId)
+      .in("question_id", questionIds)
+      .order("id", { ascending: true })
+      .range(from, to);
+
+    if (error) throw error;
+
+    const page = (data || []) as ExamResultRow[];
+    rows.push(...page);
+
+    if (page.length < pageSize) break;
+  }
+
+  return rows;
+}
+
 function analyzePerformance(subjectRows: SubjectRowWithDetails[]): PerformanceAnalysis {
   if (subjectRows.length === 0) {
     return {
@@ -628,81 +660,6 @@ export default function StudentReportPage() {
     })();
   }, [authChecking]);
 
-  // Load students, questions, results
-  useEffect(() => {
-    if (!school?.id) return;
-    (async () => {
-      setErrorMsg(null);
-      if (!canLoad) {
-        setStudents([]);
-        setQuestions([]);
-        setResults([]);
-        setSelectedStudentId("");
-        return;
-      }
-      setLoading(true);
-      try {
-        const gradeId = Number(selectedGradeId);
-        const termId = Number(selectedTermId);
-        
-        // Load students
-        const studentsRes = await supabase
-          .from("students")
-          .select("registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code")
-          .eq("school_id", school.id)
-          .eq("current_grade_id", gradeId)
-          .order("first_name");
-        
-        if (studentsRes.error) throw studentsRes.error;
-        const studentsList = (studentsRes.data ?? []) as StudentRow[];
-        setStudents(studentsList);
-        
-        // Load ALL questions for this term and grade
-        const questionsRes = await supabase
-          .from("assessment_question")
-          .select("*")
-          .eq("school_id", school.id)
-          .eq("grade_id", gradeId)
-          .eq("term_exam_id", termId);
-        
-        if ((questionsRes as any).error) throw (questionsRes as any).error;
-        const qRows = ((questionsRes as any).data ?? []) as QuestionRow[];
-        setQuestions(qRows);
-        
-        // Load ALL results for this grade/term
-        const qIds = qRows.map((q) => q.id);
-        let resultsData: ExamResultRow[] = [];
-        
-        if (qIds.length > 0) {
-          const { data: rawResults, error: resultsError } = await supabase
-            .from("assessment_examresult")
-            .select("*")
-            .eq("school_id", school.id)
-            .eq("grade_id", gradeId)
-            .in("question_id", qIds);
-          
-          if (resultsError) throw resultsError;
-          resultsData = (rawResults || []) as ExamResultRow[];
-        }
-        
-        setResults(resultsData);
-        
-        if (!selectedStudentId && studentsList.length > 0) {
-          setSelectedStudentId(studentsList[0].registration_id);
-        }
-        
-      } catch (e: any) {
-        console.error("Error loading data:", e);
-        setErrorMsg(e.message || "Failed to load data.");
-        setStudents([]);
-        setQuestions([]);
-        setResults([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [school?.id, canLoad, selectedGradeId, selectedTermId]);
-
   const selectedStudent = useMemo(() => selectedStudentId ? students.find((s) => s.registration_id === selectedStudentId) ?? null : null, [students, selectedStudentId]);
 
   // Load subject teachers
@@ -752,105 +709,194 @@ export default function StudentReportPage() {
     })();
   }, [school?.id, selectedGradeId]);
 
-  const possibleBySessionSubject = useMemo(() => {
-    const map = new Map<number, Map<number, number>>();
-    for (const q of questions) {
-      const subjectId = Number(q.subject_id ?? 0);
-      if (!subjectId) continue;
-      const sess = Number(q.exam_type_id);
-      if (!map.has(sess)) map.set(sess, new Map());
-      const mm = map.get(sess)!;
-      mm.set(subjectId, 100);
-    }
-    return map;
-  }, [questions]);
 
-  // const totalsByStudentSessionSubject = useMemo(() => {
-  //   const map = new Map<string, Map<number, Map<number, number>>>();
-    
-  //   for (const r of results) {
-  //     if (!r.question_id || !r.exam_session_id) continue;
-      
-  //     const studentId = r.student_id;
-      
-  //     const studentExists = students.some(s => s.registration_id === studentId);
-  //     if (!studentExists) continue;
-      
-  //     const question = questions.find(q => q.id === Number(r.question_id));
-  //     if (!question) continue;
-      
-  //     const subjectId = Number(question.subject_id ?? 0);
-  //     if (!subjectId) continue;
-      
-  //     const sessionId = Number(r.exam_session_id);
-      
-  //     if (!map.has(studentId)) map.set(studentId, new Map());
-  //     const bySess = map.get(studentId)!;
-  //     if (!bySess.has(sessionId)) bySess.set(sessionId, new Map());
-  //     const bySub = bySess.get(sessionId)!;
-      
-  //     let score = 0;
-  //     if (r.percentage !== undefined && r.percentage !== null) {
-  //       score = Number(r.percentage);
-  //     } else {
-  //       score = Number(r.score ?? 0);
-  //       const maxScore = question.max_score || 100;
-  //       score = (score / maxScore) * 100;
-  //     }
-      
-  //     score = Math.min(100, Math.max(0, score));
-  //     bySub.set(subjectId, score);
-  //   }
-    
-  //   return map;
-  // }, [results, questions, students]);
-
-
-
-  // Fix the totalsByStudentSessionSubject calculation
 const totalsByStudentSessionSubject = useMemo(() => {
-  const map = new Map<string, Map<number, Map<number, number>>>();
-  
-  for (const r of results) {
-    if (!r.question_id || !r.exam_session_id) continue;
-    
-    // Use registration_id consistently
-    const studentId = r.registration_id || r.student_id;
-    
-    // Check if student exists by registration_id
-    const studentExists = students.some(s => s.registration_id === studentId);
-    if (!studentExists) continue;
-    
-    const question = questions.find(q => q.id === Number(r.question_id));
-    if (!question) continue;
-    
-    const subjectId = Number(question.subject_id ?? 0);
-    if (!subjectId) continue;
-    
-    const sessionId = Number(r.exam_session_id);
-    
-    if (!map.has(studentId)) map.set(studentId, new Map());
-    const bySess = map.get(studentId)!;
-    if (!bySess.has(sessionId)) bySess.set(sessionId, new Map());
-    const bySub = bySess.get(sessionId)!;
-    
-    let score = 0;
-    if (r.percentage !== undefined && r.percentage !== null) {
-      score = Number(r.percentage);
-    } else {
-      score = Number(r.score ?? 0);
-      const maxScore = question.max_score || 100;
-      score = (score / maxScore) * 100;
+  const totals = new Map<string, Map<number, Map<number, number>>>();
+
+  if (!students.length || !results.length) return totals;
+
+  const normalize = (id: string) =>
+    String(id)
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, '')
+      .replace(/\//g, '');
+
+  const studentMatchMap = new Map<string, string>();
+
+  for (const student of students) {
+    const actualRegId = student.registration_id;
+    const norm = normalize(actualRegId);
+
+    studentMatchMap.set(norm, actualRegId);
+
+    const num = actualRegId.match(/\d+$/)?.[0];
+    if (num) {
+      studentMatchMap.set(num, actualRegId);
     }
-    
-    score = Math.min(100, Math.max(0, score));
-    
-    // Store the score for this student/session/subject
-    bySub.set(subjectId, score);
   }
-  
-  return map;
+
+  const accum = new Map<
+    string,
+    Map<number, Map<number, { score: number; possible: number; percentageTotal: number; percentageCount: number }>>
+  >();
+
+  const ensureBucket = (studentId: string, sessionId: number, subjectId: number) => {
+    if (!accum.has(studentId)) {
+      accum.set(studentId, new Map());
+    }
+
+    const sessionMap = accum.get(studentId)!;
+    if (!sessionMap.has(sessionId)) {
+      sessionMap.set(sessionId, new Map());
+    }
+
+    const subjectMap = sessionMap.get(sessionId)!;
+    if (!subjectMap.has(subjectId)) {
+      subjectMap.set(subjectId, { score: 0, possible: 0, percentageTotal: 0, percentageCount: 0 });
+    }
+
+    return subjectMap.get(subjectId)!;
+  };
+
+  for (const result of results) {
+    if (!result.question_id || !result.exam_session_id) continue;
+
+    const rawId = result.student_id;
+    if (!rawId) continue;
+
+    const normalizedResultId = normalize(rawId);
+
+    const matchedStudentId =
+      studentMatchMap.get(normalizedResultId) ||
+      studentMatchMap.get(normalizedResultId.replace(/^0+/, '')) ||
+      studentMatchMap.get(rawId.trim());
+
+    if (!matchedStudentId) {
+      continue;
+    }
+
+    const question = questions.find(q => q.id === Number(result.question_id));
+
+    const subjectId = Number(question?.subject_id ?? result.subject_id ?? 0);
+    if (!subjectId) continue;
+
+    const sessionId = Number(result.exam_session_id);
+    const bucket = ensureBucket(matchedStudentId, sessionId, subjectId);
+
+    const score = Number(result.score) || 0;
+    const possible = Number(result.max_possible ?? question?.max_score ?? 0);
+    const percentage = Number(result.percentage);
+
+    if (possible > 0) {
+      bucket.score += score;
+      bucket.possible += possible;
+    } else if (Number.isFinite(percentage)) {
+      bucket.percentageTotal += Math.min(100, Math.max(0, percentage));
+      bucket.percentageCount += 1;
+    } else {
+      bucket.percentageTotal += Math.min(100, Math.max(0, score));
+      bucket.percentageCount += 1;
+    }
+  }
+
+  for (const [studentId, sessionMap] of accum) {
+    if (!totals.has(studentId)) {
+      totals.set(studentId, new Map());
+    }
+
+    const totalSessionMap = totals.get(studentId)!;
+
+    for (const [sessionId, subjectMap] of sessionMap) {
+      if (!totalSessionMap.has(sessionId)) {
+        totalSessionMap.set(sessionId, new Map());
+      }
+
+      const totalSubjectMap = totalSessionMap.get(sessionId)!;
+
+      for (const [subjectId, bucket] of subjectMap) {
+        const mark =
+          bucket.possible > 0
+            ? (bucket.score / bucket.possible) * 100
+            : bucket.percentageCount > 0
+              ? bucket.percentageTotal / bucket.percentageCount
+              : 0;
+
+        totalSubjectMap.set(subjectId, Math.min(100, Math.max(0, mark)));
+      }
+    }
+  }
+
+  return totals;
 }, [results, questions, students]);
+
+// Also fix the results loading to include all necessary fields
+useEffect(() => {
+  if (!school?.id) return;
+  (async () => {
+    setErrorMsg(null);
+    if (!canLoad) {
+      setStudents([]);
+      setQuestions([]);
+      setResults([]);
+      setSelectedStudentId("");
+      return;
+    }
+    setLoading(true);
+    try {
+      const gradeId = Number(selectedGradeId);
+      const termId = Number(selectedTermId);
+      
+      // Load students with registration_id
+      const studentsRes = await supabase
+        .from("students")
+        .select("registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code")
+        .eq("school_id", school.id)
+        .eq("current_grade_id", gradeId)
+        .order("first_name");
+      
+      if (studentsRes.error) throw studentsRes.error;
+      const studentsList = (studentsRes.data ?? []) as StudentRow[];
+      setStudents(studentsList);
+      
+      // Load questions for this term and grade
+      const questionsRes = await supabase
+        .from("assessment_question")
+        .select("*")
+        .eq("school_id", school.id)
+        .eq("grade_id", gradeId)
+        .eq("term_exam_id", termId);
+      
+      if (questionsRes.error) throw questionsRes.error;
+      const qRows = (questionsRes.data ?? []) as QuestionRow[];
+      setQuestions(qRows);
+      
+      // Load results - use the correct schema fields
+      const qIds = qRows.map((q) => q.id);
+      let resultsData: ExamResultRow[] = [];
+      
+      if (qIds.length > 0) {
+        resultsData = await fetchAllExamResultsForQuestions(school.id, gradeId, qIds);
+      }
+      
+      setResults(resultsData);
+      
+      if (!selectedStudentId && studentsList.length > 0) {
+        setSelectedStudentId(studentsList[0].registration_id);
+      }
+      
+    } catch (e: any) {
+      console.error("Error loading data:", e);
+      setErrorMsg(e.message || "Failed to load data.");
+      setStudents([]);
+      setQuestions([]);
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  })();
+}, [school?.id, canLoad, selectedGradeId, selectedTermId]);
+
   const getSubjectPosition = (subjectId: number, sessionId: number, studentId: string): number => {
     const ranking = calculateRankings(
       students,
@@ -1112,6 +1158,8 @@ useEffect(() => {
       const printInnerPadding = !isLowerPrimaryClass 
         ? "padding: 14mm 14mm 10mm 14mm;" 
         : "padding: 3mm 6mm 4mm 6mm;";
+        
+        
 
       frameDoc.open();
       frameDoc.write(`
@@ -1747,7 +1795,7 @@ useEffect(() => {
               <div className="print-page">
                 <div className="print-inner" style={!isLowerPrimaryClass ? { padding: "14mm 14mm 10mm 14mm", boxSizing: "border-box" } : { padding: "3mm 6mm 4mm 6mm", boxSizing: "border-box" }}>
                   {/* Header */}
-                  <div className="flex items-center justify-between mb-0 pb-4 border-b">
+                  <div className="flex items-center justify-between mb-0 pb-1 border-">
                     <div className="flex items-center gap-4">
                       {school.school_badge ? (
                         <img src={school.school_badge} alt="School" width={100} height={100} className="object-contain" />
@@ -1934,7 +1982,7 @@ useEffect(() => {
                                 {!isLowerPrimaryClass ? (
                                   <td colSpan={2} className="text-center">
                                     <div className="flex items-center justify-center gap-2">
-                                      <span className="text-xs">Agg: {sessionDivision.aggregate}</span>
+                                      <span className="text-xs"> Agg: {sessionDivision.aggregate}</span>
                                       <span className={`inline-flex items-center px-2 py-0 rounded-full text-xs font-semibold text-white ${sessionDivision.pill}`}>
                                         {sessionDivision.division}
                                       </span>
@@ -2003,13 +2051,14 @@ useEffect(() => {
 }
 
 function PrintCSS({ isLowerPrimary }: { isLowerPrimary: boolean }) {
+  // Increased padding for lower primary to ensure all content fits
   const printInnerPadding = !isLowerPrimary 
     ? "padding: 14mm 14mm 10mm 14mm;" 
-    : "padding: 3mm 6mm 4mm 6mm;";
+    : "padding: 3mm 6mm 4mm 6mm;"; 
     
   return (
     <style jsx global>{`
-      .print-page {
+      .print-page { 
         width: 210mm;
         min-height: 297mm;
         background: #fff;
@@ -2017,18 +2066,64 @@ function PrintCSS({ isLowerPrimary }: { isLowerPrimary: boolean }) {
         overflow: hidden;
       }
       .print-inner { ${printInnerPadding} box-sizing: border-box; }
-      @page { size: A4 portrait; margin: 0mm; }
+      @page { 
+        size: A4 portrait; 
+        margin: 0mm; 
+      }
       @media print {
-        * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; width: 210mm !important; min-height: 297mm !important; }
+        * { 
+          -webkit-print-color-adjust: exact !important; 
+          print-color-adjust: exact !important; 
+        }
+        html, body { 
+          margin: 0 !important; 
+          padding: 0 !important; 
+          background: #fff !important; 
+          width: 210mm !important; 
+          min-height: 297mm !important; 
+        }
         body * { visibility: hidden; }
         .print-page, .print-page * { visibility: visible; }
-        .print-page { position: absolute; left: 0; top: 0; width: 210mm !important; height: 297mm !important; margin: 0 !important; padding: 0 !important; border: none !important; box-shadow: none !important; page-break-after: avoid !important; page-break-inside: avoid !important; }
+        .print-page { 
+          position: absolute; 
+          left: 0; 
+          top: 0; 
+          width: 210mm !important; 
+          min-height: 297mm !important;
+          height: auto !important;
+          margin: 0 !important; 
+          padding: 0 !important; 
+          border: none !important; 
+          box-shadow: none !important; 
+          page-break-after: avoid !important; 
+          page-break-inside: avoid !important; 
+        }
         .no-print { display: none !important; }
-        textarea { border: none !important; background: transparent !important; resize: none !important; overflow: hidden !important; color: #000 !important; }
+        textarea { 
+          border: none !important; 
+          background: transparent !important; 
+          resize: none !important; 
+          overflow: hidden !important; 
+          color: #000 !important; 
+        }
+        /* Ensure tables don't break */
+        table { 
+          page-break-inside: avoid !important; 
+          break-inside: avoid !important;
+        }
+        tr { 
+          page-break-inside: avoid !important; 
+          break-inside: avoid !important;
+        }
       }
       @media screen {
-        .print-page { box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); border-radius: 8px; background: white; margin: 0 auto; overflow: auto; }
+        .print-page { 
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); 
+          border-radius: 8px; 
+          background: white; 
+          margin: 0 auto; 
+          overflow: auto; 
+        }
       }
     `}</style>
   );

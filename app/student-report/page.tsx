@@ -385,6 +385,13 @@ function buildLocalKey(schoolId: string, gradeId: string, termId: string, studen
   return `report_comments::${schoolId}::${gradeId}::${termId}::${studentId}`;
 }
 
+function reportSchoolNameFontSize(name?: string | null) {
+  const len = (name || "").trim().length;
+  if (len > 48) return "20px";
+  if (len > 38) return "22px";
+  return "28px";
+}
+
 async function fetchAllExamResultsForQuestions(
   schoolId: string,
   gradeId: number,
@@ -1273,24 +1280,33 @@ useEffect(() => {
         frameDoc.write(`
           <div class="report-page">
             <div class="report-inner">
-              <div class="flex items-center justify-between mb-0 pb-4 border-b">
-                <div class="flex items-center gap-4">
+              <div style="display: grid; grid-template-columns: 100px minmax(0, 1fr) 80px; align-items: stretch; gap: 12px; height: 100px; margin-bottom: 0; padding-bottom: 4px;">
+                <div style="display: flex; align-items: center; justify-content: center;">
                   ${school?.school_badge ? 
                     `<img src="${school.school_badge}" alt="School" width="100" height="100" class="object-contain" />` : 
                     `<div class="h-20 w-20 rounded-lg bg-blue-100 flex items-center justify-center">
                       <svg class="h-10 w-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l9-5-9-5-9 5 9 5z"></path></svg>
                     </div>`
                   }
-                  <div>
-                    <h2 class="text-xl font-bold text-gray-900">${school?.school_name || ''}</h2>
-                    <p class="text-xs text-gray-600">${school?.location ? `<span class="mr-3">${school.location}</span>` : ''}${school?.contact_number ? `<span>📞 ${school.contact_number}</span>` : ''}</p>
+                </div>
+                <div style="min-width: 0; height: 100%; display: grid; grid-template-rows: auto 1fr; align-items: stretch; text-align: center;">
+                  <div style="min-width: 0; align-self: start;">
+                    <h2 class="font-bold text-gray-900" style="font-size: ${reportSchoolNameFontSize(school?.school_name)}; line-height: 1.08; margin: 0; overflow-wrap: anywhere;">${school?.school_name || ''}</h2>
+                  </div>
+                  <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: 10px;">
+                    <div class="text-xs text-gray-600" style="text-align: left; line-height: 1.25; padding-bottom: 2px;">
+                      ${school?.location ? `<div>${school.location}</div>` : ''}${school?.contact_number ? `<div>${school.contact_number}</div>` : ''}
+                    </div>
+                    <div style="text-align: center;">
+                      <div class="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded" style="display: inline-block; white-space: nowrap;">STUDENT REPORT CARD</div>
+                      <p class="text-sm font-bold text-gray-900 mt-1">${termLabel(selectedTerm)}</p>
+                    </div>
+                    <div style="text-align: right; line-height: 1.25; padding-bottom: 2px; min-width: 0;">
+                      ${student.payment_code ? `<div class="text-xs font-semibold text-gray-600">Payment Code:</div><div class="text-sm font-mono font-bold text-blue-700">${student.payment_code}</div>` : ''}
+                    </div>
                   </div>
                 </div>
-                <div class="text-center">
-                  <div class="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">STUDENT REPORT CARD</div>
-                  <p class="text-sm font-bold text-gray-900 mt-1">${termLabel(selectedTerm)}</p>
-                </div>
-                <div>
+                <div style="display: flex; align-items: center; justify-content: center;">
                   ${student.profile_picture_url ? 
                     `<div class="w-20 h-20 rounded-lg overflow-hidden border border-gray-200"><img src="${student.profile_picture_url}" alt="Student" class="w-full h-full object-cover" /></div>` : 
                     `<div class="w-20 h-20 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center"><svg class="h-10 w-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg></div>`
@@ -1795,38 +1811,45 @@ useEffect(() => {
               <div className="print-page">
                 <div className="print-inner" style={!isLowerPrimaryClass ? { padding: "14mm 14mm 10mm 14mm", boxSizing: "border-box" } : { padding: "3mm 6mm 4mm 6mm", boxSizing: "border-box" }}>
                   {/* Header */}
-                  <div className="flex items-center justify-between mb-0 pb-1 border-">
-                    <div className="flex items-center gap-4">
+                  <div className="grid h-[100px] grid-cols-[100px_minmax(0,1fr)_80px] items-stretch gap-3 mb-0 pb-1">
+                    <div className="flex items-center justify-center">
                       {school.school_badge ? (
-                        <img src={school.school_badge} alt="School" width={100} height={100} className="object-contain" />
+                        <img src={school.school_badge} alt="School" width={80} height={80} className="object-contain" />
                       ) : (
                         <div className="h-20 w-20 rounded-lg bg-blue-100 flex items-center justify-center">
                           <School className="h-10 w-10 text-blue-600" />
                         </div>
                       )}
-                      <div>
-                        <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-900 truncate max-w-full">
-  {school.school_name}
-</h2>
-                        <p className="text-xs text-gray-600">
-                          {school.location && <span className="mr-3">{school.location}</span>}
-                          {school.contact_number && <span>📞 {school.contact_number}</span>}
-                        </p>
+                    </div>
+                    <div className="grid h-full min-w-0 grid-rows-[auto_1fr] text-center">
+                      <div className="min-w-0 self-start">
+                        <h3
+                          className="font-bold leading-tight text-gray-900"
+                          style={{ fontSize: reportSchoolNameFontSize(school.school_name), overflowWrap: "anywhere" }}
+                        >
+                          {school.school_name}
+                        </h3>
+                      </div>
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-2">
+                        <div className="pb-0.5 text-left text-xs leading-tight text-gray-600">
+                          {school.location && <div>{school.location}</div>}
+                          {school.contact_number && <div>{school.contact_number}</div>}
+                        </div>
+                        <div className="text-center">
+                          <div className="inline-block whitespace-nowrap text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">STUDENT REPORT CARD</div>
+                          <p className="text-sm font-bold text-gray-900 mt-1">{termLabel(selectedTerm)}</p>
+                        </div>
+                        <div className="min-w-0 pb-0.5 text-right leading-tight">
+                          {selectedStudent.payment_code && (
+                            <>
+                              <div className="text-xs font-semibold text-gray-600">Payment Code:</div>
+                              <div className="text-sm font-mono font-bold text-blue-700">{selectedStudent.payment_code}</div>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <div className="text-center justify-center">
-                      <div className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">STUDENT REPORT CARD</div>
-                      <p className="text-sm font-bold text-gray-900 mt-1">{termLabel(selectedTerm)}</p>
-                      {selectedStudent.payment_code && (
-                        <div className="mt-0">
-                          <div className="flex items-center justify-center gap-2">
-                            <span className="text-xs font-semibold text-gray-600">Payment Code:</span>
-                            <span className="text-sm font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded">{selectedStudent.payment_code}</span>
-                         </div>
-                        </div>
-                      )}
-                    </div>
-                    <div>
+                    <div className="flex items-center justify-center">
                       {selectedStudent.profile_picture_url ? (
                         <div className="w-20 h-20 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0">
                           <img src={selectedStudent.profile_picture_url} alt="Student" className="w-full h-full object-cover" />

@@ -1880,6 +1880,14 @@ export default function AssessmentsPage() {
                   </Link>
 
                   <Link
+                    href="/assessments/marks/mobile"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm rounded-xl hover:bg-gray-50 transition-all"
+                  >
+                    <Users className="h-4 w-4" />
+                    Mobile Entry
+                  </Link>
+
+                  <Link
                     href="/assessments/percentage-entry/"
                     className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm rounded-xl hover:bg-gray-50 transition-all"
                   >

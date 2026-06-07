@@ -575,6 +575,7 @@ export default function StudentReportPage() {
   const [batchPrinting, setBatchPrinting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [selectedGradeId, setSelectedGradeId] = useState("");
+  const [selectedYear, setSelectedYear] = useState("");
   const [selectedTermId, setSelectedTermId] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("");
   const [subjectComments, setSubjectComments] = useState<Record<string, string>>({}); // Key: `${sessionId}_${subjectId}`
@@ -587,6 +588,16 @@ export default function StudentReportPage() {
 
   const selectedTerm = useMemo(() => selectedTermId ? terms.find((t) => t.id === Number(selectedTermId)) ?? null : null, [terms, selectedTermId]);
   const selectedGrade = useMemo(() => selectedGradeId ? grades.find((g) => g.id === Number(selectedGradeId)) ?? null : null, [grades, selectedGradeId]);
+  const availableYears = useMemo(() => {
+    return Array.from(new Set(terms.map((t) => t.year))).sort((a, b) => b - a);
+  }, [terms]);
+  const termsForSelectedYear = useMemo(() => {
+    if (!selectedYear) return [];
+    const termOrder = { TERM_1: 1, TERM_2: 2, TERM_3: 3 };
+    return terms
+      .filter((t) => t.year === Number(selectedYear))
+      .sort((a, b) => termOrder[a.term_name] - termOrder[b.term_name]);
+  }, [terms, selectedYear]);
   const subjectsForGrade = useMemo(() => {
     if (!selectedGradeId) return [];
     return subjects.filter((s) => s.grade_id === Number(selectedGradeId));
@@ -657,7 +668,9 @@ export default function StudentReportPage() {
         if (examSessRes.error) throw examSessRes.error;
         setGrades((gradeRes.data ?? []) as GradeRow[]);
         setSubjects((subjectRes.data ?? []) as SubjectRow[]);
-        setTerms((termRes.data ?? []) as TermExamRow[]);
+        const termRows = (termRes.data ?? []) as TermExamRow[];
+        setTerms(termRows);
+        setSelectedYear((current) => current || String(termRows[0]?.year ?? ""));
         setExamSessions((examSessRes.data ?? []) as ExamSessionRow[]);
       } catch (e: any) {
         setErrorMsg(e.message || "Failed to load setup.");
@@ -1549,6 +1562,108 @@ useEffect(() => {
   }
 
   const isLowerPrimaryClass = selectedGrade && isLowerPrimary(selectedGrade.grade_name);
+  const renderFilters = ({ showSelectionSummary = false } = {}) => (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-4">
+      <div className="flex items-center gap-2 mb-4">
+        <Filter className="w-5 h-5 text-gray-500" />
+        <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
+      </div>
+              <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Year</label>
+          <div className="flex gap-2 overflow-x-auto rounded-lg border border-gray-200 bg-gray-50 p-1">
+            {availableYears.length === 0 ? (
+              <span className="px-3 py-2 text-sm text-gray-500">No years</span>
+            ) : (
+              availableYears.map((year) => {
+                const active = selectedYear === String(year);
+                return (
+                  <button
+                    key={year}
+                    type="button"
+                    onClick={() => {
+                      setSelectedYear(String(year));
+                      setSelectedTermId("");
+                      setSelectedStudentId("");
+                    }}
+                    className={`shrink-0 rounded-md px-4 py-2 text-sm font-medium transition ${
+                      active
+                        ? "bg-blue-600 text-white shadow-sm"
+                        : "bg-white text-gray-700 hover:bg-gray-100"
+                    }`}
+                  >
+                    {year}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(160px,0.8fr)_minmax(260px,1.2fr)_minmax(180px,0.8fr)_minmax(220px,1fr)] gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Grade</label>
+          <select
+            value={selectedGradeId}
+            onChange={(e) => {
+              setSelectedGradeId(e.target.value);
+              setSelectedTermId("");
+              setSelectedStudentId("");
+            }}
+            className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">Select grade</option>
+            {grades.map((g) => (<option key={g.id} value={g.id}>{g.grade_name}</option>))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Term</label>
+          <select
+            value={selectedTermId}
+            onChange={(e) => {
+              setSelectedTermId(e.target.value);
+              setSelectedStudentId("");
+            }}
+            disabled={!selectedGradeId || !selectedYear}
+            className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+          >
+            <option value="">
+              {!selectedGradeId ? "Select grade first" : !selectedYear ? "Select year first" : "Select term"}
+            </option>
+            {termsForSelectedYear.map((t) => (<option key={t.id} value={t.id}>{t.term_name.replace("_", " ")}</option>))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Student</label>
+          <select
+            value={selectedStudentId}
+            onChange={(e) => setSelectedStudentId(e.target.value)}
+            disabled={!canLoad || students.length === 0}
+            className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50"
+          >
+            <option value="">{canLoad ? (students.length ? "Select student" : "No students") : "Select grade + term"}</option>
+            {students.map((s) => (<option key={s.registration_id} value={s.registration_id}>{fmtName(s)}</option>))}
+          </select>
+        </div>
+      </div>
+      {showSelectionSummary && selectedStudent && (
+        <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
+          <div className="text-sm text-gray-600">
+            <span>Student: <span className="font-semibold text-gray-900">{fmtName(selectedStudent)}</span></span>
+            <span className="mx-2">|</span>
+            <span>Class: <span className="font-semibold text-gray-900">{selectedGrade?.grade_name || "—"}</span></span>
+            <span className="mx-2">|</span>
+            <span>Term: <span className="font-semibold text-gray-900">{termLabel(selectedTerm)}</span></span>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={autoFillAllComments} className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800">
+              <Wand2 className="w-4 h-4" /> Auto
+            </button>
+            <button onClick={clearAllComments} className="text-sm text-red-600 hover:text-red-800">Clear</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   if (!selectedStudent) {
     return (
@@ -1580,35 +1695,7 @@ useEffect(() => {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-4">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Filter className="w-5 h-5 text-gray-500" />
-                    <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Grade</label>
-                      <select value={selectedGradeId} onChange={(e) => { setSelectedGradeId(e.target.value); setSelectedTermId(""); setSelectedStudentId(""); }} className="w-full px-4 py-2.5 rounded-lg border border-gray-300">
-                        <option value="">Select grade</option>
-                        {grades.map((g) => (<option key={g.id} value={g.id}>{g.grade_name}</option>))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Term</label>
-                      <select value={selectedTermId} onChange={(e) => { setSelectedTermId(e.target.value); setSelectedStudentId(""); }} disabled={!selectedGradeId} className="w-full px-4 py-2.5 rounded-lg border border-gray-300 disabled:bg-gray-50">
-                        <option value="">{selectedGradeId ? "Select term" : "Select grade first"}</option>
-                        {terms.map((t) => (<option key={t.id} value={t.id}>{t.term_name.replace("_", " ")} {t.year}</option>))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Student</label>
-                      <select value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)} disabled={!canLoad || students.length === 0} className="w-full px-4 py-2.5 rounded-lg border border-gray-300 disabled:bg-gray-50">
-                        <option value="">{canLoad ? (students.length ? "Select student" : "No students") : "Select grade + term"}</option>
-                        {students.map((s) => (<option key={s.registration_id} value={s.registration_id}>{fmtName(s)}</option>))}
-                      </select>
-                    </div>
-                  </div>
-                </div>
+                {renderFilters()}
               </div>
 
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
@@ -1641,34 +1728,7 @@ useEffect(() => {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-4">
-                  <div className="flex items-center gap-2 mb-4">
-                    <Filter className="w-5 h-5 text-gray-500" />
-                    <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Grade</label>
-                      <select value={selectedGradeId} onChange={(e) => { setSelectedGradeId(e.target.value); setSelectedTermId(""); setSelectedStudentId(""); }} className="w-full px-4 py-2.5 rounded-lg border border-gray-300">
-                        <option value="">Select grade</option>
-                        {grades.map((g) => (<option key={g.id} value={g.id}>{g.grade_name}</option>))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Term</label>
-                      <select value={selectedTermId} onChange={(e) => { setSelectedTermId(e.target.value); setSelectedStudentId(""); }} className="w-full px-4 py-2.5 rounded-lg border border-gray-300">
-                        <option value="">Select term</option>
-                        {terms.map((t) => (<option key={t.id} value={t.id}>{t.term_name.replace("_", " ")} {t.year}</option>))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Student</label>
-                      <select value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-gray-300">
-                        <option value={selectedStudentId}>{fmtName(selectedStudent)}</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
+                {renderFilters()}
               </div>
 
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-12 text-center">
@@ -1722,52 +1782,7 @@ useEffect(() => {
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-4">
-                <div className="flex items-center gap-2 mb-4">
-                  <Filter className="w-5 h-5 text-gray-500" />
-                  <h3 className="text-sm font-semibold text-gray-700">Filters</h3>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Grade</label>
-                    <select value={selectedGradeId} onChange={(e) => { setSelectedGradeId(e.target.value); setSelectedTermId(""); setSelectedStudentId(""); }} className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500">
-                      <option value="">Select grade</option>
-                      {grades.map((g) => (<option key={g.id} value={g.id}>{g.grade_name}</option>))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Term</label>
-                    <select value={selectedTermId} onChange={(e) => { setSelectedTermId(e.target.value); setSelectedStudentId(""); }} disabled={!selectedGradeId} className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 disabled:bg-gray-50">
-                      <option value="">{selectedGradeId ? "Select term" : "Select grade first"}</option>
-                      {terms.map((t) => (<option key={t.id} value={t.id}>{t.term_name.replace("_", " ")} {t.year}</option>))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Student</label>
-                    <select value={selectedStudentId} onChange={(e) => setSelectedStudentId(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500">
-                      {students.map((s) => (<option key={s.registration_id} value={s.registration_id}>{fmtName(s)}</option>))}
-                    </select>
-                  </div>
-                </div>
-                {selectedStudent && (
-                  <div className="mt-4 pt-4 border-t border-gray-200 flex items-center justify-between">
-                    <div className="text-sm text-gray-600">
-                      <span>Student: <span className="font-semibold text-gray-900">{fmtName(selectedStudent)}</span></span>
-                      <span className="mx-2">•</span>
-                      <span>Class: <span className="font-semibold text-gray-900">{selectedGrade?.grade_name || "—"}</span></span>
-                      <span className="mx-2">•</span>
-                      <span>Term: <span className="font-semibold text-gray-900">{termLabel(selectedTerm)}</span></span>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={autoFillAllComments} className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800">
-                        <Wand2 className="w-4 h-4" /> Auto
-                      </button>
-                      <button onClick={clearAllComments} className="text-sm text-red-600 hover:text-red-800">Clear</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
+              {renderFilters({ showSelectionSummary: true })}
               {errorMsg && <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{errorMsg}</div>}
             </div>
 
@@ -1814,7 +1829,7 @@ useEffect(() => {
                   <div className="grid h-[100px] grid-cols-[100px_minmax(0,1fr)_80px] items-stretch gap-3 mb-0 pb-1">
                     <div className="flex items-center justify-center">
                       {school.school_badge ? (
-                        <img src={school.school_badge} alt="School" width={80} height={80} className="object-contain" />
+                        <img src={school.school_badge} alt="School" width={100} height={100} className="object-contain" />
                       ) : (
                         <div className="h-20 w-20 rounded-lg bg-blue-100 flex items-center justify-center">
                           <School className="h-10 w-10 text-blue-600" />
@@ -1831,19 +1846,19 @@ useEffect(() => {
                         </h3>
                       </div>
                       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-2">
-                        <div className="pb-0.5 text-left text-xs leading-tight text-gray-600">
-                          {school.location && <div>{school.location}</div>}
-                          {school.contact_number && <div>{school.contact_number}</div>}
+                        <div className="pb-0.5 text-left text-xs leading-tight text-gray-600 ml-4 mt-4 ">
+                          {school.location && <div className="font-bold m-1">{school.location}</div>}
+                          {school.contact_number && <div className="m-2 font-semibold">{school.contact_number}</div>}
                         </div>
                         <div className="text-center">
                           <div className="inline-block whitespace-nowrap text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">STUDENT REPORT CARD</div>
                           <p className="text-sm font-bold text-gray-900 mt-1">{termLabel(selectedTerm)}</p>
                         </div>
-                        <div className="min-w-0 pb-0.5 text-right leading-tight">
+                        <div className="min-w-0 pb-0.5 text-right mr-4 mt-4 leading-tight">
                           {selectedStudent.payment_code && (
                             <>
-                              <div className="text-xs font-semibold text-gray-600">Payment Code:</div>
-                              <div className="text-sm font-mono font-bold text-blue-700">{selectedStudent.payment_code}</div>
+                              <div className="text-xs font-semibold text-gray-600 m-1">Payment Code:</div>
+                              <div className="text-sm font-mono font-bold text-blue-700 mr-2">{selectedStudent.payment_code}</div>
                             </>
                           )}
                         </div>

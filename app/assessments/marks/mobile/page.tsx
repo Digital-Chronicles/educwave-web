@@ -264,13 +264,13 @@ export default function MobilePercentageEntryPage() {
             ? allSubjects.filter((subject) => subject.teacher_id === teacherData.registration_id)
             : allSubjects;
 
-        const parsedSessions = ((sessionRes.data ?? []) as RawExamSessionRow[]).map((session) => {
-          const term = getFirst(session.term);
+        const parsedSessions: ExamSessionRow[] = ((sessionRes.data ?? []) as RawExamSessionRow[]).map((session) => {
+          const term = getFirst(session.term) as { term_name: TermName; year: number } | null;
           return {
             id: session.id,
             term_id: session.term_id,
             exam_type: session.exam_type,
-            term_name: term?.term_name ?? '',
+            term_name: (term?.term_name ?? '') as TermName | '',
             term_year: term?.year ?? 0,
           };
         });

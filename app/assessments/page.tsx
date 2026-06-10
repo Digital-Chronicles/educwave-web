@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 
 type AppRole = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
-type TabKey = 'overview' | 'topics' | 'questions' | 'performance';
+type TabKey = 'overview' | 'topics' | 'questions' | 'performance'|'mark-sheet';
 
 interface ProfileRow {
   user_id: string;
@@ -1885,6 +1885,14 @@ export default function AssessmentsPage() {
                   >
                     <Users className="h-4 w-4" />
                     Mobile Entry
+                  </Link>
+
+                  <Link
+                    href="/attendance/mobile"
+                    className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 text-gray-700 text-sm rounded-xl hover:bg-gray-50 transition-all"
+                  >
+                    <Calendar className="h-4 w-4" />
+                    Attendance
                   </Link>
 
                   <Link

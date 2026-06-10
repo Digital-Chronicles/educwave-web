@@ -310,6 +310,34 @@ create table if not exists public.students_class (
 create index if not exists students_class_student_idx on public.students_class(student_id);
 
 -- =========================================================
+-- ATTENDANCE
+-- =========================================================
+create table if not exists public.student_attendance (
+  id bigserial primary key,
+  school_id uuid not null references public.general_information(id) on delete cascade,
+  student_id varchar(150) not null references public.students(registration_id) on delete cascade,
+  class_id bigint not null references public.class(id) on delete cascade,
+  attendance_date date not null,
+  status text not null check (status in ('PRESENT','ABSENT','LATE','EXCUSED')),
+  notes text,
+  marked_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (school_id, student_id, class_id, attendance_date)
+);
+
+drop trigger if exists student_attendance_set_updated_at on public.student_attendance;
+create trigger student_attendance_set_updated_at
+before update on public.student_attendance
+for each row execute procedure public.set_updated_at();
+
+create index if not exists student_attendance_school_date_idx
+  on public.student_attendance(school_id, attendance_date);
+
+create index if not exists student_attendance_class_date_idx
+  on public.student_attendance(class_id, attendance_date);
+
+-- =========================================================
 -- SUBJECTS / EXAMS / NOTES
 -- =========================================================
 

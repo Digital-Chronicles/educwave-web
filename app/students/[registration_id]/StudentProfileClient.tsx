@@ -77,6 +77,21 @@ interface GradeRow {
   grade_name: string;
 }
 
+function normalizeStudentStatus(status?: string | null) {
+  const normalized = (status ?? 'active').trim().toLowerCase();
+
+  switch (normalized) {
+    case 'dropped out':
+    case 'dropped_out':
+      return 'dropped_out';
+    case 'active':
+    case 'graduated':
+      return normalized;
+    default:
+      return 'active';
+  }
+}
+
 interface StudentDetailRow {
   registration_id: string;
   lin_id: string | null;
@@ -152,6 +167,52 @@ interface StudentTuitionDescriptionRow {
   lunch: boolean;
   breakfast: boolean;
   total_fee: number;
+}
+
+function isEnumStatusError(error: any) {
+  const message = (error?.message || '').toLowerCase();
+  return message.includes('enum') || message.includes('invalid input') || message.includes('status');
+}
+
+async function updateStudentStatusWithFallback(
+  registrationId: string | undefined,
+  status: string,
+  payload?: Record<string, unknown>
+) {
+  if (!registrationId) throw new Error('Student ID is missing');
+
+  const normalizedStatus = normalizeStudentStatus(status);
+  const basePayload = {
+    ...(payload || {}),
+    updated: new Date().toISOString().slice(0, 10),
+  };
+
+  const candidates = Array.from(
+    new Set([
+      normalizedStatus,
+      normalizedStatus === 'dropped out' ? 'dropped out' : '',
+    ].filter(Boolean))
+  );
+
+  let lastError: any = null;
+
+  for (const candidate of candidates) {
+    const { error } = await supabase
+      .from('students')
+      .update({
+        ...basePayload,
+        current_status: candidate,
+      })
+      .eq('registration_id', registrationId);
+
+    if (!error) return candidate;
+
+    lastError = error;
+
+    if (!isEnumStatusError(error)) break;
+  }
+
+  throw lastError || new Error('Failed to update student status');
 }
 
 /* ---------------- UI Components ---------------- */
@@ -705,7 +766,7 @@ export default function StudentProfileClient() {
               first_name: st.first_name,
               last_name: st.last_name,
               date_of_birth: st.date_of_birth,
-              current_status: st.current_status,
+              current_status: normalizeStudentStatus(st.current_status),
               gender: st.gender || '',
               school_type: st.school_type || 'day',
               profile_picture_url: st.profile_picture_url || '',
@@ -801,8 +862,10 @@ const handleSavePersonalInfo = async (e: FormEvent) => {
   try {
     if (!profile?.school_id) throw new Error('School not linked');
 
+    const normalizedStatus = normalizeStudentStatus(personalForm.current_status);
     const basePayload = {
       ...personalForm,
+      current_status: normalizedStatus,
       school_id: profile.school_id,
       updated: new Date().toISOString().slice(0, 10),
     };
@@ -810,12 +873,7 @@ const handleSavePersonalInfo = async (e: FormEvent) => {
     if (isCreateMode) {
       // ... create logic
     } else {
-      const { error } = await supabase
-        .from('students')
-        .update(basePayload)
-        .eq('registration_id', student?.registration_id);
-
-      if (error) throw error;
+      await updateStudentStatusWithFallback(student?.registration_id, normalizedStatus, basePayload);
       
       // ✅ UPDATE LOCAL STATE IMMEDIATELY
       setStudent(prev => prev ? {
@@ -823,13 +881,14 @@ const handleSavePersonalInfo = async (e: FormEvent) => {
         first_name: personalForm.first_name,
         last_name: personalForm.last_name,
         date_of_birth: personalForm.date_of_birth,
-        current_status: personalForm.current_status,
+        current_status: normalizedStatus,
         gender: personalForm.gender,
         school_type: personalForm.school_type,
         lin_id: personalForm.lin_id,
         payment_code: personalForm.payment_code,
         updated: new Date().toISOString().slice(0, 10),
       } : null);
+      setPersonalForm(prev => ({ ...prev, current_status: normalizedStatus }));
       
       setSuccessMsg('Personal information updated');
       setEditPersonalModal(false);
@@ -1732,7 +1791,7 @@ const handleSavePersonalInfo = async (e: FormEvent) => {
               >
                 <option value="active">Active</option>
                 <option value="graduated">Graduated</option>
-                <option value="dropped out">Dropped Out</option>
+                <option value="dropped_out">Dropped Out</option>
               </select>
             </div>
           </div>
@@ -2318,15 +2377,9 @@ const handleSavePersonalInfo = async (e: FormEvent) => {
               type="button"
               onClick={async () => {
                 try {
-                  const { error } = await supabase
-                    .from('students')
-                    .update({ 
-                      current_status: 'dropped out',
-                      updated: new Date().toISOString().slice(0, 10)
-                    })
-                    .eq('registration_id', student?.registration_id);
-
-                  if (error) throw error;
+                  await updateStudentStatusWithFallback(student?.registration_id, 'dropped_out', {
+                    updated: new Date().toISOString().slice(0, 10),
+                  });
                   
                   setDropModalOpen(false);
                   setSuccessMsg('Student marked as dropped out');
@@ -2334,9 +2387,10 @@ const handleSavePersonalInfo = async (e: FormEvent) => {
                   if (student) {
                     setStudent({
                       ...student,
-                      current_status: 'dropped out'
+                      current_status: 'dropped_out'
                     });
                   }
+                  setPersonalForm(prev => ({ ...prev, current_status: 'dropped_out' }));
                 } catch (error: any) {
                   setErrorMsg(error.message);
                 }
@@ -2344,7 +2398,7 @@ const handleSavePersonalInfo = async (e: FormEvent) => {
               className="px-4 py-3 bg-gradient-to-r from-amber-600 to-amber-700 text-white rounded-xl hover:from-amber-700 hover:to-amber-800 font-medium flex items-center gap-2 transition-all shadow-lg shadow-amber-500/25"
             >
               <Shield size={16} />
-              Confirm Drop Out
+              Confirm Leave School
             </button>
           </div>
         </div>

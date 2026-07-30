@@ -94,8 +94,23 @@ type StudentRow = {
 const STATUS_CHOICES = [
   { value: 'active', label: 'Active', icon: '🟢', color: 'emerald' },
   { value: 'graduated', label: 'Graduated', icon: '🎓', color: 'blue' },
-  { value: 'dropped out', label: 'Dropped Out', icon: '🔴', color: 'rose' },
+  { value: 'dropped_out', label: 'Dropped Out', icon: '🔴', color: 'rose' },
 ];
+
+function normalizeStudentStatus(status?: string | null) {
+  const normalized = (status ?? 'active').trim().toLowerCase();
+
+  switch (normalized) {
+    case 'dropped out':
+    case 'dropped_out':
+      return 'dropped_out';
+    case 'active':
+    case 'graduated':
+      return normalized;
+    default:
+      return 'active';
+  }
+}
 
 const GENDER_CHOICES = [
   { value: 'Male', label: 'Male' },
@@ -162,8 +177,8 @@ function statusPill(status: string) {
       return 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20';
     case 'graduated':
       return 'bg-blue-500/10 text-blue-700 border border-blue-500/20';
-    case 'dropped out':
-      return 'bg-rose-500/10 text-rose-700 border border-rose-500/20';
+    case 'dropped_out':
+      return 'bg-amber-500/10 text-amber-700 border border-amber-500/20';
     default:
       return 'bg-slate-100 text-slate-700 border border-slate-200';
   }
@@ -173,7 +188,7 @@ function getStatusIcon(status: string) {
   switch (status) {
     case 'active': return '🟢';
     case 'graduated': return '🎓';
-    case 'dropped out': return '🔴';
+    case 'dropped_out': return '🚪';
     default: return '⚪';
   }
 }
@@ -1108,7 +1123,7 @@ export default function StudentsPage() {
 
   const activeCount = useMemo(() => students.filter((s) => s.current_status === 'active').length, [students]);
   const graduatedCount = useMemo(() => students.filter((s) => s.current_status === 'graduated').length, [students]);
-  const dropOutCount = useMemo(() => students.filter((s) => s.current_status === 'dropped out').length, [students]);
+  const droppedOutCount = useMemo(() => students.filter((s) => s.current_status === 'dropped_out').length, [students]);
 
   async function getNextRegistrationId(schoolId: string, schoolName: string, yearOfEntry: string) {
     const abbr = getSchoolAbbr(schoolName);
@@ -1145,7 +1160,7 @@ export default function StudentsPage() {
       first_name: s.first_name ?? '',
       last_name: s.last_name ?? '',
       date_of_birth: s.date_of_birth ?? '',
-      current_status: s.current_status ?? 'active',
+      current_status: normalizeStudentStatus(s.current_status),
       gender: '',
       school_type: 'day',
       grade_of_entry: 'grade_1',
@@ -1232,7 +1247,7 @@ export default function StudentsPage() {
         first_name: editForm.first_name.trim(),
         last_name: editForm.last_name.trim(),
         date_of_birth: editForm.date_of_birth,
-        current_status: editForm.current_status,
+        current_status: normalizeStudentStatus(editForm.current_status),
         guardian_phone: editForm.guardian_phone.trim() || null,
       };
 
@@ -1303,7 +1318,7 @@ export default function StudentsPage() {
         const ln = (r.last_name || '').trim();
         const date_of_birth = (r.date_of_birth || '').trim();
         const grade_of_entry = (r.grade_of_entry || 'grade_1').trim();
-        const current_status = (r.current_status || 'active').trim();
+        const current_status = normalizeStudentStatus(r.current_status || 'active');
 
         if (!fn || !ln || !date_of_birth) continue;
 
@@ -1546,11 +1561,11 @@ export default function StudentsPage() {
                 />
                 <StatCard 
                   icon={<Shield className="h-5 w-5" />} 
-                  label="Drop Outs" 
-                  value={dropOutCount} 
+                  label="Dropped Out" 
+                  value={droppedOutCount} 
                   trend="down"
                   trendValue="-1%"
-                  color="rose"
+                  color="amber"
                   loading={loading}
                 />
               </div>

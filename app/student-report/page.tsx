@@ -56,6 +56,7 @@ interface SchoolRow {
   email?: string | null;
   website?: string | null;
   school_badge?: string | null;
+  box_no?: string | null;
 }
 
 interface GradeRow {
@@ -1847,8 +1848,9 @@ useEffect(() => {
                       </div>
                       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-2">
                         <div className="pb-0.5 text-left text-xs leading-tight text-gray-600 ml-4 mt-4 ">
-                          {school.location && <div className="font-bold m-1">{school.location}</div>}
-                          {school.contact_number && <div className="m-2 font-semibold">{school.contact_number}</div>}
+                          {school.box_no && <div className="font-bold m-">P.O.BOX:{school.box_no}</div>}
+                          {school.location && <div className="font-bold m-">{school.location}</div>}
+                          {school.contact_number && <div className="m- font-semibold">{school.contact_number}</div>}
                         </div>
                         <div className="text-center">
                           <div className="inline-block whitespace-nowrap text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded">STUDENT REPORT CARD</div>
@@ -2015,7 +2017,7 @@ useEffect(() => {
                                 <td className="text-left p-1 font-semi-bold pl-2">Total</td>
                                 <td className="text-center">100%</td>
                                 <td className="text-center">{Math.round(sessionTotalMarks)}</td>
-                                <td className="text-center">{Math.round(sessionAvg)}%</td>
+                                <td className="text-center">Avg:{Math.round(sessionAvg)}%</td>
 
                                 {!isLowerPrimaryClass ? (
                                   <td colSpan={2} className="text-center">

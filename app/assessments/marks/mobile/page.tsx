@@ -270,7 +270,7 @@ export default function MobilePercentageEntryPage() {
             id: session.id,
             term_id: session.term_id,
             exam_type: session.exam_type,
-            term_name: (term?.term_name ?? '') as TermName | '',
+             term_name: (term?.term_name ?? '') as TermName | '',
             term_year: term?.year ?? 0,
           };
         });
@@ -755,7 +755,7 @@ export default function MobilePercentageEntryPage() {
         {!canLoadStudents ? (
           <section className="rounded-3xl border border-dashed border-white/15 p-8 text-center">
             <Users className="mx-auto h-10 w-10 text-slate-500" />
-            <h2 className="mt-4 text-base font-semibold text-white">Start with the selectors above</h2>
+            <h2 className="mt-4 text-base font-semibold text-white"> Start with the selectors above</h2>
             <p className="mt-2 text-sm text-slate-400">
               Pick class, term, exam, and subject to load the students for total percentage entry.
             </p>

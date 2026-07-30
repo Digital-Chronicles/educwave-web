@@ -23,6 +23,7 @@ import {
   TrendingUp,
   X,
   AlertCircle,
+  Clock,
   Loader2,
   ChevronLeft,
   ChevronRight,
@@ -33,6 +34,7 @@ import {
 
 type AppRole = 'ADMIN' | 'ACADEMIC' | 'TEACHER' | 'FINANCE' | 'STUDENT' | 'PARENT';
 type TabKey = 'overview' | 'topics' | 'questions' | 'performance'|'mark-sheet';
+type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED';
 
 interface ProfileRow {
   user_id: string;
@@ -115,6 +117,53 @@ interface QuestionRow {
   subject?: { name: string }[] | null;
 }
 
+interface AttendanceRow {
+  student_id: string;
+  class_id: number;
+  attendance_date: string;
+  status: AttendanceStatus;
+  class?: { grade_name: string }[] | null;
+  student?: { first_name: string; last_name: string }[] | null;
+}
+
+interface AssessmentResultRow {
+  student_id: string;
+  score: number | null;
+  max_possible: number | null;
+}
+
+interface AttendanceSummary {
+  totalRecords: number;
+  present: number;
+  absent: number;
+  late: number;
+  excused: number;
+  attendanceRate: number | null;
+}
+
+interface ClassAttendanceInsight {
+  classId: number;
+  className: string;
+  total: number;
+  present: number;
+  absent: number;
+  late: number;
+  excused: number;
+  attendanceRate: number;
+}
+
+interface StudentAttendanceInsight {
+  studentId: string;
+  studentName: string;
+  className: string;
+  total: number;
+  absent: number;
+  late: number;
+  attendanceRate: number;
+  averageScore: number | null;
+  riskLevel: 'High' | 'Medium' | 'Low';
+}
+
 // Modal Types
 type ModalMode = 'create' | 'edit';
 type EntityType = 'topic' | 'question';
@@ -132,6 +181,149 @@ interface PaginationState {
   pageSize: number;
   totalItems: number;
   totalPages: number;
+}
+
+const emptyAttendanceSummary: AttendanceSummary = {
+  totalRecords: 0,
+  present: 0,
+  absent: 0,
+  late: 0,
+  excused: 0,
+  attendanceRate: null,
+};
+
+const roundPercent = (value: number) => Number(value.toFixed(1));
+
+const relationFirst = <T,>(value: T | T[] | null | undefined): T | null => {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+};
+
+function buildAttendanceInsights(
+  attendanceRows: AttendanceRow[],
+  resultRows: AssessmentResultRow[]
+) {
+  const summary = { ...emptyAttendanceSummary };
+  const classes = new Map<number, ClassAttendanceInsight>();
+  const students = new Map<string, StudentAttendanceInsight>();
+  const resultTotals = new Map<string, { score: number; possible: number }>();
+
+  for (const result of resultRows) {
+    if (!result.student_id) continue;
+
+    const score = Number(result.score ?? 0);
+    const possible = Number(result.max_possible ?? 0);
+    if (possible <= 0) continue;
+
+    const current = resultTotals.get(result.student_id) ?? { score: 0, possible: 0 };
+    current.score += score;
+    current.possible += possible;
+    resultTotals.set(result.student_id, current);
+  }
+
+  for (const row of attendanceRows) {
+    summary.totalRecords += 1;
+
+    if (row.status === 'PRESENT') summary.present += 1;
+    if (row.status === 'ABSENT') summary.absent += 1;
+    if (row.status === 'LATE') summary.late += 1;
+    if (row.status === 'EXCUSED') summary.excused += 1;
+
+    const classRelation = relationFirst(row.class);
+    const studentRelation = relationFirst(row.student);
+    const className = classRelation?.grade_name ?? `Class ${row.class_id}`;
+    const studentName = `${studentRelation?.first_name ?? ''} ${studentRelation?.last_name ?? ''}`.trim() || row.student_id;
+
+    const classInsight = classes.get(row.class_id) ?? {
+      classId: row.class_id,
+      className,
+      total: 0,
+      present: 0,
+      absent: 0,
+      late: 0,
+      excused: 0,
+      attendanceRate: 0,
+    };
+
+    classInsight.total += 1;
+    if (row.status === 'PRESENT') classInsight.present += 1;
+    if (row.status === 'ABSENT') classInsight.absent += 1;
+    if (row.status === 'LATE') classInsight.late += 1;
+    if (row.status === 'EXCUSED') classInsight.excused += 1;
+    classes.set(row.class_id, classInsight);
+
+    const studentInsight = students.get(row.student_id) ?? {
+      studentId: row.student_id,
+      studentName,
+      className,
+      total: 0,
+      absent: 0,
+      late: 0,
+      attendanceRate: 0,
+      averageScore: null,
+      riskLevel: 'Low',
+    };
+
+    studentInsight.total += 1;
+    if (row.status === 'ABSENT') studentInsight.absent += 1;
+    if (row.status === 'LATE') studentInsight.late += 1;
+    students.set(row.student_id, studentInsight);
+  }
+
+  const attended = summary.present + summary.late;
+  summary.attendanceRate = summary.totalRecords > 0 ? roundPercent((attended / summary.totalRecords) * 100) : null;
+
+  const classInsights = Array.from(classes.values())
+    .map((item) => ({
+      ...item,
+      attendanceRate: item.total > 0 ? roundPercent(((item.present + item.late) / item.total) * 100) : 0,
+    }))
+    .sort((a, b) => a.attendanceRate - b.attendanceRate);
+
+  const studentInsights = Array.from(students.values())
+    .map((item) => {
+      const result = resultTotals.get(item.studentId);
+      const attendanceRate = item.total > 0 ? roundPercent(((item.total - item.absent - item.late) / item.total) * 100) : 0;
+      const averageScore = result && result.possible > 0 ? roundPercent((result.score / result.possible) * 100) : null;
+      const riskLevel: StudentAttendanceInsight['riskLevel'] =
+        attendanceRate < 75 || (averageScore !== null && averageScore < 50 && attendanceRate < 85)
+          ? 'High'
+          : attendanceRate < 90
+            ? 'Medium'
+            : 'Low';
+
+      return {
+        ...item,
+        attendanceRate,
+        averageScore,
+        riskLevel,
+      };
+    })
+    .sort((a, b) => {
+      const riskOrder = { High: 0, Medium: 1, Low: 2 };
+      return riskOrder[a.riskLevel] - riskOrder[b.riskLevel] || a.attendanceRate - b.attendanceRate;
+    });
+
+  const studentInsightsWithScores = studentInsights.filter((student) => student.averageScore !== null);
+  const strongAttendance = studentInsightsWithScores.filter((student) => student.attendanceRate >= 90);
+  const weakAttendance = studentInsightsWithScores.filter((student) => student.attendanceRate < 80);
+
+  const averageScoreFor = (items: StudentAttendanceInsight[]) => {
+    if (items.length === 0) return null;
+    const total = items.reduce((sum, item) => sum + (item.averageScore ?? 0), 0);
+    return roundPercent(total / items.length);
+  };
+
+  return {
+    summary,
+    classInsights,
+    studentInsights,
+    signal: {
+      strongAttendanceAverage: averageScoreFor(strongAttendance),
+      weakAttendanceAverage: averageScoreFor(weakAttendance),
+      studentsAtRisk: studentInsights.filter((student) => student.riskLevel === 'High').length,
+    },
+  };
 }
 
 export default function AssessmentsPage() {
@@ -161,6 +353,25 @@ export default function AssessmentsPage() {
   const [totalQuestions, setTotalQuestions] = useState(0);
   const [totalResults, setTotalResults] = useState(0);
   const [overallAverage, setOverallAverage] = useState<number | null>(null);
+  const [attendanceSummary, setAttendanceSummary] = useState<AttendanceSummary>({
+    totalRecords: 0,
+    present: 0,
+    absent: 0,
+    late: 0,
+    excused: 0,
+    attendanceRate: null,
+  });
+  const [classAttendanceInsights, setClassAttendanceInsights] = useState<ClassAttendanceInsight[]>([]);
+  const [studentAttendanceInsights, setStudentAttendanceInsights] = useState<StudentAttendanceInsight[]>([]);
+  const [attendanceAssessmentSignal, setAttendanceAssessmentSignal] = useState<{
+    strongAttendanceAverage: number | null;
+    weakAttendanceAverage: number | null;
+    studentsAtRisk: number;
+  }>({
+    strongAttendanceAverage: null,
+    weakAttendanceAverage: null,
+    studentsAtRisk: 0,
+  });
 
   const [selectedGradeId, setSelectedGradeId] = useState<string>('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');

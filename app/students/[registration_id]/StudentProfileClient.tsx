@@ -440,7 +440,7 @@ function StatusBadge({ status }: { status: string }) {
       color: 'bg-gradient-to-r from-blue-500 to-blue-600 text-white border-blue-600', 
       icon: <Award size={14} /> 
     },
-    'dropped out': { 
+    dropped_out: { 
       color: 'bg-gradient-to-r from-amber-500 to-amber-600 text-white border-amber-600', 
       icon: <Shield size={14} /> 
     },

@@ -25,7 +25,7 @@ do $$ begin
   end if;
 
   if not exists (select 1 from pg_type where typname = 'student_status') then
-    create type public.student_status as enum ('active','graduated','left school','dropped out');
+    create type public.student_status as enum ('active','graduated','left school','dropped out','dropped_out');
   else
     if not exists (
       select 1
@@ -43,6 +43,15 @@ do $$ begin
       where t.typname = 'student_status' and e.enumlabel = 'dropped out'
     ) then
       alter type public.student_status add value 'dropped out';
+    end if;
+
+    if not exists (
+      select 1
+      from pg_enum e
+      join pg_type t on e.enumtypid = t.oid
+      where t.typname = 'student_status' and e.enumlabel = 'dropped_out'
+    ) then
+      alter type public.student_status add value 'dropped_out';
     end if;
   end if;
 

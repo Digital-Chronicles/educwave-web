@@ -134,10 +134,13 @@ function cn(...classes: Array<string | false | null | undefined>) {
 /* ----------------------------- Helpers ----------------------------- */
 
 function getSchoolAbbr(name: string) {
+  const ignoredWords = new Set(['for', 'and', 'of', 'the', 'a', 'an']);
+
   return name
-    .split(' ')
+    .split(/\s+/)
     .filter(Boolean)
-    .map((w) => w[0]?.toUpperCase() ?? '')
+    .filter((word) => !ignoredWords.has(word.toLowerCase()))
+    .map((word) => word[0]?.toUpperCase() ?? '')
     .join('');
 }
 
@@ -153,6 +156,17 @@ function computeYearOfEntry(grade: string) {
     grade_1: y,
   };
   return String(map[grade] ?? y);
+}
+
+function getGradeCode(grade: string) {
+  const normalized = (grade ?? 'grade_1').trim().toLowerCase();
+
+  if (normalized.startsWith('grade_')) {
+    const number = normalized.replace('grade_', '').trim();
+    return `G${number}`;
+  }
+
+  return normalized.replace(/[^a-z0-9]+/g, '').toUpperCase();
 }
 
 function parseCSV(text: string) {
@@ -1125,16 +1139,52 @@ export default function StudentsPage() {
   const graduatedCount = useMemo(() => students.filter((s) => s.current_status === 'graduated').length, [students]);
   const droppedOutCount = useMemo(() => students.filter((s) => s.current_status === 'dropped_out').length, [students]);
 
-  async function getNextRegistrationId(schoolId: string, schoolName: string, yearOfEntry: string) {
+  async function getNextRegistrationId(schoolId: string, schoolName: string, yearOfEntry: string, gradeOfEntry: string) {
     const abbr = getSchoolAbbr(schoolName);
-    const { data, error } = await supabase.rpc('generate_student_registration_id', {
-      p_school_id: schoolId,
-      p_school_abbr: abbr,
-      p_year_of_entry: yearOfEntry,
-    });
-    if (error) throw error;
-    if (!data) throw new Error('Registration ID generator returned null.');
-    return String(data);
+    const gradeCode = getGradeCode(gradeOfEntry);
+    const prefix = `${abbr}/${gradeCode}/${yearOfEntry}`;
+
+    const tryRpc = async () => {
+      const { data, error } = await supabase.rpc('generate_student_registration_id', {
+        p_school_id: schoolId,
+        p_school_abbr: abbr,
+        p_year_of_entry: yearOfEntry,
+      });
+
+      if (error) return null;
+      return data ? String(data) : null;
+    };
+
+    const rpcCandidate = await tryRpc();
+    if (rpcCandidate) {
+      const { data: existing, error: existingError } = await supabase
+        .from('students')
+        .select('registration_id')
+        .eq('registration_id', rpcCandidate)
+        .maybeSingle();
+
+      if (existingError) throw existingError;
+      if (!existing) return rpcCandidate;
+    }
+
+    const { data: existingRows, error: existingError } = await supabase
+      .from('students')
+      .select('registration_id')
+      .eq('school_id', schoolId)
+      .like('registration_id', `${prefix}%`);
+
+    if (existingError) throw existingError;
+
+    const numbers = (existingRows ?? [])
+      .map((row: any) => String(row.registration_id || ''))
+      .map((value: string) => {
+        const match = value.match(/(\d+)(?:$|[-_])/);
+        return match ? Number(match[1]) : NaN;
+      })
+      .filter((value: number) => Number.isFinite(value));
+
+    const nextNumber = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+    return `${prefix}/${String(nextNumber).padStart(3, '0')}`;
   }
 
   const validateForm = (form: StudentFormState) => {
@@ -1188,36 +1238,54 @@ export default function StudentsPage() {
       if (!profile?.school_id || !school) throw new Error('School not linked.');
 
       const yearOfEntry = computeYearOfEntry(addForm.grade_of_entry);
-      const registration_id = await getNextRegistrationId(profile.school_id, school.school_name, yearOfEntry);
+      const registration_id = await getNextRegistrationId(profile.school_id, school.school_name, yearOfEntry, addForm.grade_of_entry);
 
-      const { error } = await supabase.from('students').insert({
-        registration_id,
-        lin_id: addForm.lin_id.trim() || null,
-        first_name: addForm.first_name.trim(),
-        last_name: addForm.last_name.trim(),
-        date_of_birth: addForm.date_of_birth,
-        current_status: addForm.current_status,
-        gender: addForm.gender || null,
-        school_type: addForm.school_type || null,
-        grade_of_entry: addForm.grade_of_entry || null,
-        year_of_entry: yearOfEntry,
-        guardian_name: addForm.guardian_name.trim() || null,
-        guardian_phone: addForm.guardian_phone.trim() || null,
-        current_grade_id: addForm.current_grade_id === '' ? null : Number(addForm.current_grade_id),
-        father_name: null,
-        father_phone: null,
-        father_nin: null,
-        mother_name: null,
-        mother_phone: null,
-        mother_nin: null,
-        profile_picture_url: null,
-        school_id: profile.school_id,
-        registered_by: profile.user_id,
-      });
+      const normalizedStatus = normalizeStudentStatus(addForm.current_status);
 
-      if (error) throw error;
+      let finalRegistrationId = registration_id;
+      let insertError: any = null;
 
-      setSuccessMsg(`🎉 Student "${addForm.first_name} ${addForm.last_name}" added successfully! Registration ID: ${registration_id}`);
+      for (const candidateId of [registration_id, `${registration_id}-${Date.now().toString().slice(-4)}`]) {
+        const { error } = await supabase.from('students').insert({
+          registration_id: candidateId,
+          lin_id: addForm.lin_id.trim() || null,
+          first_name: addForm.first_name.trim(),
+          last_name: addForm.last_name.trim(),
+          date_of_birth: addForm.date_of_birth,
+          current_status: normalizedStatus,
+          gender: addForm.gender || null,
+          school_type: addForm.school_type || null,
+          grade_of_entry: addForm.grade_of_entry || null,
+          year_of_entry: yearOfEntry,
+          guardian_name: addForm.guardian_name.trim() || null,
+          guardian_phone: addForm.guardian_phone.trim() || null,
+          current_grade_id: addForm.current_grade_id === '' ? null : Number(addForm.current_grade_id),
+          father_name: null,
+          father_phone: null,
+          father_nin: null,
+          mother_name: null,
+          mother_phone: null,
+          mother_nin: null,
+          profile_picture_url: null,
+          school_id: profile.school_id,
+          registered_by: profile.user_id,
+        });
+
+        if (!error) {
+          finalRegistrationId = candidateId;
+          insertError = null;
+          break;
+        }
+
+        insertError = error;
+        if (error.code !== '23505' || !String(error.message).includes('students_pkey')) {
+          break;
+        }
+      }
+
+      if (insertError) throw insertError;
+
+      setSuccessMsg(`🎉 Student "${addForm.first_name} ${addForm.last_name}" added successfully! Registration ID: ${finalRegistrationId}`);
       await fetchStudents(profile.school_id);
       setAddOpen(false);
     } catch (e: any) {
@@ -1243,23 +1311,37 @@ export default function StudentsPage() {
       if (!profile?.school_id) throw new Error('School not linked.');
       if (!editForm.registration_id) throw new Error('Missing student id.');
 
+      const yearOfEntry = computeYearOfEntry(editForm.grade_of_entry);
+      const nextRegistrationId = await getNextRegistrationId(
+        profile.school_id,
+        school?.school_name ?? '',
+        yearOfEntry,
+        editForm.grade_of_entry,
+        
+      );
+
       const payload: any = {
         first_name: editForm.first_name.trim(),
         last_name: editForm.last_name.trim(),
         date_of_birth: editForm.date_of_birth,
         current_status: normalizeStudentStatus(editForm.current_status),
+        grade_of_entry: editForm.grade_of_entry || null,
+        year_of_entry: yearOfEntry,
         guardian_phone: editForm.guardian_phone.trim() || null,
       };
 
       const { error } = await supabase
         .from('students')
-        .update(payload)
+        .update({
+          ...payload,
+          registration_id: nextRegistrationId,
+        })
         .eq('registration_id', editForm.registration_id)
         .eq('school_id', profile.school_id);
 
       if (error) throw error;
 
-      setSuccessMsg(`✅ Student "${editForm.first_name} ${editForm.last_name}" updated successfully!`);
+      setSuccessMsg(`✅ Student "${editForm.first_name} ${editForm.last_name}" updated successfully! New registration ID: ${nextRegistrationId}`);
       await fetchStudents(profile.school_id);
       setEditOpen(false);
     } catch (e: any) {
@@ -1323,7 +1405,7 @@ export default function StudentsPage() {
         if (!fn || !ln || !date_of_birth) continue;
 
         const yearOfEntry = computeYearOfEntry(grade_of_entry);
-        const registration_id = await getNextRegistrationId(profile.school_id, school.school_name, yearOfEntry);
+        const registration_id = await getNextRegistrationId(profile.school_id, school.school_name, yearOfEntry,  grade_of_entry);
 
         let current_grade_id: number | null = null;
         const rawClass = (r.current_grade_id || '').trim();

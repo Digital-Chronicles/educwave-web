@@ -190,7 +190,7 @@ async function updateStudentStatusWithFallback(
   const candidates = Array.from(
     new Set([
       normalizedStatus,
-      normalizedStatus === 'dropped out' ? 'dropped out' : '',
+      normalizedStatus === 'dropped_out' ? 'dropped_out' : '',
     ].filter(Boolean))
   );
 

@@ -94,7 +94,13 @@ interface StudentRow {
   gender?: string | null;
   profile_picture_url?: string | null;
   payment_code: string | null;
+  current_status?: string | null;
 }
+
+const isReportExcludedStudentStatus = (status?: string | null) => {
+  const normalized = (status ?? 'active').trim().toLowerCase();
+  return ['dropped_out', 'dropped out', 'left_school', 'left school'].includes(normalized);
+};
 
 interface QuestionRow {
   id: number;
@@ -871,13 +877,15 @@ useEffect(() => {
       // Load students with registration_id
       const studentsRes = await supabase
         .from("students")
-        .select("registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code")
+        .select("registration_id, lin_id, first_name, last_name, date_of_birth, gender, profile_picture_url, payment_code, current_status")
         .eq("school_id", school.id)
         .eq("current_grade_id", gradeId)
         .order("first_name");
       
       if (studentsRes.error) throw studentsRes.error;
-      const studentsList = (studentsRes.data ?? []) as StudentRow[];
+      const studentsList = ((studentsRes.data ?? []) as StudentRow[]).filter(
+        (student) => !isReportExcludedStudentStatus(student.current_status)
+      );
       setStudents(studentsList);
       
       // Load questions for this term and grade
@@ -1138,7 +1146,10 @@ useEffect(() => {
       const qIds = qRows.map((q) => q.id);
       const resultsRes = qIds.length === 0 ? { data: [], error: null } : await supabase.from("assessment_examresult").select("*").eq("school_id", school.id).eq("grade_id", gradeId).in("question_id", qIds);
       if ((resultsRes as any).error) throw (resultsRes as any).error;
-      setStudents((studentsRes.data ?? []) as StudentRow[]);
+      const activeStudents = ((studentsRes.data ?? []) as StudentRow[]).filter(
+        (student) => !isReportExcludedStudentStatus(student.current_status)
+      );
+      setStudents(activeStudents);
       setQuestions(qRows);
       setResults(((resultsRes as any).data ?? []) as ExamResultRow[]);
       tinyToast("Data refreshed");

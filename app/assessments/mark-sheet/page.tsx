@@ -84,7 +84,13 @@ interface StudentRow {
   last_name: string;
   lin_id: string | null;
   gender?: string | null;
+  current_status?: string | null;
 }
+
+const isReportExcludedStudentStatus = (status?: string | null) => {
+  const normalized = (status ?? 'active').trim().toLowerCase();
+  return ['dropped_out', 'dropped out', 'left_school', 'left school'].includes(normalized);
+};
 
 interface MarksheetStudent {
   id: string;
@@ -260,19 +266,22 @@ export default function MarksheetPage() {
       // Fetch students in the class
       const { data: studentsData, error: studentsErr } = await supabase
         .from('students')
-        .select('registration_id, first_name, last_name, lin_id, gender')
+        .select('registration_id, first_name, last_name, lin_id, gender, current_status')
         .eq('school_id', school.id)
         .eq('current_grade_id', gradeId)
         .order('first_name');
 
       if (studentsErr) throw studentsErr;
-      if (!studentsData || studentsData.length === 0) {
-        setErrorMsg('No students found in this class');
+
+      const students = ((studentsData ?? []) as StudentRow[]).filter(
+        (student) => !isReportExcludedStudentStatus(student.current_status)
+      );
+
+      if (students.length === 0) {
+        setErrorMsg('No active students found in this class');
         setGenerating(false);
         return;
       }
-
-      const students = studentsData as StudentRow[];
 
       // Fetch all subjects for this class
       const classSubjects = subjects.filter(s => s.grade_id === gradeId);

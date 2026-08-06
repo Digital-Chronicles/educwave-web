@@ -95,6 +95,7 @@ const STATUS_CHOICES = [
   { value: 'active', label: 'Active', icon: '🟢', color: 'emerald' },
   { value: 'graduated', label: 'Graduated', icon: '🎓', color: 'blue' },
   { value: 'dropped_out', label: 'Dropped Out', icon: '🔴', color: 'rose' },
+  { value: 'left school', label: 'Left School', icon: '🚪', color: 'amber' },
 ];
 
 function normalizeStudentStatus(status?: string | null) {
@@ -104,6 +105,9 @@ function normalizeStudentStatus(status?: string | null) {
     case 'dropped out':
     case 'dropped_out':
       return 'dropped_out';
+    case 'left school':
+    case 'left_school':
+      return 'left school';
     case 'active':
     case 'graduated':
       return normalized;
@@ -192,6 +196,7 @@ function statusPill(status: string) {
     case 'graduated':
       return 'bg-blue-500/10 text-blue-700 border border-blue-500/20';
     case 'dropped_out':
+    case 'left school':
       return 'bg-amber-500/10 text-amber-700 border border-amber-500/20';
     default:
       return 'bg-slate-100 text-slate-700 border border-slate-200';
@@ -202,7 +207,9 @@ function getStatusIcon(status: string) {
   switch (status) {
     case 'active': return '🟢';
     case 'graduated': return '🎓';
-    case 'dropped_out': return '🚪';
+    case 'dropped_out':
+    case 'left school':
+      return '🚪';
     default: return '⚪';
   }
 }
@@ -1135,9 +1142,21 @@ export default function StudentsPage() {
     setCurrentPage(1);
   }, [search, statusFilter, classFilter, viewMode]);
 
-  const activeCount = useMemo(() => students.filter((s) => s.current_status === 'active').length, [students]);
-  const graduatedCount = useMemo(() => students.filter((s) => s.current_status === 'graduated').length, [students]);
-  const droppedOutCount = useMemo(() => students.filter((s) => s.current_status === 'dropped_out').length, [students]);
+  const activeCount = useMemo(() =>
+    students.filter((s) => normalizeStudentStatus(s.current_status) === 'active').length,
+    [students]
+  );
+  const graduatedCount = useMemo(() =>
+    students.filter((s) => normalizeStudentStatus(s.current_status) === 'graduated').length,
+    [students]
+  );
+  const droppedOutCount = useMemo(() =>
+    students.filter((s) => {
+      const status = normalizeStudentStatus(s.current_status);
+      return status === 'dropped_out' || status === 'left school';
+    }).length,
+    [students]
+  );
 
   async function getNextRegistrationId(schoolId: string, schoolName: string, yearOfEntry: string, gradeOfEntry: string) {
     const abbr = getSchoolAbbr(schoolName);

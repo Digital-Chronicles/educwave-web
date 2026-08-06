@@ -84,6 +84,9 @@ function normalizeStudentStatus(status?: string | null) {
     case 'dropped out':
     case 'dropped_out':
       return 'dropped_out';
+    case 'left school':
+    case 'left_school':
+      return 'left school';
     case 'active':
     case 'graduated':
       return normalized;
@@ -190,7 +193,12 @@ async function updateStudentStatusWithFallback(
   const candidates = Array.from(
     new Set([
       normalizedStatus,
+      normalizedStatus === 'dropped_out' ? 'dropped out' : '',
+      normalizedStatus === 'left school' ? 'left_school' : '',
+      normalizedStatus === 'left school' ? 'left school' : '',
       normalizedStatus === 'dropped_out' ? 'dropped_out' : '',
+      normalizedStatus.replace(/\s+/g, '_'),
+      normalizedStatus.replace(/_/g, ' '),
     ].filter(Boolean))
   );
 
@@ -431,6 +439,7 @@ function Modal({
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const normalizedStatus = normalizeStudentStatus(status);
   const config = {
     active: { 
       color: 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white border-emerald-600', 
@@ -444,15 +453,21 @@ function StatusBadge({ status }: { status: string }) {
       color: 'bg-gradient-to-r from-amber-500 to-amber-600 text-white border-amber-600', 
       icon: <Shield size={14} /> 
     },
-  }[status] || { 
+    'left school': {
+      color: 'bg-gradient-to-r from-amber-500 to-orange-600 text-white border-amber-600',
+      icon: <Shield size={14} />
+    },
+  }[normalizedStatus] || { 
     color: 'bg-gradient-to-r from-gray-500 to-gray-600 text-white border-gray-600', 
     icon: <User size={14} /> 
   };
 
+  const label = normalizedStatus === 'left school' ? 'Left School' : normalizedStatus.charAt(0).toUpperCase() + normalizedStatus.slice(1);
+
   return (
     <span className={`px-3 py-1.5 rounded-full text-xs font-semibold border flex items-center gap-1.5 shadow-sm ${config.color}`}>
       {config.icon}
-      {status.charAt(0).toUpperCase() + status.slice(1)}
+      {label}
     </span>
   );
 }
@@ -1792,6 +1807,7 @@ const handleSavePersonalInfo = async (e: FormEvent) => {
                 <option value="active">Active</option>
                 <option value="graduated">Graduated</option>
                 <option value="dropped_out">Dropped Out</option>
+                <option value="left school">Left School</option>
               </select>
             </div>
           </div>
